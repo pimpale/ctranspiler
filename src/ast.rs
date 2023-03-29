@@ -19,9 +19,19 @@ pub struct Augmented<T> {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
-pub struct TypeStructItemExpr {
+pub enum StructItemExpr<T> {
+    Error,
+    Eponymous(Vec<u8>),
+    Identified {
+        identifier: Vec<u8>,
+        expr: Box<Augmented<T>>,
+    },
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct ArgsExpr<T> {
     pub identifier: Vec<u8>,
-    pub type_expr: Box<Augmented<TypeExpr>>,
+    pub expr: Box<Augmented<T>>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -40,15 +50,20 @@ pub enum TypeExpr {
     Array(BigInt, Box<Augmented<TypeExpr>>),
     Slice(Box<Augmented<TypeExpr>>),
     // struct and enumify
-    Struct(Vec<Augmented<TypeStructItemExpr>>),
-    Enum(Vec<Augmented<TypeStructItemExpr>>),
-    Union(Vec<Augmented<TypeStructItemExpr>>),
+    Struct(Vec<Augmented<StructItemExpr<TypeExpr>>>),
+    Enum(Vec<Augmented<StructItemExpr<TypeExpr>>>),
+    Union(Vec<Augmented<StructItemExpr<TypeExpr>>>),
     // For grouping apps
     Group(Box<TypeExpr>),
     // generic
-    App {
+    Generic {
         fun: Box<Augmented<TypeExpr>>,
-        args: Box<Augmented<TypeArgsExpr>>,
+        args: Box<Augmented<ArgsExpr<TypeExpr>>>,
+    },
+    // type of a function
+    Fn {
+        args: Box<Augmented<ArgsExpr<TypeExpr>>>,
+        returntype: Box<Augmented<TypeExpr>>,
     },
 }
 
@@ -82,24 +97,18 @@ pub enum ValBinaryOpKind {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
-pub struct ValStructItemExpr {
-    pub identifier: Vec<u8>,
-    pub type_expr: Box<Augmented<ValExpr>>,
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug)]
-pub enum CaseTargetKind {
+pub enum CaseTargetExpr {
     Error,
-    Int(BigInt),
-    Bool(bool),
-    Unit,
-    Identifier(Vec<u8>),
     Ignore,
+    Unit,
+    Bool(bool),
+    Int(BigInt),
+    Identifier(Vec<u8>),
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct CaseExpr {
-    pub target: Box<Augmented<CaseTargetKind>>,
+    pub target: Box<Augmented<CaseTargetExpr>>,
     pub body: Box<Augmented<ValExpr>>,
 }
 
@@ -117,8 +126,31 @@ pub enum PlaceExpr {
     Array(BigInt, Box<Augmented<ValExpr>>),
 }
 
-pub struct PatExpr {
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct PatStructItemExpr {
+    pub identifier: Vec<u8>,
+    pub expr: Box<Augmented<PatExpr>>,
+}
 
+#[derive(Serialize, Deserialize, Clone, Debug, AsRefStr)]
+pub enum PatExpr {
+    Error,
+    Ignore {
+        typeexpr: Box<Augmented<TypeExpr>>,
+    },
+    Identifier {
+        mutable: bool,
+        identifier: Vec<u8>,
+        typeexpr: Box<Augmented<TypeExpr>>,
+    },
+    StructLiteral(Vec<Augmented<PatStructItemExpr>>),
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct RangeExpr {
+    pub start: Box<Augmented<ValExpr>>,
+    pub end: Box<Augmented<ValExpr>>,
+    pub by: Option<Box<Augmented<ValExpr>>>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, AsRefStr)]
@@ -134,7 +166,7 @@ pub enum ValExpr {
         block: bool,
     },
     // Constructs a new compound type
-    StructLiteral(Box<Augmented<ValStructItemExpr>>),
+    StructLiteral(Vec<Augmented<StructItemExpr<ValExpr>>>),
     // Binary operation
     BinaryOp {
         op: ValBinaryOpKind,
@@ -146,16 +178,45 @@ pub enum ValExpr {
         expr: Box<Augmented<ValExpr>>,
         cases: Vec<Augmented<CaseExpr>>,
     },
-    // Introduces new scope and label
-    Group(Box<ValExpr>),
+    // Parens
+    Group {},
     // A reference to a previously defined variable
     Identifier(Vec<u8>),
-    // a let
+    // Function application
+    App {
+        fun: Box<Augmented<ValExpr>>,
+        args: Box<Augmented<ArgsExpr<ValExpr>>>,
+    },
+    // Lambda function
+    FnDef {
+        args: Box<Augmented<ArgsExpr<PatExpr>>>,
+        returntype: Box<Augmented<TypeExpr>>,
+        body: Box<Augmented<ValExpr>>,
+    },
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, AsRefStr)]
+pub enum BodyStatement {
+    TypeDef {
+        identifier: Vec<u8>,
+        value: Box<Augmented<TypeExpr>>,
+    },
     Let {
-        is_const: bool,
         pattern: Box<Augmented<PatExpr>>,
         value: Box<Augmented<ValExpr>>,
+    },
+    FnDef {
+        identifier: Vec<u8>,
+        args: Box<Augmented<ArgsExpr<PatExpr>>>,
+        returntype: Box<Augmented<TypeExpr>>,
         body: Box<Augmented<ValExpr>>,
+    },
+    Do {
+        value: Box<Augmented<ValExpr>>,
+    },
+    Set {
+        pattern: Box<Augmented<PatExpr>>,
+        value: Box<Augmented<ValExpr>>,
     },
     While {
         cond: Box<Augmented<ValExpr>>,
@@ -165,22 +226,6 @@ pub enum ValExpr {
         pattern: Box<Augmented<PatExpr>>,
         range: Box<Augmented<RangeExpr>>,
         body: Box<Augmented<ValExpr>>,
-    },
-    App {
-        fun: Box<Augmented<ValExpr>>,
-        args: Box<Augmented<ValArgsExpr>>,
-    },
-}
-
-pub enum BodyStatement {
-    Let {
-        is_const: bool,
-        pattern: Box<Augmented<PatExpr>>,
-        value: Box<Augmented<ValExpr>>,
-    },
-    Assign {
-        pattern: Box<Augmented<PatExpr>>,
-        value: Box<Augmented<ValExpr>>,
     },
 }
 
@@ -197,7 +242,16 @@ pub enum FileStatement {
     },
     FnDef {
         identifier: Vec<u8>,
-        args: Box<Augmented<PatArgsExpr>>,
+        args: Box<Augmented<ArgsExpr<PatExpr>>>,
         returntype: Box<Augmented<TypeExpr>>,
+        body: Box<Augmented<ValExpr>>,
     },
+    WithPrefix {
+        prefix: Vec<u8>,
+        items: Vec<Augmented<FileStatement>>,
+    },
+}
+
+pub struct File {
+    declarations: Vec<Augmented<FileStatement>>,
 }
