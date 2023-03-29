@@ -8,7 +8,6 @@ pub enum TokenKind {
     // function, type, or variable
     Identifier(Vec<u8>),
     // Keywords
-    Switch, // switch
     Case,   // case
     Of,     // of
     Val,    // val
@@ -28,6 +27,7 @@ pub enum TokenKind {
     Int(BigInt),                            // 7
     Float(BigRational),                     // 0.7
     LifetimeTy,                             // lifetime
+    Unit,                                   // ()
     // Math Operators
     Plus,  // +
     Minus, // -
@@ -52,14 +52,11 @@ pub enum TokenKind {
     // Assignment
     Assign, // =
     // Reference
-    Ref,     // &
-    UniqRef, // !
-    Deref,   // @
+    Ref,   // &
+    Deref, // @
     // Arrows
     Pipe,  // |
     Defun, // ->
-    // CaseOptions
-    CaseOption, // ||
     // Other Miscellaneous Operator Things
     ParenLeft,    // (
     ParenRight,   // )
@@ -70,6 +67,7 @@ pub enum TokenKind {
     Constrain,    // :
     ModuleAccess, // .
     Semicolon,    // ;
+    Ignore,       // _
     // Comments, and Attributes
     Metadata { value: Vec<u8>, significant: bool }, // #!attribute and # comment
 }

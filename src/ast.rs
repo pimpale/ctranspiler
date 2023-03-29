@@ -126,31 +126,24 @@ pub enum PlaceExpr {
     Array(BigInt, Box<Augmented<ValExpr>>),
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug)]
-pub struct PatStructItemExpr {
-    pub identifier: Vec<u8>,
-    pub expr: Box<Augmented<PatExpr>>,
-}
-
 #[derive(Serialize, Deserialize, Clone, Debug, AsRefStr)]
 pub enum PatExpr {
     Error,
     Ignore {
-        typeexpr: Box<Augmented<TypeExpr>>,
+        ty: Box<Augmented<TypeExpr>>,
     },
     Identifier {
         mutable: bool,
         identifier: Vec<u8>,
-        typeexpr: Box<Augmented<TypeExpr>>,
+        ty: Box<Augmented<TypeExpr>>,
     },
-    StructLiteral(Vec<Augmented<PatStructItemExpr>>),
+    StructLiteral(Vec<Augmented<StructItemExpr<PatExpr>>>),
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct RangeExpr {
     pub start: Box<Augmented<ValExpr>>,
     pub end: Box<Augmented<ValExpr>>,
-    pub by: Option<Box<Augmented<ValExpr>>>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, AsRefStr)]
@@ -179,7 +172,10 @@ pub enum ValExpr {
         cases: Vec<Augmented<CaseExpr>>,
     },
     // Parens
-    Group {},
+    Group {
+        statements: Vec<Augmented<BodyStatement>>,
+        trailing_semicolon: bool
+    },
     // A reference to a previously defined variable
     Identifier(Vec<u8>),
     // Function application
@@ -226,6 +222,7 @@ pub enum BodyStatement {
         pattern: Box<Augmented<PatExpr>>,
         range: Box<Augmented<RangeExpr>>,
         body: Box<Augmented<ValExpr>>,
+        by: Option<Box<Augmented<ValExpr>>>,
     },
 }
 
