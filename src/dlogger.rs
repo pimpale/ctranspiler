@@ -36,6 +36,17 @@ pub struct DiagnosticLogger {
     source: Option<String>,
 }
 
+fn format_token(maybe_tk: Option<TokenKind>) -> String {
+    match maybe_tk {
+        Some(TokenKind::Identifier(_)) => String::from("<IDENTIFIER>"),
+        Some(TokenKind::Bool(_)) => String::from("<BOOLEAN>"),
+        Some(TokenKind::Int(_)) => String::from("<INTEGER>"),
+        Some(TokenKind::Float(_)) => String::from("<FLOAT>"),
+        Some(k) => k.as_ref().to_string(),
+        None => String::from("EOF"),
+    }
+}
+
 impl DiagnosticLogger {
     pub fn log_unexpected_eof_in_string(&mut self, range: Range) {
         self.log(Diagnostic {
@@ -141,55 +152,54 @@ impl DiagnosticLogger {
         })
     }
 
-    fn format_token(&self, maybe_tk: Option<TokenKind>) -> String {
-        match maybe_tk {
-            Some(tkk) => format!("{}", tkk.as_ref()),
-            None => String::from("EOF"),
-        }
-    }
-
-    pub fn log_unexpected_token(
+    pub fn log_unexpected_token_specific(
         &mut self,
         range: Range,
-        expected: &str,
+        structure: &str,
+        expected_kind: Vec<TokenKind>,
         unexpected_kind: Option<TokenKind>,
     ) {
+        let message = match expected_kind.len() {
+            0 => format!(
+                "expected {} but found unexpected {}",
+                structure,
+                format_token(unexpected_kind)
+            ),
+            k => {
+                let expected_str = match k {
+                    1 => format_token(Some(expected_kind[0])),
+                    _ => expected_kind
+                        .into_iter()
+                        .enumerate()
+                        .fold(String::new(), |a, (i, x)| match i {
+                            0 => format!("one of {}", format_token(Some(x))),
+                            _ if i == expected_kind.len() - 1 => {
+                                format!("{} or {}", a, format_token(Some(x)))
+                            }
+                            _ => format!("{}, {}", a, format_token(Some(x))),
+                        }),
+                };
+
+                format!(
+                    "(while parsing {}) expected {} but found unexpected {}",
+                    structure,
+                    expected_str,
+                    format_token(unexpected_kind)
+                )
+            }
+        };
+
         self.log(Diagnostic {
             range,
             severity: Some(DiagnosticSeverity::ERROR),
             code: Some(NumberOrString::Number(8)),
             code_description: None,
             source: self.source.clone(),
-            message: format!(
-                "expected {} but found unexpected {}",
-                expected,
-                self.format_token(unexpected_kind)
-            ),
+            message,
             related_information: None,
             tags: None,
             data: None,
         })
-    }
-
-    pub fn log_unexpected_token_specific(
-        &mut self,
-        range: Range,
-        expected_kind: Vec<TokenKind>,
-        unexpected_kind: Option<TokenKind>,
-    ) {
-        let expected_str = match expected_kind.len() {
-            0 => String::from("EOF"),
-            1 => &self.format_token(expected_kind),
-            _ => expected_kind
-                .into_iter()
-                .enumerate()
-                .fold(String::from("one of"), |a, (i, x)| match i {
-                    0 => format!("{} `{}`", a, x.as_ref()),
-                    _ if i == expected_kind.len() - 1 => format!("{} or `{}`", a, x.as_ref()),
-                    _ => format!("{}, `{}`", a, x.as_ref()),
-                }),
-        };
-        self.log_unexpected_token(range, &self.format_token(expected_kind), unexpected_kind);
     }
 
     fn log(&self, d: Diagnostic) {

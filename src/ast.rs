@@ -30,8 +30,8 @@ pub enum StructItemExpr<T> {
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct ArgsExpr<T> {
-    pub identifier: Vec<u8>,
-    pub expr: Box<Augmented<T>>,
+    pub args: Vec<Augmented<T>>,
+    pub terminating_bool: bool,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -174,7 +174,7 @@ pub enum ValExpr {
     // Parens
     Group {
         statements: Vec<Augmented<BodyStatement>>,
-        trailing_semicolon: bool
+        trailing_semicolon: bool,
     },
     // A reference to a previously defined variable
     Identifier(Vec<u8>),

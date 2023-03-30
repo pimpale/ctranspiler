@@ -18,6 +18,10 @@ pub enum TokenKind {
     Mut,    // mut
     Set,    // set
     In,     // in
+    Fn,     // fn
+    While,     // fn
+    For,     // fn
+    Type,   // type
     // Literals and constants
     Lifetime(Vec<u8>),                      // 'lifetime
     Inf,                                    // inf
