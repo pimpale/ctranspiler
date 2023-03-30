@@ -92,8 +92,6 @@ pub enum ValBinaryOpKind {
     LessEqual,
     Greater,
     GreaterEqual,
-    // Module Access
-    ModuleAccess,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -144,6 +142,7 @@ pub enum PatExpr {
 pub struct RangeExpr {
     pub start: Box<Augmented<ValExpr>>,
     pub end: Box<Augmented<ValExpr>>,
+    pub inclusive: bool,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, AsRefStr)]
@@ -158,6 +157,9 @@ pub enum ValExpr {
         value: Vec<u8>,
         block: bool,
     },
+    Ref(Box<Augmented<ValExpr>>),
+    UniqRef(Box<Augmented<ValExpr>>),
+    Deref(Box<Augmented<ValExpr>>),
     // Constructs a new compound type
     StructLiteral(Vec<Augmented<StructItemExpr<ValExpr>>>),
     // Binary operation
@@ -166,22 +168,38 @@ pub enum ValExpr {
         left_operand: Box<Augmented<ValExpr>>,
         right_operand: Box<Augmented<ValExpr>>,
     },
+    IfThen {
+        cond: Box<Augmented<ValExpr>>,
+        then_branch: Box<Augmented<BlockExpr>>,
+        else_branch: Option<Box<Augmented<BlockExpr>>>,
+    },
     // Matches an expression to the first matching pattern and destructures it
     CaseOf {
         expr: Box<Augmented<ValExpr>>,
         cases: Vec<Augmented<CaseExpr>>,
     },
-    // Parens
-    Group {
-        statements: Vec<Augmented<BodyStatement>>,
-        trailing_semicolon: bool,
-    },
+    // Block
+    Block(Box<Augmented<BlockExpr>>),
+    // Group
+    Group(Box<Augmented<ValExpr>>),
+    // Inline array
+    Array(Vec<Augmented<ValExpr>>),
     // A reference to a previously defined variable
     Identifier(Vec<u8>),
     // Function application
     App {
-        fun: Box<Augmented<ValExpr>>,
+        root: Box<Augmented<ValExpr>>,
         args: Box<Augmented<ArgsExpr<ValExpr>>>,
+    },
+    // index into an array
+    ArrayIndex {
+        root: Box<Augmented<ValExpr>>,
+        index: Box<Augmented<TypeExpr>>,
+    },
+    // FieldAccess
+    FieldAccess {
+        root: Box<Augmented<ValExpr>>,
+        field: Vec<u8>,
     },
     // Lambda function
     FnDef {
@@ -191,8 +209,15 @@ pub enum ValExpr {
     },
 }
 
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct BlockExpr {
+    statements: Vec<Augmented<BlockStatement>>,
+    trailing_semicolon: bool,
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug, AsRefStr)]
-pub enum BodyStatement {
+pub enum BlockStatement {
+    Error,
     TypeDef {
         identifier: Vec<u8>,
         value: Box<Augmented<TypeExpr>>,
@@ -207,23 +232,21 @@ pub enum BodyStatement {
         returntype: Box<Augmented<TypeExpr>>,
         body: Box<Augmented<ValExpr>>,
     },
-    Do {
-        value: Box<Augmented<ValExpr>>,
-    },
     Set {
         pattern: Box<Augmented<PatExpr>>,
         value: Box<Augmented<ValExpr>>,
     },
     While {
         cond: Box<Augmented<ValExpr>>,
-        body: Box<Augmented<ValExpr>>,
+        body: Box<Augmented<Body>>,
     },
     For {
         pattern: Box<Augmented<PatExpr>>,
         range: Box<Augmented<RangeExpr>>,
-        body: Box<Augmented<ValExpr>>,
         by: Option<Box<Augmented<ValExpr>>>,
+        body: Box<Augmented<Body>>,
     },
+    Do(Box<Augmented<ValExpr>>),
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, AsRefStr)]
