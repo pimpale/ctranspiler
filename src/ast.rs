@@ -39,14 +39,13 @@ pub enum TypeExpr {
     // An error when parsing
     Error,
     Identifier(Vec<u8>),
-    Unit,
     // const literals
+    Unit,
     Int(BigInt),
     Bool(bool),
     Float(BigRational),
     // unary ops (syntax sugar)
     Ref(Box<Augmented<TypeExpr>>),
-    UniqRef(Box<Augmented<TypeExpr>>),
     Array(BigInt, Box<Augmented<TypeExpr>>),
     Slice(Box<Augmented<TypeExpr>>),
     // struct and enumify
@@ -54,7 +53,7 @@ pub enum TypeExpr {
     Enum(Vec<Augmented<StructItemExpr<TypeExpr>>>),
     Union(Vec<Augmented<StructItemExpr<TypeExpr>>>),
     // For grouping apps
-    Group(Box<TypeExpr>),
+    Group(Box<Augmented<TypeExpr>>),
     // generic
     Generic {
         fun: Box<Augmented<TypeExpr>>,
@@ -111,20 +110,6 @@ pub struct CaseExpr {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, AsRefStr)]
-pub enum PlaceExpr {
-    // An error when parsing
-    Error,
-    // A reference to a previously defined variable
-    Identifier(Vec<u8>),
-    StructField {
-        root: Box<Augmented<PlaceExpr>>,
-        field: Vec<u8>,
-    },
-    Deref(Box<Augmented<ValExpr>>),
-    Array(BigInt, Box<Augmented<ValExpr>>),
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug, AsRefStr)]
 pub enum PatExpr {
     Error,
     Ignore {
@@ -146,6 +131,18 @@ pub struct RangeExpr {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, AsRefStr)]
+pub enum ElseExpr {
+    // An error when parsing
+    Error,
+    Else(Box<Augmented<BlockExpr>>),
+    Elif {
+        cond: Box<Augmented<ValExpr>>,
+        then_branch: Box<Augmented<BlockExpr>>,
+        else_branch: Option<Box<Augmented<ElseExpr>>>,
+    },
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, AsRefStr)]
 pub enum ValExpr {
     // An error when parsing
     Error,
@@ -157,8 +154,12 @@ pub enum ValExpr {
         value: Vec<u8>,
         block: bool,
     },
+    // lambda function
+    Fn {
+        args: Box<Augmented<ArgsExpr<TypeExpr>>>,
+        returntype: Box<Augmented<TypeExpr>>,
+    },
     Ref(Box<Augmented<ValExpr>>),
-    UniqRef(Box<Augmented<ValExpr>>),
     Deref(Box<Augmented<ValExpr>>),
     // Constructs a new compound type
     StructLiteral(Vec<Augmented<StructItemExpr<ValExpr>>>),
@@ -171,7 +172,7 @@ pub enum ValExpr {
     IfThen {
         cond: Box<Augmented<ValExpr>>,
         then_branch: Box<Augmented<BlockExpr>>,
-        else_branch: Option<Box<Augmented<BlockExpr>>>,
+        else_branch: Option<Box<Augmented<ElseExpr>>>,
     },
     // Matches an expression to the first matching pattern and destructures it
     CaseOf {
@@ -194,7 +195,7 @@ pub enum ValExpr {
     // index into an array
     ArrayIndex {
         root: Box<Augmented<ValExpr>>,
-        index: Box<Augmented<TypeExpr>>,
+        index: Box<Augmented<ValExpr>>,
     },
     // FieldAccess
     FieldAccess {
@@ -230,21 +231,21 @@ pub enum BlockStatement {
         identifier: Vec<u8>,
         args: Box<Augmented<ArgsExpr<PatExpr>>>,
         returntype: Box<Augmented<TypeExpr>>,
-        body: Box<Augmented<ValExpr>>,
+        body: Box<Augmented<BlockExpr>>,
     },
     Set {
-        pattern: Box<Augmented<PatExpr>>,
+        place: Box<Augmented<ValExpr>>,
         value: Box<Augmented<ValExpr>>,
     },
     While {
         cond: Box<Augmented<ValExpr>>,
-        body: Box<Augmented<Body>>,
+        body: Box<Augmented<BlockExpr>>,
     },
     For {
         pattern: Box<Augmented<PatExpr>>,
         range: Box<Augmented<RangeExpr>>,
         by: Option<Box<Augmented<ValExpr>>>,
-        body: Box<Augmented<Body>>,
+        body: Box<Augmented<BlockExpr>>,
     },
     Do(Box<Augmented<ValExpr>>),
 }

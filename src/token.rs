@@ -9,20 +9,19 @@ pub enum TokenKind {
     Identifier(Vec<u8>),
     // Keywords
     Case,   // case
-    Of,     // of
-    Val,    // val
-    Struct, // struct
     Enum,   // enum
-    Const,  // const
+    Union,  // union
     Let,    // let
     Mut,    // mut
     Set,    // set
     In,     // in
+    If,     // if
+    Else,   // else
     By,     // by
     Fn,     // fn
     While,  // while
     For,    // for
-    Block,    // block
+    Block,  // block
     Type,   // type
     // Literals and constants
     Lifetime(Vec<u8>),                      // 'lifetime
