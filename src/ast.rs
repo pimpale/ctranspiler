@@ -46,7 +46,10 @@ pub enum TypeExpr {
     Float(BigRational),
     // unary ops (syntax sugar)
     Ref(Box<Augmented<TypeExpr>>),
-    Array(BigInt, Box<Augmented<TypeExpr>>),
+    Array {
+        root: Box<Augmented<TypeExpr>>,
+        index: Box<Augmented<TypeExpr>>,
+    },
     Slice(Box<Augmented<TypeExpr>>),
     // struct and enumify
     Struct(Vec<Augmented<StructItemExpr<TypeExpr>>>),
@@ -223,6 +226,9 @@ pub enum BlockStatement {
         identifier: Vec<u8>,
         value: Box<Augmented<TypeExpr>>,
     },
+    Use {
+        prefix: Vec<u8>,
+    },
     Let {
         pattern: Box<Augmented<PatExpr>>,
         value: Box<Augmented<ValExpr>>,
@@ -252,12 +258,12 @@ pub enum BlockStatement {
 
 #[derive(Serialize, Deserialize, Clone, Debug, AsRefStr)]
 pub enum FileStatement {
+    Error,
     TypeDef {
         identifier: Vec<u8>,
         value: Box<Augmented<TypeExpr>>,
     },
     Let {
-        is_const: bool,
         pattern: Box<Augmented<PatExpr>>,
         value: Box<Augmented<ValExpr>>,
     },
@@ -267,12 +273,18 @@ pub enum FileStatement {
         returntype: Box<Augmented<TypeExpr>>,
         body: Box<Augmented<ValExpr>>,
     },
-    WithPrefix {
+    Prefix {
         prefix: Vec<u8>,
         items: Vec<Augmented<FileStatement>>,
     },
+    Use {
+        prefix: Vec<u8>,
+    },
 }
 
-pub struct File {
+// TODO: add imports
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct TranslationUnit {
     declarations: Vec<Augmented<FileStatement>>,
 }

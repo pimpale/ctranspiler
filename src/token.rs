@@ -23,6 +23,8 @@ pub enum TokenKind {
     For,    // for
     Block,  // block
     Type,   // type
+    Prefix, // prefix
+    Use,    // use
     // Literals and constants
     Lifetime(Vec<u8>),                      // 'lifetime
     Inf,                                    // inf
@@ -32,7 +34,7 @@ pub enum TokenKind {
     Int(BigInt),                            // 7
     Float(BigRational),                     // 0.7
     LifetimeTy,                             // lifetime
-    Unit,                                   // ()
+    Unit,                                   // void
     // Math Operators
     Plus,  // +
     Minus, // -
