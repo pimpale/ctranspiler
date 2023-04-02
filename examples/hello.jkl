@@ -1,0 +1,5 @@
+
+fn main(argc: int, argv: char[][]) -> int {
+  puts("hello world!");
+  0
+}

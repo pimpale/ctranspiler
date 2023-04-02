@@ -31,7 +31,6 @@ pub enum StructItemExpr<T> {
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct ArgsExpr<T> {
     pub args: Vec<Augmented<T>>,
-    pub terminating_bool: bool,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -71,12 +70,7 @@ pub enum TypeExpr {
 
 #[derive(Serialize, Deserialize, Clone, Debug, AsRefStr)]
 pub enum ValBinaryOpKind {
-    // Function definition
-    Defun,
-    // CaseOption
-    CaseOption,
     // Function call
-    Apply,
     Pipe,
     // Math
     Add,
@@ -157,11 +151,6 @@ pub enum ValExpr {
         value: Vec<u8>,
         block: bool,
     },
-    // lambda function
-    Fn {
-        args: Box<Augmented<ArgsExpr<TypeExpr>>>,
-        returntype: Box<Augmented<TypeExpr>>,
-    },
     Ref(Box<Augmented<ValExpr>>),
     Deref(Box<Augmented<ValExpr>>),
     // Constructs a new compound type
@@ -215,8 +204,8 @@ pub enum ValExpr {
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct BlockExpr {
-    statements: Vec<Augmented<BlockStatement>>,
-    trailing_semicolon: bool,
+    pub statements: Vec<Augmented<BlockStatement>>,
+    pub trailing_semicolon: bool,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, AsRefStr)]
@@ -271,7 +260,7 @@ pub enum FileStatement {
         identifier: Vec<u8>,
         args: Box<Augmented<ArgsExpr<PatExpr>>>,
         returntype: Box<Augmented<TypeExpr>>,
-        body: Box<Augmented<ValExpr>>,
+        body: Box<Augmented<BlockExpr>>,
     },
     Prefix {
         prefix: Vec<u8>,
@@ -286,5 +275,5 @@ pub enum FileStatement {
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct TranslationUnit {
-    declarations: Vec<Augmented<FileStatement>>,
+    pub declarations: Vec<Augmented<FileStatement>>,
 }

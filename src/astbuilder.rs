@@ -1050,23 +1050,20 @@ fn parse_args_expr<TkIter: Iterator<Item = Token>, T>(
     dlogger: &mut DiagnosticLogger,
     lower_fn: impl Fn(&mut PeekMoreIterator<TkIter>, &mut DiagnosticLogger) -> Augmented<T>,
 ) -> Augmented<ArgsExpr<T>> {
-    let (range, metadata, args, terminating_bool) = parse_delimited_statement_seq(
+    let (range, metadata, args, _) = parse_delimited_statement_seq(
         tkiter,
         dlogger,
         "arguments",
         lower_fn,
-        TokenKind::BraceLeft,
-        TokenKind::BraceRight,
+        TokenKind::ParenLeft,
+        TokenKind::ParenRight,
         TokenKind::Comma,
     );
 
     Augmented {
         range,
         metadata,
-        val: ArgsExpr {
-            args,
-            terminating_bool,
-        },
+        val: ArgsExpr { args },
     }
 }
 

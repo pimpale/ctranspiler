@@ -35,6 +35,7 @@ pub enum TokenKind {
     Float(BigRational),                     // 0.7
     LifetimeTy,                             // lifetime
     Unit,                                   // void
+    NeverTy,                                // !
     // Math Operators
     Plus,  // +
     Minus, // -

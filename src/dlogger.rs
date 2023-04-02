@@ -649,20 +649,6 @@ impl DiagnosticLogger {
         })
     }
 
-    pub fn log_not_struct(&mut self, range: Range) {
-        self.log(Diagnostic {
-            range,
-            severity: Some(DiagnosticSeverity::ERROR),
-            code: Some(NumberOrString::Number(36)),
-            code_description: None,
-            source: self.source.clone(),
-            message: String::from("this object is not a struct, so no fields can be accessed"),
-            related_information: None,
-            tags: None,
-            data: None,
-        })
-    }
-
     pub fn log_variable_not_found(&mut self, range: Range, identifier: &[u8]) {
         self.log(Diagnostic {
             range,
