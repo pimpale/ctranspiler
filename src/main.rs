@@ -10,6 +10,7 @@ mod hir_resolvename;
 mod token;
 mod tokenize;
 mod utils;
+mod types;
 
 use std::io::stdin;
 use std::io::Read;
@@ -28,7 +29,7 @@ fn main() {
     // create and lower hir
     let hir = construct_hir(ast, log.get_logger(Some(String::from("acnc-hir (construct)"))));
     hir_desugar::desugar_hir(&mut hir, log.get_logger(Some(String::from("acnc-hir (desugar)"))));
-    let global_type_name_table = hir_resolvename::resolve_global_type_names(&mut hir, log.get_logger(Some(String::from("acnc-hir (resolve global type names)"))));
+    let global_type_name_table = hir_resolvename::resolve_identifiers(&mut hir, log.get_logger(Some(String::from("acnc-hir (resolve identifiers)"))));
 
 
     // dbg!(thir);

@@ -6,7 +6,7 @@ use strum::AsRefStr;
 #[derive(Debug, Clone, AsRefStr, PartialEq)]
 pub enum TokenKind {
     // function, type, or variable
-    Identifier(Vec<u8>),
+    Identifier(String),
     // Keywords
     Case,    // case
     Enum,    // enum
@@ -22,7 +22,6 @@ pub enum TokenKind {
     While,   // while
     For,     // for
     Block,   // block
-    Type,    // type
     Prefix,  // prefix
     Use,     // use
     Typedef, // typedef

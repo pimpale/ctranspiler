@@ -17,7 +17,7 @@ fn tr_aug<T, U>(
 
 fn translate_augstructitemexpr<T, U>(
     lower: fn(T, DiagnosticLogger) -> U,
-    replace_eponymous: impl Fn(Vec<u8>, DiagnosticLogger) -> U,
+    replace_eponymous: impl Fn(String, DiagnosticLogger) -> U,
     dlogger: DiagnosticLogger,
     Augmented {
         range,
@@ -119,13 +119,6 @@ fn translate_typeexpr(t: ast::TypeExpr, dlogger: DiagnosticLogger) -> TypeExpr {
         ast::TypeExpr::Bool(b) => TypeExpr::Bool(b),
         ast::TypeExpr::Float(f) => TypeExpr::Float(f),
         ast::TypeExpr::Ref(t) => TypeExpr::Ref(Box::new(tr_aug(*t, dlogger, translate_typeexpr))),
-        ast::TypeExpr::Array { element, size } => TypeExpr::Array {
-            element: Box::new(tr_aug(*element, dlogger, translate_typeexpr)),
-            size: Box::new(tr_aug(*size, dlogger, translate_typeexpr)),
-        },
-        ast::TypeExpr::Slice(t) => {
-            TypeExpr::Slice(Box::new(tr_aug(*t, dlogger, translate_typeexpr)))
-        }
         ast::TypeExpr::Struct(items) => TypeExpr::Struct(
             items
                 .into_iter()
@@ -366,8 +359,8 @@ fn translate_valexpr(v: ast::ValExpr, dlogger: DiagnosticLogger) -> ValExpr {
 fn translate_blockstatement(bs: ast::BlockStatement, dlogger: DiagnosticLogger) -> BlockStatement {
     match bs {
         ast::BlockStatement::Error => BlockStatement::Error,
-        ast::BlockStatement::TypeDef { identifier, value } => BlockStatement::TypeDef {
-            identifier,
+        ast::BlockStatement::TypeDef { typepat, value } => BlockStatement::TypeDef {
+            typepat: Box::new(translate_augtypepatexpr(*typepat, dlogger)),
             value: Box::new(tr_aug(*value, dlogger, translate_typeexpr)),
         },
         ast::BlockStatement::Use { prefix } => BlockStatement::Use { prefix },
@@ -442,8 +435,8 @@ fn translate_blockexpr(b: ast::BlockExpr, dlogger: DiagnosticLogger) -> BlockExp
 fn translate_filestatement(fs: ast::FileStatement, dlogger: DiagnosticLogger) -> FileStatement {
     match fs {
         ast::FileStatement::Error => FileStatement::Error,
-        ast::FileStatement::TypeDef { identifier, value } => FileStatement::TypeDef {
-            identifier,
+        ast::FileStatement::TypeDef { typepat, value } => FileStatement::TypeDef {
+            typepat: Box::new(translate_augtypepatexpr(*typepat, dlogger)),
             value: Box::new(tr_aug(*value, dlogger, translate_typeexpr)),
         },
         ast::FileStatement::Let { pattern, value } => FileStatement::Let {

@@ -21,9 +21,9 @@ pub struct Augmented<T> {
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub enum StructItemExpr<T> {
     Error,
-    Eponymous(Vec<u8>),
+    Eponymous(String),
     Identified {
-        identifier: Vec<u8>,
+        identifier: String,
         expr: Box<Augmented<T>>,
     },
 }
@@ -53,7 +53,7 @@ pub enum KindExpr {
 pub enum TypeExpr {
     // An error when parsing
     Error,
-    Identifier(Vec<u8>),
+    Identifier(String),
     // types
     UnitTy,
     ArrayTy,
@@ -68,11 +68,6 @@ pub enum TypeExpr {
     Float(BigRational),
     // unary ops (syntax sugar)
     Ref(Box<Augmented<TypeExpr>>),
-    Array {
-        element: Box<Augmented<TypeExpr>>,
-        size: Box<Augmented<TypeExpr>>,
-    },
-    Slice(Box<Augmented<TypeExpr>>),
     // struct and enumify
     Struct(Vec<Augmented<StructItemExpr<TypeExpr>>>),
     Enum(Vec<Augmented<StructItemExpr<TypeExpr>>>),
@@ -96,7 +91,7 @@ pub enum TypeExpr {
 pub enum TypePatExpr {
     Error,
     Identifier {
-        identifier: Vec<u8>,
+        identifier: String,
         kind: Option<Box<Augmented<KindExpr>>>,
     }
 }
@@ -130,7 +125,7 @@ pub enum CaseTargetExpr {
     Unit,
     Bool(bool),
     Int(BigInt),
-    Identifier(Vec<u8>),
+    Identifier(String),
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -145,7 +140,7 @@ pub enum PatExpr {
     Ignore,
     Identifier {
         mutable: bool,
-        identifier: Vec<u8>,
+        identifier: String,
     },
     StructLiteral(Vec<Augmented<StructItemExpr<PatExpr>>>),
     Typed {
@@ -212,7 +207,7 @@ pub enum ValExpr {
     // Inline array
     Array(Vec<Augmented<ValExpr>>),
     // A reference to a previously defined variable
-    Identifier(Vec<u8>),
+    Identifier(String),
     // Concretize
     Concretize {
         root: Box<Augmented<ValExpr>>,
@@ -231,7 +226,7 @@ pub enum ValExpr {
     // FieldAccess
     FieldAccess {
         root: Box<Augmented<ValExpr>>,
-        field: Vec<u8>,
+        field: String,
     },
     // Lambda function
     FnDef {
@@ -251,18 +246,18 @@ pub struct BlockExpr {
 pub enum BlockStatement {
     Error,
     TypeDef {
-        identifier: Vec<u8>,
+        typepat: Box<Augmented<TypePatExpr>>,
         value: Box<Augmented<TypeExpr>>,
     },
     Use {
-        prefix: Vec<u8>,
+        prefix: String,
     },
     Let {
         pattern: Box<Augmented<PatExpr>>,
         value: Box<Augmented<ValExpr>>,
     },
     FnDef {
-        identifier: Vec<u8>,
+        identifier: String,
         tyargs: Option<Box<Augmented<ArgsExpr<TypePatExpr>>>>,
         args: Box<Augmented<ArgsExpr<PatExpr>>>,
         returntype: Box<Augmented<TypeExpr>>,
@@ -289,7 +284,7 @@ pub enum BlockStatement {
 pub enum FileStatement {
     Error,
     TypeDef {
-        identifier: Vec<u8>,
+        typepat: Box<Augmented<TypePatExpr>>,
         value: Box<Augmented<TypeExpr>>,
     },
     Let {
@@ -297,18 +292,18 @@ pub enum FileStatement {
         value: Box<Augmented<ValExpr>>,
     },
     FnDef {
-        identifier: Vec<u8>,
+        identifier: String,
         tyargs: Option<Box<Augmented<ArgsExpr<TypePatExpr>>>>,
         args: Box<Augmented<ArgsExpr<PatExpr>>>,
         returntype: Box<Augmented<TypeExpr>>,
         body: Box<Augmented<BlockExpr>>,
     },
     Prefix {
-        prefix: Vec<u8>,
+        prefix: String,
         items: Vec<Augmented<FileStatement>>,
     },
     Use {
-        prefix: Vec<u8>,
+        prefix: String,
     },
 }
 
