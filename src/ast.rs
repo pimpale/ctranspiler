@@ -46,8 +46,8 @@ pub enum TypeExpr {
     // unary ops (syntax sugar)
     Ref(Box<Augmented<TypeExpr>>),
     Array {
-        root: Box<Augmented<TypeExpr>>,
-        index: Box<Augmented<TypeExpr>>,
+        element: Box<Augmented<TypeExpr>>,
+        size: Box<Augmented<TypeExpr>>,
     },
     Slice(Box<Augmented<TypeExpr>>),
     // struct and enumify
@@ -109,15 +109,16 @@ pub struct CaseExpr {
 #[derive(Serialize, Deserialize, Clone, Debug, AsRefStr)]
 pub enum PatExpr {
     Error,
-    Ignore {
-        ty: Box<Augmented<TypeExpr>>,
-    },
+    Ignore,
     Identifier {
         mutable: bool,
         identifier: Vec<u8>,
-        ty: Box<Augmented<TypeExpr>>,
     },
     StructLiteral(Vec<Augmented<StructItemExpr<PatExpr>>>),
+    Typed {
+        pat: Box<Augmented<PatExpr>>,
+        ty: Box<Augmented<TypeExpr>>,
+    },
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]

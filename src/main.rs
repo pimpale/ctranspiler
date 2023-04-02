@@ -4,8 +4,9 @@ mod astbuilder;
 mod codereader;
 mod dlogger;
 mod hir;
-mod hirbuilder;
-mod desugar_hir;
+mod hir_construct;
+mod hir_desugar;
+mod hir_resolvename;
 mod token;
 mod tokenize;
 mod utils;
@@ -15,7 +16,7 @@ use std::io::Read;
 
 use astbuilder::construct_ast;
 use dlogger::DiagnosticLog;
-use hirbuilder::translate_translationunit;
+use hir_construct::construct_hir;
 use tokenize::tokenize;
 
 fn main() {
@@ -25,7 +26,9 @@ fn main() {
     let ast = construct_ast(tokenstream, log.get_logger(Some(String::from("acnc-ast"))));
 
     // create and lower hir
-    let hir = translate_translationunit(ast, log.get_logger(Some(String::from("acnc-hir"))));
+    let hir = construct_hir(ast, log.get_logger(Some(String::from("acnc-hir (construct)"))));
+    hir_desugar::desugar_hir(&mut hir, log.get_logger(Some(String::from("acnc-hir (desugar)"))));
+    let global_vtable = hir_resolvename::resolve_global_names(&mut hir, log.get_logger(Some(String::from("acnc-hir (resolve global names)"))));
 
 
     // dbg!(thir);

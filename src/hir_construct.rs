@@ -15,15 +15,41 @@ fn tr_aug<T, U>(
     }
 }
 
-fn translate_structitemexpr<T, U>(
+fn translate_augstructitemexpr<T, U>(
     lower: fn(T, DiagnosticLogger) -> U,
-) -> impl Fn(ast::StructItemExpr<T>, DiagnosticLogger) -> ast::StructItemExpr<U> {
-    move |x: ast::StructItemExpr<T>, dlogger: DiagnosticLogger| match x {
-        ast::StructItemExpr::Error => ast::StructItemExpr::Error,
-        ast::StructItemExpr::Eponymous(identifier) => ast::StructItemExpr::Eponymous(identifier),
-        ast::StructItemExpr::Identified { identifier, expr } => ast::StructItemExpr::Identified {
-            identifier,
-            expr: Box::new(tr_aug(*expr, dlogger, lower)),
+    replace_eponymous: impl Fn(Vec<u8>, DiagnosticLogger) -> U,
+    dlogger: DiagnosticLogger,
+    Augmented {
+        range,
+        metadata,
+        val,
+    }: Augmented<ast::StructItemExpr<T>>,
+) -> Augmented<hir::StructItemExpr<U>> {
+    match val {
+        ast::StructItemExpr::Error => Augmented {
+            metadata,
+            range,
+            val: StructItemExpr::Error,
+        },
+        ast::StructItemExpr::Eponymous(identifier) => Augmented {
+            metadata,
+            range,
+            val: hir::StructItemExpr::Identified {
+                identifier: identifier.clone(),
+                expr: Box::new(Augmented {
+                    metadata: vec![],
+                    range,
+                    val: replace_eponymous(identifier, dlogger),
+                }),
+            },
+        },
+        ast::StructItemExpr::Identified { identifier, expr } => Augmented {
+            range,
+            metadata,
+            val: StructItemExpr::Identified {
+                identifier,
+                expr: Box::new(tr_aug(*expr, dlogger, lower)),
+            },
         },
     }
 }
@@ -37,9 +63,9 @@ fn translate_typeexpr(t: ast::TypeExpr, dlogger: DiagnosticLogger) -> TypeExpr {
         ast::TypeExpr::Bool(b) => TypeExpr::Bool(b),
         ast::TypeExpr::Float(f) => TypeExpr::Float(f),
         ast::TypeExpr::Ref(t) => TypeExpr::Ref(Box::new(tr_aug(*t, dlogger, translate_typeexpr))),
-        ast::TypeExpr::Array { root, index } => TypeExpr::Array {
-            root: Box::new(tr_aug(*root, dlogger, translate_typeexpr)),
-            index: Box::new(tr_aug(*index, dlogger, translate_typeexpr)),
+        ast::TypeExpr::Array { element, size } => TypeExpr::Array {
+            element: Box::new(tr_aug(*element, dlogger, translate_typeexpr)),
+            size: Box::new(tr_aug(*size, dlogger, translate_typeexpr)),
         },
         ast::TypeExpr::Slice(t) => {
             TypeExpr::Slice(Box::new(tr_aug(*t, dlogger, translate_typeexpr)))
@@ -47,24 +73,43 @@ fn translate_typeexpr(t: ast::TypeExpr, dlogger: DiagnosticLogger) -> TypeExpr {
         ast::TypeExpr::Struct(items) => TypeExpr::Struct(
             items
                 .into_iter()
-                .map(|x| tr_aug(x, dlogger, translate_structitemexpr(translate_typeexpr)))
+                .map(|x| {
+                    translate_augstructitemexpr(
+                        translate_typeexpr,
+                        |e, _| TypeExpr::Identifier(e),
+                        dlogger,
+                        x,
+                    )
+                })
                 .collect(),
         ),
         ast::TypeExpr::Enum(items) => TypeExpr::Enum(
             items
                 .into_iter()
-                .map(|x| tr_aug(x, dlogger, translate_structitemexpr(translate_typeexpr)))
+                .map(|x| {
+                    translate_augstructitemexpr(
+                        translate_typeexpr,
+                        |e, _| TypeExpr::Identifier(e),
+                        dlogger,
+                        x,
+                    )
+                })
                 .collect(),
         ),
         ast::TypeExpr::Union(items) => TypeExpr::Union(
             items
                 .into_iter()
-                .map(|x| tr_aug(x, dlogger, translate_structitemexpr(translate_typeexpr)))
+                .map(|x| {
+                    translate_augstructitemexpr(
+                        translate_typeexpr,
+                        |e, _| TypeExpr::Identifier(e),
+                        dlogger,
+                        x,
+                    )
+                })
                 .collect(),
         ),
-        ast::TypeExpr::Group(t) => {
-            TypeExpr::Group(Box::new(tr_aug(*t, dlogger, translate_typeexpr)))
-        }
+        ast::TypeExpr::Group(t) => translate_typeexpr(t.val, dlogger),
         ast::TypeExpr::Generic { fun, args } => TypeExpr::Generic {
             fun: Box::new(tr_aug(*fun, dlogger, translate_typeexpr)),
             args: args
@@ -89,24 +134,34 @@ fn translate_typeexpr(t: ast::TypeExpr, dlogger: DiagnosticLogger) -> TypeExpr {
 fn translate_patexpr(p: ast::PatExpr, dlogger: DiagnosticLogger) -> PatExpr {
     match p {
         ast::PatExpr::Error => hir::PatExpr::Error,
-        ast::PatExpr::Ignore { ty } => PatExpr::Ignore {
-            ty: Box::new(tr_aug(*ty, dlogger, translate_typeexpr)),
-        },
+        ast::PatExpr::Ignore => PatExpr::Ignore,
         ast::PatExpr::Identifier {
             identifier,
-            ty,
             mutable,
         } => PatExpr::Identifier {
             identifier,
             mutable,
-            ty: Box::new(tr_aug(*ty, dlogger, translate_typeexpr)),
         },
         ast::PatExpr::StructLiteral(items) => PatExpr::StructLiteral(
             items
                 .into_iter()
-                .map(|x| tr_aug(x, dlogger, translate_structitemexpr(translate_patexpr)))
+                .map(|x| {
+                    translate_augstructitemexpr(
+                        translate_patexpr,
+                        |e, _| PatExpr::Identifier {
+                            mutable: false,
+                            identifier: e,
+                        },
+                        dlogger,
+                        x,
+                    )
+                })
                 .collect(),
         ),
+        ast::PatExpr::Typed { pat, ty } => PatExpr::Typed {
+            pat: Box::new(tr_aug(*pat, dlogger, translate_patexpr)),
+            ty: Box::new(tr_aug(*ty, dlogger, translate_typeexpr)),
+        },
     }
 }
 
@@ -148,7 +203,14 @@ fn translate_valexpr(v: ast::ValExpr, dlogger: DiagnosticLogger) -> ValExpr {
         ast::ValExpr::StructLiteral(items) => ValExpr::StructLiteral(
             items
                 .into_iter()
-                .map(|x| tr_aug(x, dlogger, translate_structitemexpr(translate_valexpr)))
+                .map(|x| {
+                    translate_augstructitemexpr(
+                        translate_valexpr,
+                        |e, _| ValExpr::Identifier(e),
+                        dlogger,
+                        x,
+                    )
+                })
                 .collect(),
         ),
         ast::ValExpr::BinaryOp {
@@ -195,7 +257,7 @@ fn translate_valexpr(v: ast::ValExpr, dlogger: DiagnosticLogger) -> ValExpr {
             ValExpr::Block(Box::new(tr_aug(*b, dlogger, translate_blockexpr)))
         }
         ast::ValExpr::Group(v) => translate_valexpr(v.val, dlogger),
-        ast::ValExpr::Array(items) => ValExpr::Array(
+        ast::ValExpr::Array(items) => ValExpr::ArrayLiteral(
             items
                 .into_iter()
                 .map(|x| tr_aug(x, dlogger, translate_valexpr))
@@ -223,7 +285,7 @@ fn translate_valexpr(v: ast::ValExpr, dlogger: DiagnosticLogger) -> ValExpr {
             args,
             returntype,
             body,
-        } => ValExpr::FnDef {
+        } => ValExpr::FnLiteral {
             args: args
                 .val
                 .args
@@ -340,7 +402,10 @@ fn translate_filestatement(fs: ast::FileStatement, dlogger: DiagnosticLogger) ->
     }
 }
 
-pub fn translate_translationunit(tu: ast::TranslationUnit, dlogger: DiagnosticLogger) -> TranslationUnit {
+pub fn construct_hir(
+    tu: ast::TranslationUnit,
+    dlogger: DiagnosticLogger,
+) -> TranslationUnit {
     TranslationUnit {
         declarations: tu
             .declarations

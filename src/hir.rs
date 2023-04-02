@@ -1,14 +1,16 @@
+use std::fs::File;
+
 use num_bigint::BigInt;
 use num_rational::BigRational;
 
 use crate::ast::Augmented;
-use crate::ast::StructItemExpr;
 use crate::ast::CaseTargetExpr;
+
 
 #[derive(Clone, Debug)]
 pub enum HirPhase {
     Raw,
-    SyntaxDesugared,
+    Desugared,
     NameResolved,
     TypeChecked,
     TempsGenerated,
@@ -17,28 +19,38 @@ pub enum HirPhase {
 }
 
 #[derive(Clone, Debug)]
+pub enum StructItemExpr<T> {
+    Error,
+    Identified {
+        identifier: Vec<u8>,
+        expr: Box<Augmented<T>>,
+    },
+}
+
+#[derive(Clone, Debug)]
 pub enum TypeExpr {
     // An error when parsing
     Error,
     Identifier(Vec<u8>),
-    // const literals
+    // identifier cached
+    Identifier2(usize),
+    // types
     Unit,
+    // const literals
     Int(BigInt),
     Bool(bool),
     Float(BigRational),
     // unary ops (syntax sugar)
     Ref(Box<Augmented<TypeExpr>>),
     Array {
-        root: Box<Augmented<TypeExpr>>,
-        index: Box<Augmented<TypeExpr>>,
+        element: Box<Augmented<TypeExpr>>,
+        size: Box<Augmented<TypeExpr>>,
     },
     Slice(Box<Augmented<TypeExpr>>),
     // struct and enumify
     Struct(Vec<Augmented<StructItemExpr<TypeExpr>>>),
     Enum(Vec<Augmented<StructItemExpr<TypeExpr>>>),
     Union(Vec<Augmented<StructItemExpr<TypeExpr>>>),
-    // For grouping apps
-    Group(Box<Augmented<TypeExpr>>),
     // generic
     Generic {
         fun: Box<Augmented<TypeExpr>>,
@@ -82,15 +94,16 @@ pub struct CaseExpr {
 #[derive(Clone, Debug)]
 pub enum PatExpr {
     Error,
-    Ignore {
-        ty: Box<Augmented<TypeExpr>>,
-    },
+    Ignore,
     Identifier {
         mutable: bool,
         identifier: Vec<u8>,
-        ty: Box<Augmented<TypeExpr>>,
     },
     StructLiteral(Vec<Augmented<StructItemExpr<PatExpr>>>),
+    Typed {
+        pat: Box<Augmented<PatExpr>>,
+        ty: Box<Augmented<TypeExpr>>,
+    },
 }
 
 #[derive(Clone, Debug)]
@@ -137,13 +150,14 @@ pub enum ValExpr {
     // Block
     Block(Box<Augmented<BlockExpr>>),
     // Inline array
-    Array(Vec<Augmented<ValExpr>>),
+    ArrayLiteral(Vec<Augmented<ValExpr>>),
     // A reference to a previously defined variable
     Identifier(Vec<u8>),
-    // Function application
-    App {
-        root: Box<Augmented<ValExpr>>,
-        args: Vec<Augmented<ValExpr>>,
+    // Lambda function
+    FnLiteral {
+        args: Vec<Augmented<PatExpr>>,
+        returntype: Box<Augmented<TypeExpr>>,
+        body: Box<Augmented<ValExpr>>,
     },
     // index into an array
     ArrayIndex {
@@ -155,18 +169,17 @@ pub enum ValExpr {
         root: Box<Augmented<ValExpr>>,
         field: Vec<u8>,
     },
-    // Lambda function
-    FnDef {
-        args: Vec<Augmented<PatExpr>>,
-        returntype: Box<Augmented<TypeExpr>>,
-        body: Box<Augmented<ValExpr>>,
+    // Function application
+    App {
+        root: Box<Augmented<ValExpr>>,
+        args: Vec<Augmented<ValExpr>>,
     },
 }
 
 #[derive(Clone, Debug)]
 pub struct BlockExpr {
-    statements: Vec<Augmented<BlockStatement>>,
-    trailing_semicolon: bool,
+    pub statements: Vec<Augmented<BlockStatement>>,
+    pub trailing_semicolon: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -215,6 +228,10 @@ pub enum FileStatement {
         identifier: Vec<u8>,
         value: Box<Augmented<TypeExpr>>,
     },
+    TypeDef2 {
+        identifier: usize,
+        value: Box<Augmented<TypeExpr>>,
+    },
     Let {
         pattern: Box<Augmented<PatExpr>>,
         value: Box<Augmented<ValExpr>>,
@@ -235,9 +252,313 @@ pub enum FileStatement {
 }
 
 // TODO: add imports
-
 #[derive(Clone, Debug)]
 pub struct TranslationUnit {
-    declarations: Vec<Augmented<FileStatement>>,
-    phase: HirPhase,
+    pub declarations: Vec<Augmented<FileStatement>>,
+    pub phase: HirPhase,
+}
+
+pub trait HirVisitor {
+    fn dfs_visit_translation_unit(&mut self, unit: &mut TranslationUnit) {
+        for decl in &unit.declarations {
+            self.visit_file_statement(&mut decl);
+        }
+    }
+
+    fn dfs_visit_file_statement(&mut self, statement: &mut Augmented<FileStatement>) {
+        match statement.val {
+            FileStatement::Error => {}
+            FileStatement::TypeDef { identifier, value  } => {
+                self.visit_type_expr(&mut value);
+            }
+            FileStatement::Let { pattern, value } => {
+                self.visit_pat_expr(&mut pattern);
+                self.visit_val_expr(&mut value);
+            }
+            FileStatement::FnDef {
+                identifier,
+                args,
+                returntype,
+                body,
+            } => {
+                for arg in args {
+                    self.visit_pat_expr(&mut arg);
+                }
+                self.visit_type_expr(&mut returntype);
+                self.visit_block_expr(&mut body);
+            }
+            FileStatement::Prefix { prefix, items } => {
+                for item in items {
+                    self.visit_file_statement(&mut item);
+                }
+            }
+            FileStatement::Use { prefix } => {}
+        }
+    }
+
+    fn dfs_visit_block_expr(&mut self, block: &mut Augmented<BlockExpr>) {
+        for statement in &block.val.statements {
+            self.visit_block_statement(&mut statement);
+        }
+    }
+
+    fn dfs_visit_block_statement(&mut self, statement: &mut Augmented<BlockStatement>) {
+        match statement.val {
+            BlockStatement::Error => {}
+            BlockStatement::TypeDef { identifier, value } => {
+                self.visit_type_expr(&mut value);
+            }
+            BlockStatement::Use { prefix } => {}
+            BlockStatement::Let { pattern, value } => {
+                self.visit_pat_expr(&mut pattern);
+                self.visit_val_expr(&mut value);
+            }
+            BlockStatement::FnDef {
+                identifier,
+                args,
+                returntype,
+                body,
+            } => {
+                for arg in args {
+                    self.visit_pat_expr(&mut arg);
+                }
+                self.visit_type_expr(&mut returntype);
+                self.visit_block_expr(&mut body);
+            }
+            BlockStatement::Set { place, value } => {
+                self.visit_val_expr(&mut place);
+                self.visit_val_expr(&mut value);
+            }
+            BlockStatement::While { cond, body } => {
+                self.visit_val_expr(&mut cond);
+                self.visit_block_expr(&mut body);
+            }
+            BlockStatement::For {
+                pattern,
+                start,
+                end,
+                inclusive,
+                by,
+                body,
+            } => {
+                self.visit_pat_expr(&mut pattern);
+                self.visit_val_expr(&mut start);
+                self.visit_val_expr(&mut end);
+                if let Some(by) = by {
+                    self.visit_val_expr(&mut by);
+                }
+                self.visit_block_expr(&mut body);
+            }
+            BlockStatement::Do(expr) => {
+                self.visit_val_expr(&mut expr);
+            }
+        }
+    }
+
+    fn visit_struct_item_expr<T>(
+        &mut self,
+        expr: &mut Augmented<StructItemExpr<T>>,
+        lower: impl Fn(&mut Self, &mut Augmented<T>),
+    ) {
+        match expr.val {
+            StructItemExpr::Error => {}
+            StructItemExpr::Identified { identifier, expr } => {
+                lower(self, &mut expr);
+            }
+        }
+    }
+
+    fn dfs_visit_type_expr(&mut self, expr: &mut Augmented<TypeExpr>) {
+        match expr.val {
+            TypeExpr::Error => {}
+            TypeExpr::Identifier(_) => {}
+            TypeExpr::Unit => {}
+            TypeExpr::Int(_) => {}
+            TypeExpr::Bool(_) => {}
+            TypeExpr::Float(_) => {}
+            TypeExpr::Ref(element) => {
+                self.visit_type_expr(&mut element);
+            }
+            TypeExpr::Array { element, size } => {
+                self.visit_type_expr(&mut element);
+                self.visit_type_expr(&mut size);
+            }
+            TypeExpr::Slice(element) => {
+                self.visit_type_expr(&mut element);
+            }
+            TypeExpr::Struct(items) => {
+                for item in items {
+                    self.visit_struct_item_expr(&mut item, Self::visit_type_expr);
+                }
+            }
+            TypeExpr::Enum(items) => {
+                for item in items {
+                    self.visit_struct_item_expr(&mut item, Self::visit_type_expr);
+                }
+            }
+            TypeExpr::Union(items) => {
+                for item in items {
+                    self.visit_struct_item_expr(&mut item, Self::visit_type_expr);
+                }
+            }
+            TypeExpr::Generic { fun, args } => {
+                self.visit_type_expr(&mut fun);
+                for arg in args {
+                    self.visit_type_expr(&mut arg);
+                }
+            }
+            TypeExpr::Fn { args, returntype } => {
+                for arg in args {
+                    self.visit_type_expr(&mut arg);
+                }
+                self.visit_type_expr(&mut returntype);
+            }
+        }
+    }
+
+    fn dfs_visit_pat_expr(&mut self, expr: &mut Augmented<PatExpr>) {
+        match expr.val {
+            PatExpr::Error => {}
+            PatExpr::Ignore => {}
+            PatExpr::Identifier {
+                mutable,
+                identifier,
+            } => {}
+            PatExpr::StructLiteral(items) => {
+                for item in items {
+                    self.visit_struct_item_expr(&mut item, Self::visit_pat_expr);
+                }
+            }
+            PatExpr::Typed { pat, ty } => {
+                self.visit_pat_expr(&mut pat);
+                self.visit_type_expr(&mut ty);
+            }
+        }
+    }
+
+    fn visit_case_expr(&mut self, expr: &mut Augmented<CaseExpr>) {
+        self.visit_val_expr(&mut expr.val.body)
+    }
+
+    fn dfs_visit_else_expr(&mut self, expr: &mut Augmented<ElseExpr>) {
+        match expr.val {
+            ElseExpr::Error => {}
+            ElseExpr::Elif{cond, then_branch, else_branch} => {
+                self.visit_val_expr(&mut cond);
+                self.visit_block_expr(&mut then_branch);
+                if let Some(else_branch) = else_branch {
+                    self.visit_else_expr(&mut else_branch);
+                }
+            }
+            ElseExpr::Else(expr) => {
+                self.visit_block_expr(&mut expr);
+            }
+        }
+    }
+
+    fn dfs_visit_val_expr(&mut self, expr: &mut Augmented<ValExpr>) {
+        match expr.val {
+            ValExpr::Error => {}
+            ValExpr::Unit => {}
+            ValExpr::Int(_) => {}
+            ValExpr::Bool(_) => {}
+            ValExpr::Float(_) => {}
+            ValExpr::String(_) => {}
+            ValExpr::Ref(expr) => {
+                self.visit_val_expr(&mut expr);
+            }
+            ValExpr::Deref(expr) => {
+                self.visit_val_expr(&mut expr);
+            }
+            ValExpr::StructLiteral(items) => {
+                for item in items {
+                    self.visit_struct_item_expr(&mut item, Self::visit_val_expr);
+                }
+            }
+            ValExpr::BinaryOp {
+                op: _,
+                left_operand,
+                right_operand,
+            } => {
+                self.visit_val_expr(&mut left_operand);
+                self.visit_val_expr(&mut right_operand);
+            }
+            ValExpr::IfThen {
+                cond,
+                then_branch,
+                else_branch,
+            } => {
+                self.visit_val_expr(&mut cond);
+                self.visit_block_expr(&mut then_branch);
+                if let Some(else_branch) = else_branch {
+                    self.visit_else_expr(&mut else_branch);
+                }
+            }
+            ValExpr::CaseOf { expr, cases } => {
+                self.visit_val_expr(&mut expr);
+                for case in cases {
+                    self.visit_case_expr(&mut case);
+                }
+            }
+            ValExpr::Block(expr) => {
+                self.visit_block_expr(&mut expr);
+            }
+            ValExpr::ArrayLiteral(items) => {
+                for item in items {
+                    self.visit_val_expr(&mut item);
+                }
+            }
+            ValExpr::Identifier(_) => {}
+            ValExpr::FnLiteral {
+                args,
+                returntype,
+                body,
+            } => {
+                for arg in args {
+                    self.visit_pat_expr(&mut arg);
+                }
+                self.visit_type_expr(&mut returntype);
+                self.visit_val_expr(&mut body);
+            }
+            ValExpr::ArrayIndex { root, index } => {
+                self.visit_val_expr(&mut root);
+                self.visit_val_expr(&mut index);
+            }
+            ValExpr::FieldAccess { root, field: _ } => {
+                self.visit_val_expr(&mut root);
+            }
+            ValExpr::App { root, args } => {
+                self.visit_val_expr(&mut root);
+                for arg in args {
+                    self.visit_val_expr(&mut arg);
+                }
+            }
+        }
+    }
+
+    fn visit_translation_unit (&mut self, tu: &mut TranslationUnit) {
+        self.dfs_visit_translation_unit(tu);
+    }
+    fn visit_val_expr(&mut self, expr: &mut Augmented<ValExpr>) {
+        self.dfs_visit_val_expr(expr);
+    }
+    fn visit_pat_expr(&mut self, expr: &mut Augmented<PatExpr>) {
+        self.dfs_visit_pat_expr(expr);
+    }
+    fn visit_type_expr(&mut self, expr: &mut Augmented<TypeExpr>) {
+        self.dfs_visit_type_expr(expr);
+    }
+    fn visit_block_expr(&mut self, expr: &mut Augmented<BlockExpr>) {
+        self.dfs_visit_block_expr(expr);
+    }
+    fn visit_else_expr(&mut self, expr: &mut Augmented<ElseExpr>) {
+        self.dfs_visit_else_expr(expr);
+    }
+    fn visit_file_statement(&mut self, statement: &mut Augmented<FileStatement>) {
+        self.dfs_visit_file_statement(statement)
+    }
+    fn visit_block_statement(&mut self, statement: &mut Augmented<BlockStatement>) {
+        self.dfs_visit_block_statement(statement)
+    }
+
 }

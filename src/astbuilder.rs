@@ -975,36 +975,42 @@ fn parse_valexpr<TkIter: Iterator<Item = Token>>(
     parse_valexpr_pipe(tkiter, dlogger)
 }
 
-fn parse_patexpr<TkIter: Iterator<Item = Token>>(
+fn parse_patexpr_term<TkIter: Iterator<Item = Token>>(
     tkiter: &mut PeekMoreIterator<TkIter>,
     dlogger: &mut DiagnosticLogger,
 ) -> Augmented<PatExpr> {
     let metadata = get_metadata(tkiter);
     match tkiter.peek_nth(0).unwrap().kind {
-        // TODO: parse mutable patterns
-        Some(TokenKind::Ignore) | Some(TokenKind::Identifier(_)) => {
-            // actually get the tk
-            let first_tk = tkiter.next().unwrap();
-
-            // get the next token
-            expect_token(
-                tkiter,
-                dlogger,
-                "pattern expression",
-                vec![TokenKind::Constrain],
-            );
-
-            let ty = Box::new(parse_typeexpr(tkiter, dlogger));
+        Some(TokenKind::Ignore) => {
+            let tk = tkiter.next().unwrap();
             Augmented {
-                range: union_of(first_tk.range, ty.range),
+                range: tk.range,
                 metadata,
-                val: match first_tk.kind {
-                    Some(TokenKind::Identifier(identifier)) => PatExpr::Identifier {
-                        ty,
-                        identifier,
-                        mutable: true,
-                    },
-                    _ => PatExpr::Ignore { ty },
+                val: PatExpr::Ignore,
+            }
+        }
+        Some(TokenKind::Mut) => {
+            let mut_tk = tkiter.next().unwrap();
+            assert!(mut_tk.kind == Some(TokenKind::Mut));
+            let (identifier, identifier_range) =
+                expect_identifier(tkiter, dlogger, "mutable identifier pattern");
+            Augmented {
+                range: union_of(mut_tk.range, identifier_range),
+                metadata,
+                val: PatExpr::Identifier {
+                    identifier,
+                    mutable: true,
+                },
+            }
+        }
+        Some(TokenKind::Identifier(identifier)) => {
+            let tk = tkiter.next().unwrap();
+            Augmented {
+                range: tk.range,
+                metadata,
+                val: PatExpr::Identifier {
+                    identifier,
+                    mutable: false,
                 },
             }
         }
@@ -1043,6 +1049,30 @@ fn parse_patexpr<TkIter: Iterator<Item = Token>>(
             }
         }
     }
+}
+
+fn parse_patexpr<TkIter: Iterator<Item = Token>>(
+    tkiter: &mut PeekMoreIterator<TkIter>,
+    dlogger: &mut DiagnosticLogger,
+) -> Augmented<PatExpr> {
+    parse_postfix_op(tkiter, dlogger, parse_patexpr_term, |t| match t {
+        Some(TokenKind::Constrain) => Some(Box::new(
+            |tkiter: &mut PeekMoreIterator<TkIter>,
+             dlogger: &mut DiagnosticLogger,
+             prefix: Augmented<PatExpr>| {
+                let ty = Box::new(parse_typeexpr(tkiter, dlogger));
+                Augmented {
+                    metadata: vec![],
+                    range: union_of(prefix.range, ty.range),
+                    val: PatExpr::Typed {
+                        pat: Box::new(prefix),
+                        ty,
+                    },
+                }
+            },
+        )),
+        _ => None,
+    })
 }
 
 fn parse_args_expr<TkIter: Iterator<Item = Token>, T>(
@@ -1676,7 +1706,7 @@ pub fn parse_typeexpr<TkIter: Iterator<Item = Token>>(
                         }
                     }
                     _ => {
-                        let index = Box::new(parse_typeexpr(tkiter, dlogger));
+                        let size = Box::new(parse_typeexpr(tkiter, dlogger));
                         let Token { range, .. } = expect_token(
                             tkiter,
                             dlogger,
@@ -1687,8 +1717,8 @@ pub fn parse_typeexpr<TkIter: Iterator<Item = Token>>(
                             metadata: vec![],
                             range: union_of(prefix.range, range),
                             val: TypeExpr::Array {
-                                root: Box::new(prefix),
-                                index,
+                                element: Box::new(prefix),
+                                size,
                             },
                         }
                     }
