@@ -8,24 +8,26 @@ pub enum TokenKind {
     // function, type, or variable
     Identifier(Vec<u8>),
     // Keywords
-    Case,   // case
-    Enum,   // enum
-    Union,  // union
-    Let,    // let
-    Mut,    // mut
-    Set,    // set
-    In,     // in
-    If,     // if
-    Else,   // else
-    By,     // by
-    Fn,     // fn
-    While,  // while
-    For,    // for
-    Block,  // block
-    Type,   // type
-    Prefix, // prefix
-    Use,    // use
-    // Literals and constants
+    Case,    // case
+    Enum,    // enum
+    Union,   // union
+    Let,     // let
+    Mut,     // mut
+    Set,     // set
+    In,      // in
+    If,      // if
+    Else,    // else
+    By,      // by
+    Fn,      // fn
+    While,   // while
+    For,     // for
+    Block,   // block
+    Type,    // type
+    Prefix,  // prefix
+    Use,     // use
+    Typedef, // typedef
+    // Values
+    Unit,       // void
     Lifetime(Vec<u8>),                      // 'lifetime
     Inf,                                    // inf
     Nan,                                    // nan
@@ -33,9 +35,21 @@ pub enum TokenKind {
     String { value: Vec<u8>, block: bool }, // "string"
     Int(BigInt),                            // 7
     Float(BigRational),                     // 0.7
-    LifetimeTy,                             // lifetime
-    Unit,                                   // void
-    NeverTy,                                // !
+    // Types
+    UnitTy,     // Void
+    NeverTy,    // !
+    ArrayTy,    // Array
+    SliceTy,    // Slice
+    IntTy,      // Int
+    UIntTy,     // UInt
+    FloatTy,    // Float
+    BoolTy,     // Bool
+    // Kinds
+    TypeKind, // TYPE
+    BoolKind, // BOOL
+    IntKind,  // INT
+    UIntKind, // UINT
+    FloatKind,// FLOAT
     // Math Operators
     Plus,  // +
     Minus, // -

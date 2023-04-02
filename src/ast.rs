@@ -34,12 +34,35 @@ pub struct ArgsExpr<T> {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
+pub enum KindExpr {
+    Error,
+    Type,
+    Int,
+    UInt,
+    Float,
+    Bool,
+    // this is the kind of a generic function
+    GenericFn {
+        args: Vec<Augmented<KindExpr>>,
+        returnkind: Box<Augmented<KindExpr>>,
+    }
+}
+
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub enum TypeExpr {
     // An error when parsing
     Error,
     Identifier(Vec<u8>),
+    // types
+    UnitTy,
+    ArrayTy,
+    SliceTy,
+    IntTy,
+    UIntTy,
+    FloatTy,
+    BoolTy,    
     // const literals
-    Unit,
     Int(BigInt),
     Bool(bool),
     Float(BigRational),
@@ -66,6 +89,16 @@ pub enum TypeExpr {
         args: Box<Augmented<ArgsExpr<TypeExpr>>>,
         returntype: Box<Augmented<TypeExpr>>,
     },
+}
+
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub enum TypePatExpr {
+    Error,
+    Identifier {
+        identifier: Vec<u8>,
+        kind: Option<Box<Augmented<KindExpr>>>,
+    }
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, AsRefStr)]
@@ -180,13 +213,18 @@ pub enum ValExpr {
     Array(Vec<Augmented<ValExpr>>),
     // A reference to a previously defined variable
     Identifier(Vec<u8>),
+    // Concretize
+    Concretize {
+        root: Box<Augmented<ValExpr>>,
+        tyargs: Box<Augmented<ArgsExpr<TypeExpr>>>,
+    },
     // Function application
     App {
         root: Box<Augmented<ValExpr>>,
         args: Box<Augmented<ArgsExpr<ValExpr>>>,
     },
     // index into an array
-    ArrayIndex {
+    ArrayAccess {
         root: Box<Augmented<ValExpr>>,
         index: Box<Augmented<ValExpr>>,
     },
@@ -225,6 +263,7 @@ pub enum BlockStatement {
     },
     FnDef {
         identifier: Vec<u8>,
+        tyargs: Option<Box<Augmented<ArgsExpr<TypePatExpr>>>>,
         args: Box<Augmented<ArgsExpr<PatExpr>>>,
         returntype: Box<Augmented<TypeExpr>>,
         body: Box<Augmented<BlockExpr>>,
@@ -259,6 +298,7 @@ pub enum FileStatement {
     },
     FnDef {
         identifier: Vec<u8>,
+        tyargs: Option<Box<Augmented<ArgsExpr<TypePatExpr>>>>,
         args: Box<Augmented<ArgsExpr<PatExpr>>>,
         returntype: Box<Augmented<TypeExpr>>,
         body: Box<Augmented<BlockExpr>>,

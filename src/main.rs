@@ -28,7 +28,7 @@ fn main() {
     // create and lower hir
     let hir = construct_hir(ast, log.get_logger(Some(String::from("acnc-hir (construct)"))));
     hir_desugar::desugar_hir(&mut hir, log.get_logger(Some(String::from("acnc-hir (desugar)"))));
-    let global_vtable = hir_resolvename::resolve_global_names(&mut hir, log.get_logger(Some(String::from("acnc-hir (resolve global names)"))));
+    let global_type_name_table = hir_resolvename::resolve_global_type_names(&mut hir, log.get_logger(Some(String::from("acnc-hir (resolve global type names)"))));
 
 
     // dbg!(thir);
