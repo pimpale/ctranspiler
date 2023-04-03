@@ -246,22 +246,16 @@ pub struct BlockExpr {
 pub enum BlockStatement {
     Error,
     TypeDef {
-        typepat: Box<Augmented<TypePatExpr>>,
+        tyargs: Option<Box<Augmented<ArgsExpr<TypePatExpr>>>>,
+        identifier: String,
         value: Box<Augmented<TypeExpr>>,
     },
     Use {
         prefix: String,
     },
     Let {
-        pattern: Box<Augmented<PatExpr>>,
+        pat: Box<Augmented<PatExpr>>,
         value: Box<Augmented<ValExpr>>,
-    },
-    FnDef {
-        identifier: String,
-        tyargs: Option<Box<Augmented<ArgsExpr<TypePatExpr>>>>,
-        args: Box<Augmented<ArgsExpr<PatExpr>>>,
-        returntype: Box<Augmented<TypeExpr>>,
-        body: Box<Augmented<BlockExpr>>,
     },
     Set {
         place: Box<Augmented<ValExpr>>,
@@ -284,19 +278,14 @@ pub enum BlockStatement {
 pub enum FileStatement {
     Error,
     TypeDef {
-        typepat: Box<Augmented<TypePatExpr>>,
+        tyargs: Option<Box<Augmented<ArgsExpr<TypePatExpr>>>>,
+        identifier: String,
         value: Box<Augmented<TypeExpr>>,
     },
     Let {
-        pattern: Box<Augmented<PatExpr>>,
-        value: Box<Augmented<ValExpr>>,
-    },
-    FnDef {
-        identifier: String,
         tyargs: Option<Box<Augmented<ArgsExpr<TypePatExpr>>>>,
-        args: Box<Augmented<ArgsExpr<PatExpr>>>,
-        returntype: Box<Augmented<TypeExpr>>,
-        body: Box<Augmented<BlockExpr>>,
+        pat: Box<Augmented<PatExpr>>,
+        value: Box<Augmented<ValExpr>>,
     },
     Prefix {
         prefix: String,

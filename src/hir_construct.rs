@@ -159,9 +159,9 @@ fn translate_typeexpr(t: ast::TypeExpr, dlogger: DiagnosticLogger) -> TypeExpr {
                 .collect(),
         ),
         ast::TypeExpr::Group(t) => translate_typeexpr(t.val, dlogger),
-        ast::TypeExpr::Generic { fun, args } => TypeExpr::Generic {
-            fun: Box::new(tr_aug(*fun, dlogger, translate_typeexpr)),
-            args: args
+        ast::TypeExpr::Generic { fun, args } => TypeExpr::Concretization {
+            generic: Box::new(tr_aug(*fun, dlogger, translate_typeexpr)),
+            tyargs: args
                 .val
                 .args
                 .into_iter()
@@ -313,9 +313,9 @@ fn translate_valexpr(v: ast::ValExpr, dlogger: DiagnosticLogger) -> ValExpr {
                 .collect(),
         ),
         ast::ValExpr::Identifier(i) => ValExpr::Identifier(i),
-        ast::ValExpr::Concretize { root, tyargs } => ValExpr::GenericFnConcretization {
-            fun: Box::new(tr_aug(*root, dlogger, translate_valexpr)),
-            args: tyargs
+        ast::ValExpr::Concretize { root, tyargs } => ValExpr::Concretization {
+            generic: Box::new(tr_aug(*root, dlogger, translate_valexpr)),
+            tyargs: tyargs
                 .val
                 .args
                 .into_iter()
@@ -359,23 +359,11 @@ fn translate_valexpr(v: ast::ValExpr, dlogger: DiagnosticLogger) -> ValExpr {
 fn translate_blockstatement(bs: ast::BlockStatement, dlogger: DiagnosticLogger) -> BlockStatement {
     match bs {
         ast::BlockStatement::Error => BlockStatement::Error,
-        ast::BlockStatement::TypeDef { typepat, value } => BlockStatement::TypeDef {
-            typepat: Box::new(translate_augtypepatexpr(*typepat, dlogger)),
-            value: Box::new(tr_aug(*value, dlogger, translate_typeexpr)),
-        },
-        ast::BlockStatement::Use { prefix } => BlockStatement::Use { prefix },
-        ast::BlockStatement::Let { pattern, value } => BlockStatement::Let {
-            pattern: Box::new(tr_aug(*pattern, dlogger, translate_patexpr)),
-            value: Box::new(tr_aug(*value, dlogger, translate_valexpr)),
-        },
-        ast::BlockStatement::FnDef {
-            identifier,
+        ast::BlockStatement::TypeDef {
             tyargs,
-            args,
-            returntype,
-            body,
-        } => BlockStatement::FnDef {
             identifier,
+            value,
+        } => BlockStatement::TypeDef {
             tyargs: match tyargs {
                 Some(tyargs) => tyargs
                     .val
@@ -385,14 +373,13 @@ fn translate_blockstatement(bs: ast::BlockStatement, dlogger: DiagnosticLogger) 
                     .collect(),
                 None => vec![],
             },
-            args: args
-                .val
-                .args
-                .into_iter()
-                .map(|x| tr_aug(x, dlogger, translate_patexpr))
-                .collect(),
-            returntype: Box::new(tr_aug(*returntype, dlogger, translate_typeexpr)),
-            body: Box::new(tr_aug(*body, dlogger, translate_blockexpr)),
+            identifier,
+            value: Box::new(tr_aug(*value, dlogger, translate_typeexpr)),
+        },
+        ast::BlockStatement::Use { prefix } => BlockStatement::Use { prefix },
+        ast::BlockStatement::Let { pat, value } => BlockStatement::Let {
+            pattern: Box::new(tr_aug(*pat, dlogger, translate_patexpr)),
+            value: Box::new(tr_aug(*value, dlogger, translate_valexpr)),
         },
         ast::BlockStatement::Set { place, value } => BlockStatement::Set {
             place: Box::new(tr_aug(*place, dlogger, translate_valexpr)),
@@ -435,22 +422,11 @@ fn translate_blockexpr(b: ast::BlockExpr, dlogger: DiagnosticLogger) -> BlockExp
 fn translate_filestatement(fs: ast::FileStatement, dlogger: DiagnosticLogger) -> FileStatement {
     match fs {
         ast::FileStatement::Error => FileStatement::Error,
-        ast::FileStatement::TypeDef { typepat, value } => FileStatement::TypeDef {
-            typepat: Box::new(translate_augtypepatexpr(*typepat, dlogger)),
-            value: Box::new(tr_aug(*value, dlogger, translate_typeexpr)),
-        },
-        ast::FileStatement::Let { pattern, value } => FileStatement::Let {
-            pattern: Box::new(tr_aug(*pattern, dlogger, translate_patexpr)),
-            value: Box::new(tr_aug(*value, dlogger, translate_valexpr)),
-        },
-        ast::FileStatement::FnDef {
-            identifier,
+        ast::FileStatement::TypeDef {
             tyargs,
-            args,
-            returntype,
-            body,
-        } => FileStatement::FnDef {
             identifier,
+            value,
+        } => FileStatement::TypeDef {
             tyargs: match tyargs {
                 Some(tyargs) => tyargs
                     .val
@@ -460,14 +436,21 @@ fn translate_filestatement(fs: ast::FileStatement, dlogger: DiagnosticLogger) ->
                     .collect(),
                 None => vec![],
             },
-            args: args
-                .val
-                .args
-                .into_iter()
-                .map(|x| tr_aug(x, dlogger, translate_patexpr))
-                .collect(),
-            returntype: Box::new(tr_aug(*returntype, dlogger, translate_typeexpr)),
-            body: Box::new(tr_aug(*body, dlogger, translate_blockexpr)),
+            identifier,
+            value: Box::new(tr_aug(*value, dlogger, translate_typeexpr)),
+        },
+        ast::FileStatement::Let { tyargs, pat, value } => FileStatement::Let {
+            tyargs: match tyargs {
+                Some(tyargs) => tyargs
+                    .val
+                    .args
+                    .into_iter()
+                    .map(|x| translate_augtypepatexpr(x, dlogger))
+                    .collect(),
+                None => vec![],
+            },
+            pattern: Box::new(tr_aug(*pat, dlogger, translate_patexpr)),
+            value: Box::new(tr_aug(*value, dlogger, translate_valexpr)),
         },
         ast::FileStatement::Prefix { prefix, items } => FileStatement::Prefix {
             prefix,

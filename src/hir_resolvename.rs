@@ -3,42 +3,48 @@ use std::collections::HashMap;
 use crate::ast::Augmented;
 use crate::dlogger::DiagnosticLogger;
 use crate::hir;
+use crate::types;
 use crate::hir::HirVisitor;
 
-struct ValTableEntry {
-    generic_variables: Vec<hir::KindExpr>,
-    declared_type: hir::TypeExpr,
+struct Scope {
+    val_table: HashMap<String, usize>,
+    type_table: HashMap<String, usize>,
 }
 
-struct TypeTableEntry {
-    declared_kind: hir::KindExpr,
-    declared_type: hir::TypeExpr,
+struct UnevaluatedTypeTableEntry {
+    tyargs: Vec<Augmented<hir::TypePatExpr>>,
+    value: Box<Augmented<hir::TypeExpr>>,
 }
 
-struct GlobalNameResolver {
-    dlogger: DiagnosticLogger,
-    val_table: Vec<ValTableEntry>,
-    type_table: Vec<TypeTableEntry>,
-    val_name_map: HashMap<String, usize>,
-    type_name_map: HashMap<String, usize>,
+struct GlobalTypeNameResolver<'d> {
+    dlogger: &'d mut DiagnosticLogger,
+    type_name_map: HashMap<String, UnevaluatedTypeTableEntry>,
     prefixes: Vec<String>,
 }
 
-impl HirVisitor for GlobalNameResolver {
+impl<'d> HirVisitor for GlobalTypeNameResolver<'d> {
     fn visit_file_statement(&mut self, statement: &mut Augmented<hir::FileStatement>) {
         match statement.val {
-            hir::FileStatement::FnDef { identifier, .. } => {
-                let identifier = [self.prefixes.concat(), identifier].concat();
-                self.val_name_map.insert(identifier, self.val_table.len());
-                self.val_table.push(ValTableEntry { declared_type: () });
+            hir::FileStatement::TypeDef {
+                ref identifier,
+                ref tyargs,
+                ref value,
+            } => {
+                let identifier = [self.prefixes.concat(), identifier.clone()].concat();
+                if self.type_name_map.contains_key(&identifier) {
+                    self.dlogger
+                        .log_duplicate_identifier(statement.range, &identifier);
+                } else {
+                    self.type_name_map.insert(identifier, UnevaluatedTypeTableEntry {
+                        tyargs: tyargs.clone(),
+                        value: value.clone(),
+                    });
+                }
             }
-            hir::FileStatement::Let { ref mut pattern, .. } => {
-                self.dfs_visit_pat_expr(pattern);
-            } 
-            hir::FileStatement::TypeDef { ref mut typepat, .. } => {
-                self.visit_type_pat_expr(typepat)
-            }
-            hir::FileStatement::Prefix { prefix, ref mut items } => {
+            hir::FileStatement::Prefix {
+                prefix,
+                ref mut items,
+            } => {
                 self.prefixes.push(prefix.clone());
                 for item in items.iter_mut() {
                     self.visit_file_statement(item);
@@ -48,15 +54,22 @@ impl HirVisitor for GlobalNameResolver {
             _ => {}
         }
     }
+}
 
-    fn visit_pat_expr(&mut self, expr: &mut Augmented<hir::PatExpr>) {
-        match expr.val {
-            hir::PatExpr::Ident { ref mut identifier, .. } => {
-                let identifier = [self.prefixes.concat(), identifier.clone()].concat();
-                self.val_name_table.push(NameTableEntry { identifier });
-            }
-            _ => {}
-        }
-    }
-    
+struct GlobalTypeEvaluator<'d> {
+    dlogger: &'d mut DiagnosticLogger,
+    type_table: Vec<UnevaluatedTypeTableEntry>,
+    type_name_map: HashMap<String, usize>,
+    prefixes: Vec<String>,
+}
+
+pub fn resolve_kinds(ast: &mut hir::TranslationUnit, dlogger: &mut DiagnosticLogger) {
+    // get the names and unevaluated type expressions of all the global types
+    let mut resolver = GlobalTypeNameResolver {
+        dlogger,
+        type_name_map: HashMap::new(),
+        prefixes: Vec::new(),
+    };
+    resolver.visit_translation_unit(ast);
+    let type_name_map = resolver.type_name_map;
 }

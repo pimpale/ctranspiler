@@ -33,7 +33,7 @@ pub enum KindExpr {
     Float,
     Bool,
     // this is the kind of a generic function
-    GenericFn {
+    TypeLevelFn {
         args: Vec<Augmented<KindExpr>>,
         returnkind: Box<Augmented<KindExpr>>,
     },
@@ -63,9 +63,9 @@ pub enum TypeExpr {
     Enum(Vec<Augmented<StructItemExpr<TypeExpr>>>),
     Union(Vec<Augmented<StructItemExpr<TypeExpr>>>),
     // generic
-    Generic {
-        fun: Box<Augmented<TypeExpr>>,
-        args: Vec<Augmented<TypeExpr>>,
+    Concretization {
+        generic: Box<Augmented<TypeExpr>>,
+        tyargs: Vec<Augmented<TypeExpr>>,
     },
     // type of a function
     Fn {
@@ -189,10 +189,10 @@ pub enum ValExpr {
         root: Box<Augmented<ValExpr>>,
         field: String,
     },
-    // Concretization of a generic function
-    GenericFnConcretization {
-        fun: Box<Augmented<ValExpr>>,
-        args: Vec<Augmented<TypeExpr>>,
+    // Concretization
+    Concretization {
+        generic: Box<Augmented<ValExpr>>,
+        tyargs: Vec<Augmented<TypeExpr>>,
     },
     // Function application
     App {
@@ -211,7 +211,8 @@ pub struct BlockExpr {
 pub enum BlockStatement {
     Error,
     TypeDef {
-        typepat: Box<Augmented<TypePatExpr>>,
+        tyargs: Vec<Augmented<TypePatExpr>>,
+        identifier: String,
         value: Box<Augmented<TypeExpr>>,
     },
     Use {
@@ -220,13 +221,6 @@ pub enum BlockStatement {
     Let {
         pattern: Box<Augmented<PatExpr>>,
         value: Box<Augmented<ValExpr>>,
-    },
-    FnDef {
-        identifier: String,
-        tyargs: Vec<Augmented<TypePatExpr>>,
-        args: Vec<Augmented<PatExpr>>,
-        returntype: Box<Augmented<TypeExpr>>,
-        body: Box<Augmented<BlockExpr>>,
     },
     Set {
         place: Box<Augmented<ValExpr>>,
@@ -251,19 +245,14 @@ pub enum BlockStatement {
 pub enum FileStatement {
     Error,
     TypeDef {
-        typepat: Box<Augmented<TypePatExpr>>,
+        tyargs: Vec<Augmented<TypePatExpr>>,
+        identifier: String,
         value: Box<Augmented<TypeExpr>>,
     },
     Let {
+        tyargs: Vec<Augmented<TypePatExpr>>,
         pattern: Box<Augmented<PatExpr>>,
         value: Box<Augmented<ValExpr>>,
-    },
-    FnDef {
-        identifier: String,
-        tyargs: Vec<Augmented<TypePatExpr>>,
-        args: Vec<Augmented<PatExpr>>,
-        returntype: Box<Augmented<TypeExpr>>,
-        body: Box<Augmented<BlockExpr>>,
     },
     Prefix {
         prefix: String,
@@ -291,29 +280,22 @@ pub trait HirVisitor {
     fn dfs_visit_file_statement(&mut self, statement: &mut Augmented<FileStatement>) {
         match statement.val {
             FileStatement::Error => {}
-            FileStatement::TypeDef { typepat, value } => {
-                self.visit_type_pat_expr(&mut typepat);
+            FileStatement::TypeDef { tyargs, value, .. } => {
+                for tyarg in tyargs {
+                    self.visit_type_pat_expr(&mut tyarg);
+                }
                 self.visit_type_expr(&mut value);
             }
-            FileStatement::Let { pattern, value } => {
-                self.visit_pat_expr(&mut pattern);
-                self.visit_val_expr(&mut value);
-            }
-            FileStatement::FnDef {
-                identifier,
+            FileStatement::Let {
                 tyargs,
-                args,
-                returntype,
-                body,
+                pattern,
+                value,
             } => {
                 for tyarg in tyargs {
                     self.visit_type_pat_expr(&mut tyarg);
                 }
-                for arg in args {
-                    self.visit_pat_expr(&mut arg);
-                }
-                self.visit_type_expr(&mut returntype);
-                self.visit_block_expr(&mut body);
+                self.visit_pat_expr(&mut pattern);
+                self.visit_val_expr(&mut value);
             }
             FileStatement::Prefix { prefix, items } => {
                 for item in items {
@@ -333,30 +315,16 @@ pub trait HirVisitor {
     fn dfs_visit_block_statement(&mut self, statement: &mut Augmented<BlockStatement>) {
         match statement.val {
             BlockStatement::Error => {}
-            BlockStatement::TypeDef { typepat, value } => {
-                self.visit_type_pat_expr(&mut typepat);
+            BlockStatement::TypeDef { tyargs, value, .. } => {
+                for tyarg in tyargs {
+                    self.visit_type_pat_expr(&mut tyarg);
+                }
                 self.visit_type_expr(&mut value);
             }
             BlockStatement::Use { prefix } => {}
             BlockStatement::Let { pattern, value } => {
                 self.visit_pat_expr(&mut pattern);
                 self.visit_val_expr(&mut value);
-            }
-            BlockStatement::FnDef {
-                identifier,
-                tyargs,
-                args,
-                returntype,
-                body,
-            } => {
-                for tyarg in tyargs {
-                    self.visit_type_pat_expr(&mut tyarg);
-                }
-                for arg in args {
-                    self.visit_pat_expr(&mut arg);
-                }
-                self.visit_type_expr(&mut returntype);
-                self.visit_block_expr(&mut body);
             }
             BlockStatement::Set { place, value } => {
                 self.visit_val_expr(&mut place);
@@ -407,7 +375,7 @@ pub trait HirVisitor {
             KindExpr::Bool => {}
             KindExpr::Int => {}
             KindExpr::Float => {}
-            KindExpr::GenericFn { args, returnkind } => {
+            KindExpr::TypeLevelFn { args, returnkind } => {
                 for arg in args {
                     self.visit_kind_expr(&mut arg);
                 }
@@ -456,10 +424,10 @@ pub trait HirVisitor {
                     self.visit_struct_item_expr(&mut item, Self::visit_type_expr);
                 }
             }
-            TypeExpr::Generic { fun, args } => {
-                self.visit_type_expr(&mut fun);
-                for arg in args {
-                    self.visit_type_expr(&mut arg);
+            TypeExpr::Concretization { generic, tyargs } => {
+                self.visit_type_expr(&mut generic);
+                for tyarg in tyargs {
+                    self.visit_type_expr(&mut tyarg);
                 }
             }
             TypeExpr::Fn { args, returntype } => {
@@ -586,10 +554,10 @@ pub trait HirVisitor {
             ValExpr::FieldAccess { root, field: _ } => {
                 self.visit_val_expr(&mut root);
             }
-            ValExpr::GenericFnConcretization { fun, args } => {
-                self.visit_val_expr(&mut fun);
-                for arg in args {
-                    self.visit_type_expr(&mut arg);
+            ValExpr::Concretization { generic, tyargs } => {
+                self.visit_val_expr(&mut generic);
+                for tyarg in tyargs {
+                    self.visit_type_expr(&mut tyarg);
                 }
             }
             ValExpr::App { fun, args } => {

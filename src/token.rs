@@ -26,7 +26,7 @@ pub enum TokenKind {
     Use,     // use
     Typedef, // typedef
     // Values
-    Unit,       // void
+    Unit,                                   // void
     Lifetime(Vec<u8>),                      // 'lifetime
     Inf,                                    // inf
     Nan,                                    // nan
@@ -35,20 +35,20 @@ pub enum TokenKind {
     Int(BigInt),                            // 7
     Float(BigRational),                     // 0.7
     // Types
-    UnitTy,     // Void
-    NeverTy,    // !
-    ArrayTy,    // Array
-    SliceTy,    // Slice
-    IntTy,      // Int
-    UIntTy,     // UInt
-    FloatTy,    // Float
-    BoolTy,     // Bool
+    UnitTy,  // Void
+    NeverTy, // !
+    ArrayTy, // Array
+    SliceTy, // Slice
+    IntTy,   // Int
+    UIntTy,  // UInt
+    FloatTy, // Float
+    BoolTy,  // Bool
     // Kinds
-    TypeKind, // TYPE
-    BoolKind, // BOOL
-    IntKind,  // INT
-    UIntKind, // UINT
-    FloatKind,// FLOAT
+    TypeKind,  // TYPE
+    BoolKind,  // BOOL
+    IntKind,   // INT
+    UIntKind,  // UINT
+    FloatKind, // FLOAT
     // Math Operators
     Plus,  // +
     Minus, // -
@@ -72,6 +72,7 @@ pub enum TokenKind {
     GreaterEqual, // >=
     // Assignment
     Assign, // =
+    FunctionDefine, // :=
     // Reference
     Ref,   // &
     Deref, // @

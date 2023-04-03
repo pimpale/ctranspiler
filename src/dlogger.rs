@@ -208,271 +208,32 @@ impl DiagnosticLogger {
         todo!();
     }
 
-    pub fn log_cannot_find_label_in_scope(&mut self, range: Range, label: &[u8]) {
+    pub fn log_duplicate_identifier(&mut self, range: Range, identifier: &str) {
         self.log(Diagnostic {
             range,
             severity: Some(DiagnosticSeverity::ERROR),
             code: Some(NumberOrString::Number(9)),
             code_description: None,
             source: self.source.clone(),
-            message: format!(
-                "cannot find label `{}` in scope",
-                String::from_utf8_lossy(label)
-            ),
+            message: format!("duplicate identifier {}", identifier),
             related_information: None,
             tags: None,
             data: None,
         })
     }
 
-    pub fn log_expected_case_option_expr(&mut self, range: Range, kind: &ast::ExprKind) {
+    pub fn log_pattern_must_be_annotated(&mut self, range: Range) {
         self.log(Diagnostic {
             range,
             severity: Some(DiagnosticSeverity::ERROR),
             code: Some(NumberOrString::Number(10)),
             code_description: None,
             source: self.source.clone(),
-            message: format!(
-                "expected CaseOption BinaryOp, but found unexpected {}",
-                kind.as_ref()
-            ),
+            message: format!("pattern must be annotated with a type",),
             related_information: None,
             tags: None,
             data: None,
         })
-    }
-
-    pub fn log_expected_case_option_binop(&mut self, range: Range, kind: &ast::BinaryOpKind) {
-        self.log(Diagnostic {
-            range,
-            severity: Some(DiagnosticSeverity::ERROR),
-            code: Some(NumberOrString::Number(11)),
-            code_description: None,
-            source: self.source.clone(),
-            message: format!(
-                "expected CaseOption, but found unexpected {}",
-                kind.as_ref()
-            ),
-            related_information: None,
-            tags: None,
-            data: None,
-        })
-    }
-
-    pub fn log_unexpected_in_refutable_pattern(&mut self, range: Range, kind: &ast::ExprKind) {
-        self.log(Diagnostic {
-      range,
-      severity: Some(DiagnosticSeverity::ERROR),
-      code: Some(NumberOrString::Number(12)),
-      code_description: None,
-      source: self.source.clone(),
-      message: format!(
-        "{} is invalid in a refutable pattern. If you wish to use the value yielded from this expression, consider using `val`",
-        kind.as_ref()
-      ),
-      related_information: None,
-      tags: None,
-      data: None,
-    })
-    }
-
-    pub fn log_unexpected_in_irrefutable_pattern(&mut self, range: Range, kind: &ast::ExprKind) {
-        self.log(Diagnostic {
-            range,
-            severity: Some(DiagnosticSeverity::ERROR),
-            code: Some(NumberOrString::Number(12)),
-            code_description: None,
-            source: self.source.clone(),
-            message: format!("{} is invalid in a irrefutable pattern.", kind.as_ref()),
-            related_information: None,
-            tags: None,
-            data: None,
-        })
-    }
-    pub fn log_unexpected_in_val_pattern(&mut self, range: Range, kind: &ast::ExprKind) {
-        self.log(Diagnostic {
-      range,
-      severity: Some(DiagnosticSeverity::ERROR),
-      code: Some(NumberOrString::Number(12)),
-      code_description: None,
-      source: self.source.clone(),
-      message: format!(
-        "{} is invalid in a val pattern. If you wish to use the value yielded from this expression, consider using `val`",
-        kind.as_ref()
-      ),
-      related_information: None,
-      tags: None,
-      data: None,
-    })
-    }
-
-    pub fn log_unexpected_binop_in_irrefutable_pattern(
-        &mut self,
-        range: Range,
-        kind: &ast::BinaryOpKind,
-    ) {
-        self.log(Diagnostic {
-      range,
-      severity: Some(DiagnosticSeverity::ERROR),
-      code: Some(NumberOrString::Number(14)),
-      code_description: None,
-      source: self.source.clone(),
-      message: format!(
-        "{} is an invalid binary operator in an irrefutable_pattern. If you wish to use the value yielded from this expression, consider using `val`",
-        kind.as_ref()
-      ),
-      related_information: None,
-      tags: None,
-      data: None,
-    })
-    }
-
-    pub fn log_unexpected_binop_in_refutable_pattern(
-        &mut self,
-        range: Range,
-        kind: &ast::BinaryOpKind,
-    ) {
-        self.log(Diagnostic {
-      range,
-      severity: Some(DiagnosticSeverity::ERROR),
-      code: Some(NumberOrString::Number(14)),
-      code_description: None,
-      source: self.source.clone(),
-      message: format!(
-        "{} is an invalid binary operator in a refutable pattern. If you wish to use the value yielded from this expression, consider using `val`",
-        kind.as_ref()
-      ),
-      related_information: None,
-      tags: None,
-      data: None,
-    })
-    }
-
-    pub fn log_unexpected_binop_in_val_pattern(&mut self, range: Range, kind: &ast::BinaryOpKind) {
-        self.log(Diagnostic {
-      range,
-      severity: Some(DiagnosticSeverity::ERROR),
-      code: Some(NumberOrString::Number(14)),
-      code_description: None,
-      source: self.source.clone(),
-      message: format!(
-        "{} is an invalid binary operator in a val pattern. If you wish to use the value yielded from this expression, consider using `val`",
-        kind.as_ref()
-      ),
-      related_information: None,
-      tags: None,
-      data: None,
-    })
-    }
-
-    pub fn log_unexpected_bind_target(&mut self, range: Range) {
-        self.log(Diagnostic {
-            range,
-            severity: Some(DiagnosticSeverity::ERROR),
-            code: Some(NumberOrString::Number(18)),
-            code_description: None,
-            source: self.source.clone(),
-            message: format!("`$` may only be used to prefix an identifier."),
-            related_information: None,
-            tags: None,
-            data: None,
-        })
-    }
-
-    pub fn log_only_in_pattern(&mut self, range: Range, kind: &ast::ExprKind) {
-        self.log(Diagnostic {
-            range,
-            severity: Some(DiagnosticSeverity::ERROR),
-            code: Some(NumberOrString::Number(20)),
-            code_description: None,
-            source: self.source.clone(),
-            message: format!("{} is invalid outside of a pattern.", kind.as_ref()),
-            related_information: None,
-            tags: None,
-            data: None,
-        })
-    }
-
-    pub fn log_expected_struct_literal_struct(&mut self, range: Range, kind: &ast::ExprKind) {
-        self.log(Diagnostic {
-            range,
-            severity: Some(DiagnosticSeverity::ERROR),
-            code: Some(NumberOrString::Number(20)),
-            code_description: None,
-            source: self.source.clone(),
-            message: format!(
-                "expected struct literal after `struct` keyword, but found {}",
-                kind.as_ref()
-            ),
-            related_information: None,
-            tags: None,
-            data: None,
-        })
-    }
-
-    pub fn log_expected_struct_literal_enum(&mut self, range: Range, kind: &ast::ExprKind) {
-        self.log(Diagnostic {
-            range,
-            severity: Some(DiagnosticSeverity::ERROR),
-            code: Some(NumberOrString::Number(20)),
-            code_description: None,
-            source: self.source.clone(),
-            message: format!(
-                "expected struct literal after `enum` keyword, but found {}",
-                kind.as_ref()
-            ),
-            related_information: None,
-            tags: None,
-            data: None,
-        })
-    }
-
-    pub fn log_unexpected_binop_in_expr(&mut self, range: Range, kind: &ast::BinaryOpKind) {
-        self.log(Diagnostic {
-      range,
-      severity: Some(DiagnosticSeverity::ERROR),
-      code: Some(NumberOrString::Number(21)),
-      code_description: None,
-      source: self.source.clone(),
-      message: format!(
-        "{} is invalid outside of a pattern. If you wish to use this pattern as a function, consider using `pat`",
-        kind.as_ref()
-      ),
-      related_information: None,
-      tags: None,
-      data: None,
-    })
-    }
-
-    pub fn log_only_in_case(&mut self, range: Range) {
-        self.log(Diagnostic {
-            range,
-            severity: Some(DiagnosticSeverity::ERROR),
-            code: Some(NumberOrString::Number(24)),
-            code_description: None,
-            source: self.source.clone(),
-            message: String::from("the CaseOption operator may only be used in a case context"),
-            related_information: None,
-            tags: None,
-            data: None,
-        })
-    }
-
-    pub fn log_field_not_valid(&mut self, range: Range, kind: &ast::ExprKind) {
-        self.log(Diagnostic {
-      range,
-      severity: Some(DiagnosticSeverity::ERROR),
-      code: Some(NumberOrString::Number(25)),
-      code_description: None,
-      source: self.source.clone(),
-      message: format!(
-        "expected identifier, Ref, UniqRef, or Deref after module access operator, but found unexpected {}",
-        kind.as_ref()
-      ),
-      related_information: None,
-      tags: None,
-      data: None,
-    })
     }
 
     pub fn log_unexpected_infer_arg(&mut self, range: Range) {
@@ -567,112 +328,98 @@ impl DiagnosticLogger {
         })
     }
 
-    pub fn log_duplicate_field_name(&mut self, range: Range, name: &[u8], previous_range: Range) {
+    pub fn log_wrong_number_type_args(
+        &mut self,
+        concretization_range: Range,
+        fn_args: usize,
+        provided_args: usize,
+    ) {
         self.log(Diagnostic {
-            range,
+            range: concretization_range,
             severity: Some(DiagnosticSeverity::ERROR),
             code: Some(NumberOrString::Number(31)),
             code_description: None,
             source: self.source.clone(),
-            message: format!("duplicate field `{}`", String::from_utf8_lossy(name)),
-            related_information: Some(vec![DiagnosticRelatedInformation {
-                location: Location::new(Url::parse("/").unwrap(), previous_range),
-                message: format!("previous field `{}`", String::from_utf8_lossy(name)),
-            }]),
-            tags: None,
-            data: None,
-        })
-    }
-
-    pub fn log_unexpected_element_in_struct(&mut self, range: Range, kind: &ast::ExprKind) {
-        self.log(Diagnostic {
-      range,
-      severity: Some(DiagnosticSeverity::ERROR),
-      code: Some(NumberOrString::Number(32)),
-      code_description: None,
-      source: self.source.clone(),
-      message: format!(
-        "{} is not permitted in a struct literal. The body of the struct must contain only assigns seperated by semicolons.",
-        kind.as_ref()
-      ),
-      related_information: None,
-      tags: None,
-      data: None,
-    })
-    }
-
-    pub fn log_unexpected_binop_in_struct(&mut self, range: Range, kind: &ast::BinaryOpKind) {
-        self.log(Diagnostic {
-      range,
-      severity: Some(DiagnosticSeverity::ERROR),
-      code: Some(NumberOrString::Number(33)),
-      code_description: None,
-      source: self.source.clone(),
-      message: format!(
-        "{} is not permitted in a struct literal. The body of the struct must contain only assigns seperated by semicolons.",
-        kind.as_ref()
-      ),
-      related_information: None,
-      tags: None,
-      data: None,
-    })
-    }
-
-    pub fn log_unsupported_target_in_struct_assign(&mut self, range: Range, kind: &ast::ExprKind) {
-        self.log(Diagnostic {
-      range,
-      severity: Some(DiagnosticSeverity::ERROR),
-      code: Some(NumberOrString::Number(34)),
-      code_description: None,
-      source: self.source.clone(),
-      message: format!(
-        "{} is an invalid target in for an assign in a struct literal. The left hand side must be a single variable binding.",
-        kind.as_ref()
-      ),
-      related_information: None,
-      tags: None,
-      data: None,
-    })
-    }
-
-    pub fn log_nonexistent_field(&mut self, range: Range, field: &[u8]) {
-        self.log(Diagnostic {
-            range,
-            severity: Some(DiagnosticSeverity::ERROR),
-            code: Some(NumberOrString::Number(35)),
-            code_description: None,
-            source: self.source.clone(),
-            message: format!("nonexistent field `{}`", String::from_utf8_lossy(field)),
-            related_information: None,
-            tags: None,
-            data: None,
-        })
-    }
-
-    pub fn log_variable_not_found(&mut self, range: Range, identifier: &[u8]) {
-        self.log(Diagnostic {
-            range,
-            severity: Some(DiagnosticSeverity::ERROR),
-            code: Some(NumberOrString::Number(37)),
-            code_description: None,
-            source: self.source.clone(),
             message: format!(
-                "no variable `{}` found in this scope",
-                String::from_utf8_lossy(identifier)
+                "expected {} type arguments, but found {}",
+                fn_args, provided_args
             ),
             related_information: None,
             tags: None,
             data: None,
         })
     }
-    pub fn log_invalid_place_expression(&mut self, range: Range, kind: &ast::ExprKind) {
+
+    pub fn log_not_a_type_level_fn(&mut self, range: Range) {
         self.log(Diagnostic {
             range,
             severity: Some(DiagnosticSeverity::ERROR),
-            code: Some(NumberOrString::Number(38)),
+            code: Some(NumberOrString::Number(32)),
             code_description: None,
             source: self.source.clone(),
-            message: format!("{} is an invalid place expression.", kind.as_ref()),
+            message: "cannot be concretized, is not a type level function".to_owned(),
+            related_information: None,
+            tags: None,
+            data: None,
+        })
+    }
+
+    pub fn log_duplicate_field_name(&mut self, range: Range, name: String, previous_range: Range) {
+        self.log(Diagnostic {
+            range,
+            severity: Some(DiagnosticSeverity::ERROR),
+            code: Some(NumberOrString::Number(33)),
+            code_description: None,
+            source: self.source.clone(),
+            message: format!("duplicate field `{}`", name),
+            related_information: Some(vec![DiagnosticRelatedInformation {
+                location: Location::new(Url::parse("/").unwrap(), previous_range),
+                message: format!("previous field `{}`", name),
+            }]),
+            tags: None,
+            data: None,
+        })
+    }
+
+    pub fn log_kind_mismatch(&mut self, range: Range, expected_kind: &str, got_kind: &str) {
+        self.log(Diagnostic {
+            range,
+            severity: Some(DiagnosticSeverity::ERROR),
+            code: Some(NumberOrString::Number(34)),
+            code_description: None,
+            source: self.source.clone(),
+            message: format!(
+                "expected kind {}, but found kind {}",
+                expected_kind, got_kind
+            ),
+            related_information: None,
+            tags: None,
+            data: None,
+        })
+    }
+
+    pub fn log_nonexistent_field(&mut self, range: Range, field: &str) {
+        self.log(Diagnostic {
+            range,
+            severity: Some(DiagnosticSeverity::ERROR),
+            code: Some(NumberOrString::Number(35)),
+            code_description: None,
+            source: self.source.clone(),
+            message: format!("nonexistent field `{}`", field),
+            related_information: None,
+            tags: None,
+            data: None,
+        })
+    }
+
+    pub fn log_variable_not_found(&mut self, range: Range, identifier: &str) {
+        self.log(Diagnostic {
+            range,
+            severity: Some(DiagnosticSeverity::ERROR),
+            code: Some(NumberOrString::Number(37)),
+            code_description: None,
+            source: self.source.clone(),
+            message: format!("no variable `{}` found in this scope", identifier),
             related_information: None,
             tags: None,
             data: None,
