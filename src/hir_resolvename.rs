@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::collections::HashSet;
 
 use crate::ast::Augmented;
 use crate::dlogger::DiagnosticLogger;
@@ -6,25 +7,33 @@ use crate::hir;
 use crate::types;
 use crate::hir::HirVisitor;
 
-struct Scope {
-    val_table: HashMap<String, usize>,
-    type_table: HashMap<String, usize>,
-}
-
-struct UnevaluatedTypeTableEntry {
-    tyargs: Vec<Augmented<hir::TypePatExpr>>,
-    value: Box<Augmented<hir::TypeExpr>>,
-}
-
-struct GlobalTypeNameResolver<'d> {
+struct GlobalNameCollector<'d> {
     dlogger: &'d mut DiagnosticLogger,
-    type_name_map: HashMap<String, UnevaluatedTypeTableEntry>,
+    type_names: HashSet<String>,
+    val_names: HashSet<String>,
     prefixes: Vec<String>,
 }
 
-impl<'d> HirVisitor for GlobalTypeNameResolver<'d> {
+// visits the AST and collects all the names of global types and values (all these values will be in scope when we start evaluating functions)
+impl<'d> HirVisitor for GlobalNameCollector<'d> {
     fn visit_file_statement(&mut self, statement: &mut Augmented<hir::FileStatement>) {
         match statement.val {
+            hir::FileStatement::Let {
+                ref identifier,
+                ref tyargs,
+                ref value,
+            } => {
+                let identifier = [self.prefixes.concat(), identifier.clone()].concat();
+                if self.type_name_map.contains_key(&identifier) {
+                    self.dlogger
+                        .log_duplicate_identifier(statement.range, &identifier);
+                } else {
+                    self.type_name_map.insert(identifier, UnevaluatedTypeTableEntry {
+                        tyargs: tyargs.clone(),
+                        value: value.clone(),
+                    });
+                }
+            }
             hir::FileStatement::TypeDef {
                 ref identifier,
                 ref tyargs,

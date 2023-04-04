@@ -38,7 +38,6 @@ pub enum KindExpr {
     Error,
     Type,
     Int,
-    UInt,
     Float,
     Bool,
     // this is the kind of a generic function
