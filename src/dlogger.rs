@@ -350,14 +350,14 @@ impl DiagnosticLogger {
         })
     }
 
-    pub fn log_not_a_type_level_fn(&mut self, range: Range) {
+    pub fn log_cannot_be_concretized(&mut self, range: Range) {
         self.log(Diagnostic {
             range,
             severity: Some(DiagnosticSeverity::ERROR),
             code: Some(NumberOrString::Number(32)),
             code_description: None,
             source: self.source.clone(),
-            message: "cannot be concretized, is not a type level function".to_owned(),
+            message: "cannot be concretized, is not a generic".to_owned(),
             related_information: None,
             tags: None,
             data: None,
@@ -412,14 +412,14 @@ impl DiagnosticLogger {
         })
     }
 
-    pub fn log_variable_not_found(&mut self, range: Range, identifier: &str) {
+    pub fn log_unknown_identifier(&mut self, range: Range, identifier: &str) {
         self.log(Diagnostic {
             range,
             severity: Some(DiagnosticSeverity::ERROR),
             code: Some(NumberOrString::Number(37)),
             code_description: None,
             source: self.source.clone(),
-            message: format!("no variable `{}` found in this scope", identifier),
+            message: format!("unknown identifier `{}`", identifier),
             related_information: None,
             tags: None,
             data: None,

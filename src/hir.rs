@@ -16,20 +16,10 @@ pub enum HirPhase {
 }
 
 #[derive(Clone, Debug)]
-pub enum StructItemExpr<T> {
-    Error,
-    Identified {
-        identifier: String,
-        expr: Box<Augmented<T>>,
-    },
-}
-
-#[derive(Clone, Debug)]
 pub enum KindExpr {
     Error,
     Type,
     Int,
-    UInt,
     Float,
     Bool,
     // this is the kind of a generic function
@@ -46,31 +36,30 @@ pub enum TypeExpr {
     Identifier(String),
     // types
     UnitTy,
-    ArrayTy,
-    SliceTy,
-    IntTy,
-    UIntTy,
-    FloatTy,
     BoolTy,
+    RefConstructorTy,
+    ArrayConstructorTy,
+    SliceConstructorTy,
+    IntConstructorTy,
+    UIntConstructorTy,
+    FloatConstructorTy,
     // const literals
     Int(BigInt),
     Bool(bool),
     Float(BigRational),
-    // unary ops (syntax sugar)
-    Ref(Box<Augmented<TypeExpr>>),
-    // struct and enumify
-    Struct(Vec<Augmented<StructItemExpr<TypeExpr>>>),
-    Enum(Vec<Augmented<StructItemExpr<TypeExpr>>>),
-    Union(Vec<Augmented<StructItemExpr<TypeExpr>>>),
-    // generic
-    Concretization {
-        generic: Box<Augmented<TypeExpr>>,
-        tyargs: Vec<Augmented<TypeExpr>>,
-    },
     // type of a function
     Fn {
         args: Vec<Augmented<TypeExpr>>,
         returntype: Box<Augmented<TypeExpr>>,
+    },
+    // struct and enumify
+    Struct(Vec<(String, Augmented<TypeExpr>)>),
+    Enum(Vec<(String, Augmented<TypeExpr>)>),
+    Union(Vec<(String, Augmented<TypeExpr>)>),
+    // generic
+    Concretization {
+        generic: Box<Augmented<TypeExpr>>,
+        tyargs: Vec<Augmented<TypeExpr>>,
     },
 }
 
@@ -119,7 +108,7 @@ pub enum PatExpr {
         mutable: bool,
         identifier: String,
     },
-    StructLiteral(Vec<Augmented<StructItemExpr<PatExpr>>>),
+    StructLiteral(Vec<(String, Augmented<PatExpr>)>),
     Typed {
         pat: Box<Augmented<PatExpr>>,
         ty: Box<Augmented<TypeExpr>>,
@@ -150,7 +139,7 @@ pub enum ValExpr {
     Ref(Box<Augmented<ValExpr>>),
     Deref(Box<Augmented<ValExpr>>),
     // Constructs a new compound type
-    StructLiteral(Vec<Augmented<StructItemExpr<ValExpr>>>),
+    StructLiteral(Vec<(String, Augmented<ValExpr>)>),
     // Binary operation
     BinaryOp {
         op: ValBinaryOpKind,
@@ -356,19 +345,6 @@ pub trait HirVisitor {
         }
     }
 
-    fn visit_struct_item_expr<T>(
-        &mut self,
-        expr: &mut Augmented<StructItemExpr<T>>,
-        lower: impl Fn(&mut Self, &mut Augmented<T>),
-    ) {
-        match expr.val {
-            StructItemExpr::Error => {}
-            StructItemExpr::Identified { identifier, expr } => {
-                lower(self, &mut expr);
-            }
-        }
-    }
-
     fn dfs_visit_kind_expr(&mut self, expr: &mut Augmented<KindExpr>) {
         match expr.val {
             KindExpr::Error => {}
@@ -399,29 +375,26 @@ pub trait HirVisitor {
             TypeExpr::Identifier(_) => {}
             TypeExpr::UnitTy => {}
             TypeExpr::BoolTy => {}
-            TypeExpr::IntTy => {}
-            TypeExpr::FloatTy => {}
-            TypeExpr::ArrayTy => {}
-            TypeExpr::SliceTy => {}
+            TypeExpr::IntConstructorTy => {}
+            TypeExpr::FloatConstructorTy => {}
+            TypeExpr::ArrayConstructorTy => {}
+            TypeExpr::SliceConstructorTy => {}
             TypeExpr::Int(_) => {}
             TypeExpr::Bool(_) => {}
             TypeExpr::Float(_) => {}
-            TypeExpr::Ref(element) => {
-                self.visit_type_expr(&mut element);
-            }
             TypeExpr::Struct(items) => {
-                for item in items {
-                    self.visit_struct_item_expr(&mut item, Self::visit_type_expr);
+                for (_, item) in items {
+                    self.visit_type_expr(&mut item);
                 }
             }
             TypeExpr::Enum(items) => {
-                for item in items {
-                    self.visit_struct_item_expr(&mut item, Self::visit_type_expr);
+                for (_, item) in items {
+                    self.visit_type_expr(&mut item);
                 }
             }
             TypeExpr::Union(items) => {
-                for item in items {
-                    self.visit_struct_item_expr(&mut item, Self::visit_type_expr);
+                for (_, item) in items {
+                    self.visit_type_expr(&mut item);
                 }
             }
             TypeExpr::Concretization { generic, tyargs } => {
@@ -448,8 +421,8 @@ pub trait HirVisitor {
                 identifier,
             } => {}
             PatExpr::StructLiteral(items) => {
-                for item in items {
-                    self.visit_struct_item_expr(&mut item, Self::visit_pat_expr);
+                for (_, item) in items {
+                    self.visit_pat_expr(&mut item);
                 }
             }
             PatExpr::Typed { pat, ty } => {
@@ -498,8 +471,8 @@ pub trait HirVisitor {
                 self.visit_val_expr(&mut expr);
             }
             ValExpr::StructLiteral(items) => {
-                for item in items {
-                    self.visit_struct_item_expr(&mut item, Self::visit_val_expr);
+                for (_, item) in items {
+                    self.visit_val_expr(&mut item);
                 }
             }
             ValExpr::BinaryOp {
