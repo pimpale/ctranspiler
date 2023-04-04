@@ -208,6 +208,7 @@ pub enum BlockStatement {
         prefix: String,
     },
     Let {
+        tyargs: Vec<Augmented<TypePatExpr>>,
         pattern: Box<Augmented<PatExpr>>,
         value: Box<Augmented<ValExpr>>,
     },
@@ -311,7 +312,14 @@ pub trait HirVisitor {
                 self.visit_type_expr(&mut value);
             }
             BlockStatement::Use { prefix } => {}
-            BlockStatement::Let { pattern, value } => {
+            BlockStatement::Let {
+                tyargs,
+                pattern,
+                value,
+            } => {
+                for tyarg in tyargs {
+                    self.visit_type_pat_expr(&mut tyarg);
+                }
                 self.visit_pat_expr(&mut pattern);
                 self.visit_val_expr(&mut value);
             }
