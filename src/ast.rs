@@ -80,8 +80,8 @@ pub enum TypeExpr {
     },
     // type of a function
     Fn {
-        args: Box<Augmented<ArgsExpr<TypeExpr>>>,
-        returntype: Box<Augmented<TypeExpr>>,
+        paramtys: Box<Augmented<ArgsExpr<TypeExpr>>>,
+        tyreturn: Box<Augmented<TypeExpr>>,
     },
 }
 
@@ -120,11 +120,10 @@ pub enum ValBinaryOpKind {
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub enum CaseTargetExpr {
     Error,
-    Ignore,
     Unit,
     Bool(bool),
     Int(BigInt),
-    Identifier(String),
+    PatExpr(Box<Augmented<PatExpr>>),
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -229,9 +228,9 @@ pub enum ValExpr {
     },
     // Lambda function
     FnDef {
-        args: Box<Augmented<ArgsExpr<PatExpr>>>,
-        returntype: Box<Augmented<TypeExpr>>,
-        body: Box<Augmented<ValExpr>>,
+        params: Box<Augmented<ArgsExpr<PatExpr>>>,
+        returnty: Box<Augmented<TypeExpr>>,
+        body: Box<Augmented<BlockExpr>>,
     },
 }
 
@@ -245,14 +244,15 @@ pub struct BlockExpr {
 pub enum BlockStatement {
     Error,
     TypeDef {
-        tyargs: Option<Box<Augmented<ArgsExpr<TypePatExpr>>>>,
-        identifier: String,
+        typarams: Option<Box<Augmented<ArgsExpr<TypePatExpr>>>>,
+        typat: Box<Augmented<TypePatExpr>>,
         value: Box<Augmented<TypeExpr>>,
     },
     Use {
         prefix: String,
     },
     Let {
+        typarams: Option<Box<Augmented<ArgsExpr<TypePatExpr>>>>,
         pat: Box<Augmented<PatExpr>>,
         value: Box<Augmented<ValExpr>>,
     },
@@ -278,7 +278,7 @@ pub enum FileStatement {
     Error,
     TypeDef {
         tyargs: Option<Box<Augmented<ArgsExpr<TypePatExpr>>>>,
-        identifier: String,
+        typat: Box<Augmented<TypePatExpr>>,
         value: Box<Augmented<TypeExpr>>,
     },
     Let {

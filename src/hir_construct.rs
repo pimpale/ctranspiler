@@ -1,3 +1,5 @@
+use indexmap::IndexMap;
+
 use crate::ast;
 use crate::ast::Augmented;
 use crate::dlogger::DiagnosticLogger;
@@ -5,8 +7,8 @@ use crate::hir::{self, *};
 
 fn tr_aug<T, U>(
     x: Augmented<T>,
-    dlogger: DiagnosticLogger,
-    f: impl Fn(T, DiagnosticLogger) -> U,
+    dlogger: &mut DiagnosticLogger,
+    f: impl Fn(T, &mut DiagnosticLogger) -> U,
 ) -> Augmented<U> {
     Augmented {
         range: x.range,
@@ -16,12 +18,12 @@ fn tr_aug<T, U>(
 }
 
 fn translate_augstructitemexpr<T, U>(
-    lower: fn(Augmented<T>, DiagnosticLogger) -> Augmented<U>,
-    replace_eponymous: impl Fn(String, DiagnosticLogger) -> U,
-    dlogger: DiagnosticLogger,
+    lower: fn(Augmented<T>, &mut DiagnosticLogger) -> Augmented<U>,
+    replace_eponymous: impl Fn(String, &mut DiagnosticLogger) -> U,
+    dlogger: &mut DiagnosticLogger,
     items: Vec<Augmented<ast::StructItemExpr<T>>>,
-) -> Vec<(String, Augmented<U>)> {
-    let mut out = vec![];
+) -> IndexMap<String, Augmented<U>> {
+    let mut out_items: IndexMap<String, Augmented<U>> = IndexMap::new();
     for Augmented {
         range,
         metadata,
@@ -31,24 +33,32 @@ fn translate_augstructitemexpr<T, U>(
         match val {
             ast::StructItemExpr::Error => {}
             ast::StructItemExpr::Eponymous(identifier) => {
-                out.push((
-                    identifier,
-                    Augmented {
-                        metadata,
-                        range,
-                        val: replace_eponymous(identifier, dlogger),
-                    },
-                ));
+                if let Some(preexisting) = out_items.get(&identifier) {
+                    dlogger.log_duplicate_field_name(range, preexisting.range, &identifier);
+                } else {
+                    out_items.insert(
+                        identifier.clone(),
+                        Augmented {
+                            metadata,
+                            range,
+                            val: replace_eponymous(identifier, dlogger),
+                        },
+                    );
+                }
             }
             ast::StructItemExpr::Identified { identifier, expr } => {
-                out.push((identifier, lower(*expr, dlogger)));
+                if let Some(preexisting) = out_items.get(&identifier) {
+                    dlogger.log_duplicate_field_name(range, preexisting.range, &identifier);
+                } else {
+                    out_items.insert(identifier, lower(*expr, dlogger));
+                }
             }
         }
     }
-    out
+    out_items
 }
 
-fn translate_kindexpr(k: ast::KindExpr, dlogger: DiagnosticLogger) -> KindExpr {
+fn translate_kindexpr(k: ast::KindExpr, dlogger: &mut DiagnosticLogger) -> KindExpr {
     match k {
         ast::KindExpr::Error => hir::KindExpr::Error,
         ast::KindExpr::Type => hir::KindExpr::Type,
@@ -71,7 +81,7 @@ fn translate_augtypepatexpr(
         metadata,
         val,
     }: Augmented<ast::TypePatExpr>,
-    dlogger: DiagnosticLogger,
+    dlogger: &mut DiagnosticLogger,
 ) -> Augmented<TypePatExpr> {
     match val {
         ast::TypePatExpr::Error => Augmented {
@@ -103,7 +113,7 @@ fn translate_augtypeexpr(
         metadata,
         val,
     }: Augmented<ast::TypeExpr>,
-    dlogger: DiagnosticLogger,
+    dlogger: &mut DiagnosticLogger,
 ) -> Augmented<TypeExpr> {
     match val {
         ast::TypeExpr::Error => Augmented {
@@ -170,7 +180,7 @@ fn translate_augtypeexpr(
             range,
             metadata,
             val: TypeExpr::Concretization {
-                generic: Box::new(Augmented {
+                genericty: Box::new(Augmented {
                     range,
                     metadata: vec![],
                     val: TypeExpr::RefConstructorTy,
@@ -213,7 +223,7 @@ fn translate_augtypeexpr(
             range,
             metadata,
             val: TypeExpr::Concretization {
-                generic: Box::new(translate_augtypeexpr(*fun, dlogger)),
+                genericty: Box::new(translate_augtypeexpr(*fun, dlogger)),
                 tyargs: args
                     .val
                     .args
@@ -222,23 +232,23 @@ fn translate_augtypeexpr(
                     .collect(),
             },
         },
-        ast::TypeExpr::Fn { args, returntype } => Augmented {
+        ast::TypeExpr::Fn { paramtys, tyreturn } => Augmented {
             range,
             metadata,
             val: TypeExpr::Fn {
-                args: args
+                paramtys: paramtys
                     .val
                     .args
                     .into_iter()
                     .map(|x| translate_augtypeexpr(x, dlogger))
                     .collect(),
-                returntype: Box::new(translate_augtypeexpr(*returntype, dlogger)),
+                tyreturn: Box::new(translate_augtypeexpr(*tyreturn, dlogger)),
             },
         },
     }
 }
 
-fn translate_patexpr(p: ast::PatExpr, dlogger: DiagnosticLogger) -> PatExpr {
+fn translate_patexpr(p: ast::PatExpr, dlogger: &mut DiagnosticLogger) -> PatExpr {
     match p {
         ast::PatExpr::Error => hir::PatExpr::Error,
         ast::PatExpr::Ignore => PatExpr::Ignore,
@@ -265,14 +275,29 @@ fn translate_patexpr(p: ast::PatExpr, dlogger: DiagnosticLogger) -> PatExpr {
     }
 }
 
-fn translate_caseexpr(c: ast::CaseExpr, dlogger: DiagnosticLogger) -> CaseExpr {
+fn translate_casetargetexpr(
+    c: ast::CaseTargetExpr,
+    dlogger: &mut DiagnosticLogger,
+) -> CaseTargetExpr {
+    match c {
+        ast::CaseTargetExpr::Error => CaseTargetExpr::Error,
+        ast::CaseTargetExpr::Unit => CaseTargetExpr::Unit,
+        ast::CaseTargetExpr::Bool(b) => CaseTargetExpr::Bool(b),
+        ast::CaseTargetExpr::Int(i) => CaseTargetExpr::Int(i),
+        ast::CaseTargetExpr::PatExpr(pat) => {
+            CaseTargetExpr::PatExpr(Box::new(tr_aug(*pat, dlogger, translate_patexpr)))
+        }
+    }
+}
+
+fn translate_caseexpr(c: ast::CaseExpr, dlogger: &mut DiagnosticLogger) -> CaseExpr {
     CaseExpr {
-        target: c.target,
+        target: Box::new(tr_aug(*c.target, dlogger, translate_casetargetexpr)),
         body: Box::new(tr_aug(*c.body, dlogger, translate_valexpr)),
     }
 }
 
-fn translate_elseexpr(e: ast::ElseExpr, dlogger: DiagnosticLogger) -> ElseExpr {
+fn translate_elseexpr(e: ast::ElseExpr, dlogger: &mut DiagnosticLogger) -> ElseExpr {
     match e {
         ast::ElseExpr::Error => ElseExpr::Error,
         ast::ElseExpr::Else(body) => {
@@ -290,7 +315,7 @@ fn translate_elseexpr(e: ast::ElseExpr, dlogger: DiagnosticLogger) -> ElseExpr {
     }
 }
 
-fn translate_valexpr(v: ast::ValExpr, dlogger: DiagnosticLogger) -> ValExpr {
+fn translate_valexpr(v: ast::ValExpr, dlogger: &mut DiagnosticLogger) -> ValExpr {
     match v {
         ast::ValExpr::Error => ValExpr::Error,
         ast::ValExpr::Unit => ValExpr::Unit,
@@ -384,32 +409,35 @@ fn translate_valexpr(v: ast::ValExpr, dlogger: DiagnosticLogger) -> ValExpr {
             field,
         },
         ast::ValExpr::FnDef {
-            args,
-            returntype,
+            params,
+            returnty,
             body,
         } => ValExpr::FnLiteral {
-            args: args
+            params: params
                 .val
                 .args
                 .into_iter()
                 .map(|x| tr_aug(x, dlogger, translate_patexpr))
                 .collect(),
-            returntype: Box::new(translate_augtypeexpr(*returntype, dlogger)),
-            body: Box::new(tr_aug(*body, dlogger, translate_valexpr)),
+            returnty: Box::new(translate_augtypeexpr(*returnty, dlogger)),
+            body: Box::new(tr_aug(*body, dlogger, translate_blockexpr)),
         },
     }
 }
 
-fn translate_blockstatement(bs: ast::BlockStatement, dlogger: DiagnosticLogger) -> BlockStatement {
+fn translate_blockstatement(
+    bs: ast::BlockStatement,
+    dlogger: &mut DiagnosticLogger,
+) -> BlockStatement {
     match bs {
-        ast::BlockStatement::Error => BlockStatement::Error,
+        ast::BlockStatement::Error => BlockStatement::NoOp,
         ast::BlockStatement::TypeDef {
-            tyargs,
-            identifier,
+            typarams,
+            typat,
             value,
         } => BlockStatement::TypeDef {
-            tyargs: match tyargs {
-                Some(tyargs) => tyargs
+            typarams: match typarams {
+                Some(typarams) => typarams
                     .val
                     .args
                     .into_iter()
@@ -417,12 +445,25 @@ fn translate_blockstatement(bs: ast::BlockStatement, dlogger: DiagnosticLogger) 
                     .collect(),
                 None => vec![],
             },
-            identifier,
+            typat: Box::new(translate_augtypepatexpr(*typat, dlogger)),
             value: Box::new(translate_augtypeexpr(*value, dlogger)),
         },
         ast::BlockStatement::Use { prefix } => BlockStatement::Use { prefix },
-        ast::BlockStatement::Let { pat, value } => BlockStatement::Let {
-            pattern: Box::new(tr_aug(*pat, dlogger, translate_patexpr)),
+        ast::BlockStatement::Let {
+            typarams,
+            pat,
+            value,
+        } => BlockStatement::Let {
+            typarams: match typarams {
+                Some(typarams) => typarams
+                    .val
+                    .args
+                    .into_iter()
+                    .map(|x| translate_augtypepatexpr(x, dlogger))
+                    .collect(),
+                None => vec![],
+            },
+            pat: Box::new(tr_aug(*pat, dlogger, translate_patexpr)),
             value: Box::new(tr_aug(*value, dlogger, translate_valexpr)),
         },
         ast::BlockStatement::Set { place, value } => BlockStatement::Set {
@@ -452,7 +493,7 @@ fn translate_blockstatement(bs: ast::BlockStatement, dlogger: DiagnosticLogger) 
     }
 }
 
-fn translate_blockexpr(b: ast::BlockExpr, dlogger: DiagnosticLogger) -> BlockExpr {
+fn translate_blockexpr(b: ast::BlockExpr, dlogger: &mut DiagnosticLogger) -> BlockExpr {
     BlockExpr {
         statements: b
             .statements
@@ -463,12 +504,15 @@ fn translate_blockexpr(b: ast::BlockExpr, dlogger: DiagnosticLogger) -> BlockExp
     }
 }
 
-fn translate_filestatement(fs: ast::FileStatement, dlogger: DiagnosticLogger) -> FileStatement {
+fn translate_filestatement(
+    fs: ast::FileStatement,
+    dlogger: &mut DiagnosticLogger,
+) -> FileStatement {
     match fs {
-        ast::FileStatement::Error => FileStatement::Error,
+        ast::FileStatement::Error => FileStatement::NoOp,
         ast::FileStatement::TypeDef {
             tyargs,
-            identifier,
+            typat,
             value,
         } => FileStatement::TypeDef {
             tyargs: match tyargs {
@@ -480,7 +524,7 @@ fn translate_filestatement(fs: ast::FileStatement, dlogger: DiagnosticLogger) ->
                     .collect(),
                 None => vec![],
             },
-            identifier,
+            typat: Box::new(translate_augtypepatexpr(*typat, dlogger)),
             value: Box::new(translate_augtypeexpr(*value, dlogger)),
         },
         ast::FileStatement::Let { tyargs, pat, value } => FileStatement::Let {
@@ -493,7 +537,7 @@ fn translate_filestatement(fs: ast::FileStatement, dlogger: DiagnosticLogger) ->
                     .collect(),
                 None => vec![],
             },
-            pattern: Box::new(tr_aug(*pat, dlogger, translate_patexpr)),
+            pat: Box::new(tr_aug(*pat, dlogger, translate_patexpr)),
             value: Box::new(tr_aug(*value, dlogger, translate_valexpr)),
         },
         ast::FileStatement::Prefix { prefix, items } => FileStatement::Prefix {
@@ -507,7 +551,10 @@ fn translate_filestatement(fs: ast::FileStatement, dlogger: DiagnosticLogger) ->
     }
 }
 
-pub fn construct_hir(tu: ast::TranslationUnit, dlogger: DiagnosticLogger) -> TranslationUnit {
+pub fn construct_hir(
+    tu: ast::TranslationUnit,
+    ref mut dlogger: DiagnosticLogger,
+) -> TranslationUnit {
     TranslationUnit {
         declarations: tu
             .declarations

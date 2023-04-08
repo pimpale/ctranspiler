@@ -1,5 +1,3 @@
-use super::ast;
-//use super::thir;
 use super::token::TokenKind;
 use lsp_types::Diagnostic;
 use lsp_types::DiagnosticRelatedInformation;
@@ -8,6 +6,7 @@ use lsp_types::Location;
 use lsp_types::NumberOrString;
 use lsp_types::Range;
 use lsp_types::Url;
+use num_bigint::BigInt;
 use std::sync::mpsc::channel;
 use std::sync::mpsc::Receiver;
 use std::sync::mpsc::Sender;
@@ -208,7 +207,12 @@ impl DiagnosticLogger {
         todo!();
     }
 
-    pub fn log_duplicate_identifier(&mut self, range: Range, identifier: &str) {
+    pub fn log_duplicate_identifier(
+        &mut self,
+        range: Range,
+        previous_range: Range,
+        identifier: &str,
+    ) {
         self.log(Diagnostic {
             range,
             severity: Some(DiagnosticSeverity::ERROR),
@@ -216,7 +220,10 @@ impl DiagnosticLogger {
             code_description: None,
             source: self.source.clone(),
             message: format!("duplicate identifier {}", identifier),
-            related_information: None,
+            related_information: Some(vec![DiagnosticRelatedInformation {
+                location: Location::new(Url::parse("/").unwrap(), previous_range),
+                message: format!("previous declaration of {}", identifier),
+            }]),
             tags: None,
             data: None,
         })
@@ -364,7 +371,7 @@ impl DiagnosticLogger {
         })
     }
 
-    pub fn log_duplicate_field_name(&mut self, range: Range, name: String, previous_range: Range) {
+    pub fn log_duplicate_field_name(&mut self, range: Range, previous_range: Range, name: &str) {
         self.log(Diagnostic {
             range,
             severity: Some(DiagnosticSeverity::ERROR),
@@ -420,6 +427,54 @@ impl DiagnosticLogger {
             code_description: None,
             source: self.source.clone(),
             message: format!("unknown identifier `{}`", identifier),
+            related_information: None,
+            tags: None,
+            data: None,
+        })
+    }
+
+    pub fn log_duplicate_use(&mut self, range: Range, previous_range: Range, prefix: &str) {
+        self.log(Diagnostic {
+            range,
+            severity: Some(DiagnosticSeverity::ERROR),
+            code: Some(NumberOrString::Number(38)),
+            code_description: None,
+            source: self.source.clone(),
+            message: format!("duplicate use for `{}`", prefix),
+            related_information: Some(vec![DiagnosticRelatedInformation {
+                location: Location::new(Url::parse("/").unwrap(), previous_range),
+                message: format!("previous use `{}`", prefix),
+            }]),
+            tags: None,
+            data: None,
+        });
+    }
+
+    pub fn log_array_length_negative(&mut self, range: Range, provided_length: BigInt) {
+        self.log(Diagnostic {
+            range,
+            severity: Some(DiagnosticSeverity::ERROR),
+            code: Some(NumberOrString::Number(39)),
+            code_description: None,
+            source: self.source.clone(),
+            message: format!("array length must be non-negative, but found {}", provided_length),
+            related_information: None,
+            tags: None,
+            data: None,
+        })
+    }
+
+    pub fn log_array_length_too_large(&mut self, range: Range, provided_length: BigInt) {
+        self.log(Diagnostic {
+            range,
+            severity: Some(DiagnosticSeverity::ERROR),
+            code: Some(NumberOrString::Number(40)),
+            code_description: None,
+            source: self.source.clone(),
+            message: format!(
+                "array length must be less than 2^64, but found {}",
+                provided_length
+            ),
             related_information: None,
             tags: None,
             data: None,
