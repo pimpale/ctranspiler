@@ -44,9 +44,8 @@ pub enum KindExpr {
     GenericFn {
         args: Vec<Augmented<KindExpr>>,
         returnkind: Box<Augmented<KindExpr>>,
-    }
+    },
 }
-
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub enum TypeExpr {
@@ -60,7 +59,7 @@ pub enum TypeExpr {
     IntTy,
     UIntTy,
     FloatTy,
-    BoolTy,    
+    BoolTy,
     // const literals
     Int(BigInt),
     Bool(bool),
@@ -81,10 +80,9 @@ pub enum TypeExpr {
     // type of a function
     Fn {
         paramtys: Box<Augmented<ArgsExpr<TypeExpr>>>,
-        tyreturn: Box<Augmented<TypeExpr>>,
+        returnty: Box<Augmented<TypeExpr>>,
     },
 }
-
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub enum TypePatExpr {
@@ -92,7 +90,7 @@ pub enum TypePatExpr {
     Identifier {
         identifier: String,
         kind: Option<Box<Augmented<KindExpr>>>,
-    }
+    },
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, AsRefStr)]
@@ -226,12 +224,6 @@ pub enum ValExpr {
         root: Box<Augmented<ValExpr>>,
         field: String,
     },
-    // Lambda function
-    FnDef {
-        params: Box<Augmented<ArgsExpr<PatExpr>>>,
-        returnty: Box<Augmented<TypeExpr>>,
-        body: Box<Augmented<BlockExpr>>,
-    },
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -248,13 +240,20 @@ pub enum BlockStatement {
         typat: Box<Augmented<TypePatExpr>>,
         value: Box<Augmented<TypeExpr>>,
     },
-    Use {
-        prefix: String,
-    },
-    Let {
+    ValDef {
         typarams: Option<Box<Augmented<ArgsExpr<TypePatExpr>>>>,
         pat: Box<Augmented<PatExpr>>,
         value: Box<Augmented<ValExpr>>,
+    },
+    FnDef {
+        identifier: String,
+        typarams: Option<Box<Augmented<ArgsExpr<TypePatExpr>>>>,
+        params: Box<Augmented<ArgsExpr<PatExpr>>>,
+        returnty: Box<Augmented<TypeExpr>>,
+        body: Box<Augmented<ValExpr>>,
+    },
+    Use {
+        prefix: String,
     },
     Set {
         place: Box<Augmented<ValExpr>>,
@@ -277,14 +276,21 @@ pub enum BlockStatement {
 pub enum FileStatement {
     Error,
     TypeDef {
-        tyargs: Option<Box<Augmented<ArgsExpr<TypePatExpr>>>>,
+        typarams: Option<Box<Augmented<ArgsExpr<TypePatExpr>>>>,
         typat: Box<Augmented<TypePatExpr>>,
         value: Box<Augmented<TypeExpr>>,
     },
-    Let {
-        tyargs: Option<Box<Augmented<ArgsExpr<TypePatExpr>>>>,
+    ValDef {
+        typarams: Option<Box<Augmented<ArgsExpr<TypePatExpr>>>>,
         pat: Box<Augmented<PatExpr>>,
         value: Box<Augmented<ValExpr>>,
+    },
+    FnDef {
+        identifier: String,
+        typarams: Option<Box<Augmented<ArgsExpr<TypePatExpr>>>>,
+        params: Box<Augmented<ArgsExpr<PatExpr>>>,
+        returnty: Box<Augmented<TypeExpr>>,
+        body: Box<Augmented<BlockExpr>>,
     },
     Prefix {
         prefix: String,

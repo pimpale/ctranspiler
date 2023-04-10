@@ -78,24 +78,23 @@ pub enum TypePatExpr {
 
 #[derive(Clone, Debug)]
 pub enum ValBinaryOpKind {
-    // Not permitted after SyntaxDesugared
-    Pipe,
     // Math
     Add,
     Sub,
     Mul,
     Div,
     Rem,
-    // Booleans
-    And,
-    Or,
     // Comparison
-    Eq,
-    Neq,
     Lt,
     Leq,
     Gt,
     Geq,
+    // Booleans
+    And,
+    Or,
+    // Equality
+    Eq,
+    Neq,
 }
 
 #[derive(Clone, Debug)]
@@ -208,7 +207,7 @@ pub enum ValExpr {
 #[derive(Clone, Debug)]
 pub struct BlockExpr {
     pub statements: Vec<Augmented<BlockStatement>>,
-    pub trailing_semicolon: bool,
+    pub last_expression: Option<Augmented<ValExpr>>,
 }
 
 #[derive(Clone, Debug)]
@@ -219,13 +218,13 @@ pub enum BlockStatement {
         typat: Box<Augmented<TypePatExpr>>,
         value: Box<Augmented<TypeExpr>>,
     },
-    Use {
-        prefix: String,
-    },
-    Let {
+    ValDef {
         typarams: Vec<Augmented<TypePatExpr>>,
         pat: Box<Augmented<PatExpr>>,
         value: Box<Augmented<ValExpr>>,
+    },
+    Use {
+        prefix: String,
     },
     Set {
         place: Box<Augmented<ValExpr>>,
@@ -254,7 +253,7 @@ pub enum FileStatement {
         typat: Box<Augmented<TypePatExpr>>,
         value: Box<Augmented<TypeExpr>>,
     },
-    Let {
+    ValDef {
         typarams: Vec<Augmented<TypePatExpr>>,
         pat: Box<Augmented<PatExpr>>,
         value: Box<Augmented<ValExpr>>,

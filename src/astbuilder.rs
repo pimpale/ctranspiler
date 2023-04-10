@@ -746,7 +746,6 @@ fn decide_valexpr_term<TkIter: Iterator<Item = Token>>(
         TokenKind::Int(_) => Some(parse_exact_valexpr_int::<TkIter>),
         TokenKind::Float(_) => Some(parse_exact_valexpr_rational::<TkIter>),
         TokenKind::String { .. } => Some(parse_exact_valexpr_string::<TkIter>),
-        TokenKind::Fn => Some(parse_exact_valexpr_fn::<TkIter>),
         TokenKind::BraceLeft => Some(parse_exact_valexpr_struct_literal::<TkIter>),
         TokenKind::ParenLeft => Some(parse_exact_valexpr_group::<TkIter>),
         TokenKind::Case => Some(parse_exact_valexpr_case::<TkIter>),
@@ -1375,11 +1374,11 @@ fn parse_exact_blockstatement_typedef<TkIter: Iterator<Item = Token>>(
     tkiter: &mut PeekMoreIterator<TkIter>,
     dlogger: &mut DiagnosticLogger,
 ) -> Augmented<BlockStatement> {
-    let (range, metadata, tyargs, identifier, value) = parse_exact_typedef(tkiter, dlogger);
+    let (range, metadata, tyargs, typat, value) = parse_exact_typedef(tkiter, dlogger);
     Augmented {
         metadata,
         range,
-        val: BlockStatement::TypeDef { tyargs, identifier, value },
+        val: BlockStatement::TypeDef { typarams, typat, value },
     }
 }
 
@@ -1705,18 +1704,18 @@ fn parse_exact_typeexpr_fn<TkIter: Iterator<Item = Token>>(
 ) -> Augmented<TypeExpr> {
     let metadata = get_metadata(tkiter);
     let fn_tk = exact_token(tkiter, TokenKind::Fn);
-    let args = Box::new(parse_args_expr(tkiter, dlogger, parse_typeexpr));
+    let paramtys = Box::new(parse_args_expr(tkiter, dlogger, parse_typeexpr));
     expect_token(
         tkiter,
         dlogger,
         "type function definition",
         vec![TokenKind::Defun],
     );
-    let returntype = Box::new(parse_typeexpr(tkiter, dlogger));
+    let returnty = Box::new(parse_typeexpr(tkiter, dlogger));
     Augmented {
         metadata,
         range: union_of(fn_tk.range, returntype.range),
-        val: TypeExpr::Fn { args, returntype },
+        val: TypeExpr::Fn { paramtys, returnty },
     }
 }
 
@@ -1949,11 +1948,11 @@ fn parse_exact_filestatement_typedef<TkIter: Iterator<Item = Token>>(
     tkiter: &mut PeekMoreIterator<TkIter>,
     dlogger: &mut DiagnosticLogger,
 ) -> Augmented<FileStatement> {
-    let (range, metadata, tyargs, identifier, value) = parse_exact_typedef(tkiter, dlogger);
+    let (range, metadata, typarams, typat, value) = parse_exact_typedef(tkiter, dlogger);
     Augmented {
         metadata,
         range,
-        val: FileStatement::TypeDef { tyargs, identifier, value },
+        val: FileStatement::TypeDef { typarams, typat, value },
     }
 }
 

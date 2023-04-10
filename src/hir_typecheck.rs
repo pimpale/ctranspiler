@@ -24,8 +24,8 @@ impl<'d, 't> GlobalTypeChecker<'d, 't> {
 impl<'d, 't> HirVisitor for GlobalTypeChecker<'d, 't> {
     fn visit_file_statement(&mut self, statement: &mut crate::ast::Augmented<hir::FileStatement>) {
         match statement.val {
-            hir::FileStatement::Let { ref mut typarams, ref mut pat, .. } => {
-                
+            hir::FileStatement::Let { ref mut typarams, ref mut pat, ref mut value } => {
+                types::evaluate_hir_type(v, dlogger, type_name_table, type_typevalue_table)
             }
         }
     }

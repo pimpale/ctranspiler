@@ -514,3 +514,219 @@ pub fn evaluate_hir_type(
         }
     }
 }
+
+pub fn typecheck_hir_value_infermode(
+    v: &mut Augmented<hir::ValExpr>,
+    dlogger: &mut DiagnosticLogger,
+    val_name_table: &mut Vec<String>,
+    val_type_table: &mut Vec<Option<TypeValue>>,
+) -> TypeValue {
+    match &mut v.value {
+        hir::ValExpr::Error => TypeValue::Error,
+        hir::ValExpr::Unit => TypeValue::UnitTy,
+        hir::ValExpr::Int(_) => TypeValue::IntTy(64),
+        hir::ValExpr::Bool(_) => TypeValue::BoolTy,
+        hir::ValExpr::Float(_) => TypeValue::FloatTy(64),
+        hir::ValExpr::String(_) => TypeValue::SliceTy(Box::new(TypeValue::IntTy(8))),
+        hir::ValExpr::Ref(v) => TypeValue::RefTy(Box::new(typecheck_hir_value_infermode(
+            v,
+            dlogger,
+            val_name_table,
+            val_type_table,
+        ))),
+        hir::ValExpr::Deref(v) => {
+            let vtype = typecheck_hir_value_infermode(v, dlogger, val_name_table, val_type_table);
+            match vtype {
+                TypeValue::RefTy(x) => *x,
+                _ => {
+                    dlogger.log_deref_of_non_ref(v.range);
+                    TypeValue::Error
+                }
+            }
+        }
+        hir::ValExpr::StructLiteral(fields) => {
+            let mut fieldtypes = Vec::new();
+            for (name, field) in fields.iter_mut() {
+                fieldtypes.push(typecheck_hir_value_infermode(
+                    field,
+                    dlogger,
+                    val_name_table,
+                    val_type_table,
+                ));
+            }
+            TypeValue::StructTy(fieldtypes)
+        }
+        hir::ValExpr::BinaryOp {
+            op,
+            left_operand,
+            right_operand,
+        } => match op {
+            // math or numerical comparison
+            hir::ValBinaryOpKind::Add
+            | hir::ValBinaryOpKind::Sub
+            | hir::ValBinaryOpKind::Mul
+            | hir::ValBinaryOpKind::Div
+            | hir::ValBinaryOpKind::Rem => {
+                let left_type = typecheck_hir_value_infermode(
+                    left_operand,
+                    dlogger,
+                    val_name_table,
+                    val_type_table,
+                );
+                typecheck_hir_value_checkmode(
+                    right_operand,
+                    dlogger,
+                    val_name_table,
+                    val_type_table,
+                    &left_type,
+                );
+
+                match left_type {
+                    k @ (TypeValue::IntTy(_) | TypeValue::UIntTy(_) | TypeValue::FloatTy(_)) => k,
+                    _ => {
+                        dlogger.log_type_error(left_operand.range, "expected int, uint, or float");
+                        TypeValue::Error
+                    }
+                }
+            }
+            hir::ValBinaryOpKind::Lt
+            | hir::ValBinaryOpKind::Leq
+            | hir::ValBinaryOpKind::Gt
+            | hir::ValBinaryOpKind::Geq => {
+                let left_type = typecheck_hir_value_infermode(
+                    left_operand,
+                    dlogger,
+                    val_name_table,
+                    val_type_table,
+                );
+                typecheck_hir_value_checkmode(
+                    right_operand,
+                    dlogger,
+                    val_name_table,
+                    val_type_table,
+                    &left_type,
+                );
+
+                match left_type {
+                    TypeValue::IntTy(_) | TypeValue::UIntTy(_) | TypeValue::FloatTy(_) => {
+                        TypeValue::BoolTy
+                    }
+                    _ => {
+                        dlogger.log_type_error(left_operand.range, "expected int, uint, or float");
+                        TypeValue::BoolTy
+                    }
+                }
+            }
+            hir::ValBinaryOpKind::And | hir::ValBinaryOpKind::Or => {
+                let _ = typecheck_hir_value_checkmode(
+                    left_operand,
+                    dlogger,
+                    val_name_table,
+                    val_type_table,
+                    &TypeValue::BoolTy,
+                );
+                typecheck_hir_value_checkmode(
+                    right_operand,
+                    dlogger,
+                    val_name_table,
+                    val_type_table,
+                    &TypeValue::BoolTy,
+                );
+                TypeValue::BoolTy
+            }
+            hir::ValBinaryOpKind::Eq | hir::ValBinaryOpKind::Neq => {
+                let left_type = typecheck_hir_value_infermode(
+                    left_operand,
+                    dlogger,
+                    val_name_table,
+                    val_type_table,
+                );
+                typecheck_hir_value_checkmode(
+                    right_operand,
+                    dlogger,
+                    val_name_table,
+                    val_type_table,
+                    &left_type,
+                );
+
+                match left_type {
+                    TypeValue::IntTy(_) | TypeValue::UIntTy(_) | TypeValue::FloatTy(_) => {
+                        TypeValue::BoolTy
+                    }
+                    _ => {
+                        dlogger.log_type_error(
+                            left_operand.range,
+                            "expected int, uint, float, or bool",
+                        );
+                        TypeValue::BoolTy
+                    }
+                }
+
+                TypeValue::BoolTy
+            }
+        },
+        hir::ValExpr::IfThen {
+            cond,
+            then_branch,
+            else_branch,
+        } => {
+            typecheck_hir_value_checkmode(
+                cond,
+                dlogger,
+                val_name_table,
+                val_type_table,
+                &TypeValue::BoolTy,
+            );
+            let if_type =
+                typecheck_hir_value_infermode(then_branch, dlogger, val_name_table, val_type_table);
+            if let Some(elseexpr) = else_branch {
+                typecheck_hir_elseexpr_checkmode(
+                    elseexpr,
+                    dlogger,
+                    val_name_table,
+                    val_type_table,
+                    &if_type,
+                );
+            }
+            if_type
+        }
+        hir::ValExpr::CaseOf { expr, cases } => {
+            let expr_type = typecheck_hir_value_infermode(expr, dlogger, val_name_table, val_type_table);
+            let mut case_types = Vec::new();
+            for case in cases.iter_mut() {
+                let case_type = typecheck_hir_case_checkmode(
+                    case,
+                    dlogger,
+                    val_name_table,
+                    val_type_table,
+                    &expr_type,
+                );
+                case_types.push(case_type);
+            }
+            let mut case_types_iter = case_types.iter();
+            let first_case_type = case_types_iter.next().unwrap();
+            for case_type in case_types_iter {
+                if case_type != first_case_type {
+                    dlogger.log_type_error(
+                        v.range,
+                        "all cases must have the same type",
+                    );
+                    return TypeValue::Error;
+                }
+            }
+            first_case_type.clone()
+        }
+        hir::ValExpr::Block(block) => {
+            for statement in block.val.statements {
+                match statement.val {
+                    hir::BlockStatement::NoOp => {},
+                    hir::BlockStatement::TypeDef { .. } => {},
+                    hir::BlockStatement::Use { .. } => unreachable!("should have been resolved"),
+                    hir::BlockStatement::Let { pat, value, .. } => {
+                        
+                    }
+                }
+            }
+        }
+    }
+}
