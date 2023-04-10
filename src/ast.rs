@@ -48,10 +48,16 @@ pub enum KindExpr {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct Identifier {
+    pub identifier: Option<String>,
+    pub range: Range,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub enum TypeExpr {
     // An error when parsing
     Error,
-    Identifier(String),
+    Identifier(Identifier),
     // types
     UnitTy,
     ArrayTy,
@@ -88,7 +94,7 @@ pub enum TypeExpr {
 pub enum TypePatExpr {
     Error,
     Identifier {
-        identifier: String,
+        identifier: Identifier,
         kind: Option<Box<Augmented<KindExpr>>>,
     },
 }
@@ -136,7 +142,7 @@ pub enum PatExpr {
     Ignore,
     Identifier {
         mutable: bool,
-        identifier: String,
+        identifier: Identifier,
     },
     StructLiteral(Vec<Augmented<StructItemExpr<PatExpr>>>),
     Typed {
@@ -203,7 +209,7 @@ pub enum ValExpr {
     // Inline array
     Array(Vec<Augmented<ValExpr>>),
     // A reference to a previously defined variable
-    Identifier(String),
+    Identifier(Identifier),
     // Concretize
     Concretize {
         root: Box<Augmented<ValExpr>>,
@@ -246,7 +252,7 @@ pub enum BlockStatement {
         value: Box<Augmented<ValExpr>>,
     },
     FnDef {
-        identifier: String,
+        identifier: Identifier,
         typarams: Option<Box<Augmented<ArgsExpr<TypePatExpr>>>>,
         params: Box<Augmented<ArgsExpr<PatExpr>>>,
         returnty: Box<Augmented<TypeExpr>>,
@@ -286,7 +292,7 @@ pub enum FileStatement {
         value: Box<Augmented<ValExpr>>,
     },
     FnDef {
-        identifier: String,
+        identifier: Identifier,
         typarams: Option<Box<Augmented<ArgsExpr<TypePatExpr>>>>,
         params: Box<Augmented<ArgsExpr<PatExpr>>>,
         returnty: Box<Augmented<TypeExpr>>,

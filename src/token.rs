@@ -11,7 +11,8 @@ pub enum TokenKind {
     Case,    // case
     Enum,    // enum
     Union,   // union
-    Let,     // let
+    Valdef,  // val
+    Typedef, // type
     Mut,     // mut
     Set,     // set
     In,      // in
@@ -24,7 +25,6 @@ pub enum TokenKind {
     Block,   // block
     Prefix,  // prefix
     Use,     // use
-    Typedef, // typedef
     // Values
     Unit,                                   // void
     Lifetime(Vec<u8>),                      // 'lifetime
@@ -44,11 +44,10 @@ pub enum TokenKind {
     FloatTy, // Float
     BoolTy,  // Bool
     // Kinds
-    TypeKind,  // TYPE
-    BoolKind,  // BOOL
-    IntKind,   // INT
-    UIntKind,  // UINT
-    FloatKind, // FLOAT
+    TypeKind,  // Type
+    BoolKind,  // Bool
+    IntKind,   // Int
+    FloatKind, // Float
     // Math Operators
     Plus,  // +
     Minus, // -
@@ -71,7 +70,7 @@ pub enum TokenKind {
     Greater,      // >
     GreaterEqual, // >=
     // Assignment
-    Assign, // =
+    Assign,         // =
     FunctionDefine, // :=
     // Reference
     Ref,   // &

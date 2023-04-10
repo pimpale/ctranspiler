@@ -1,4 +1,5 @@
 use indexmap::IndexMap;
+use lsp_types::Range;
 use num_bigint::BigInt;
 use num_rational::BigRational;
 
@@ -7,7 +8,6 @@ use crate::ast::Augmented;
 #[derive(Clone, Debug)]
 pub enum HirPhase {
     Raw,
-    Desugared,
     NameResolved,
     TypeChecked,
     TempsGenerated,
@@ -29,11 +29,16 @@ pub enum KindExpr {
 }
 
 #[derive(Clone, Debug)]
+pub struct Identifier {
+    id: usize,
+    range: Range,
+}
+
+#[derive(Clone, Debug)]
 pub enum TypeExpr {
     // An error when parsing
     Error,
-    Identifier(String),
-    Identifier2(usize),
+    Identifier(Identifier),
     // types
     UnitTy,
     BoolTy,
@@ -67,11 +72,7 @@ pub enum TypeExpr {
 pub enum TypePatExpr {
     Error,
     Identifier {
-        identifier: String,
-        kind: Box<Augmented<KindExpr>>,
-    },
-    Identifier2 {
-        identifier: usize,
+        identifier: Identifier,
         kind: Box<Augmented<KindExpr>>,
     },
 }
@@ -118,9 +119,8 @@ pub enum PatExpr {
     Ignore,
     Identifier {
         mutable: bool,
-        identifier: String,
+        identifier: Identifier,
     },
-    Identifier2(usize),
     StructLiteral(IndexMap<String, Augmented<PatExpr>>),
     Typed {
         pat: Box<Augmented<PatExpr>>,
@@ -174,14 +174,7 @@ pub enum ValExpr {
     // Inline array
     ArrayLiteral(Vec<Augmented<ValExpr>>),
     // A reference to a previously defined variable
-    Identifier(String),
-    Identifier2(usize),
-    // Lambda function
-    FnLiteral {
-        params: Vec<Augmented<PatExpr>>,
-        returnty: Box<Augmented<TypeExpr>>,
-        body: Box<Augmented<BlockExpr>>,
-    },
+    Identifier(Identifier),
     // index into an array
     ArrayAccess {
         root: Box<Augmented<ValExpr>>,
@@ -223,6 +216,13 @@ pub enum BlockStatement {
         pat: Box<Augmented<PatExpr>>,
         value: Box<Augmented<ValExpr>>,
     },
+    FnDef {
+        typarams: Vec<Augmented<TypePatExpr>>,
+        identifier: Identifier,
+        params: Vec<Augmented<PatExpr>>,
+        returnty: Box<Augmented<TypeExpr>>,
+        body: Box<Augmented<BlockExpr>>,
+    },
     Use {
         prefix: String,
     },
@@ -257,6 +257,13 @@ pub enum FileStatement {
         typarams: Vec<Augmented<TypePatExpr>>,
         pat: Box<Augmented<PatExpr>>,
         value: Box<Augmented<ValExpr>>,
+    },
+    FnDef {
+        typarams: Vec<Augmented<TypePatExpr>>,
+        identifier: Identifier,
+        params: Vec<Augmented<PatExpr>>,
+        returnty: Box<Augmented<TypeExpr>>,
+        body: Box<Augmented<BlockExpr>>,
     },
     Prefix {
         prefix: String,
@@ -295,7 +302,7 @@ pub trait HirVisitor {
                 self.visit_type_pat_expr(&mut typat);
                 self.visit_type_expr(&mut value);
             }
-            FileStatement::Let {
+            FileStatement::ValDef {
                 typarams,
                 pat,
                 value,
@@ -305,6 +312,22 @@ pub trait HirVisitor {
                 }
                 self.visit_pat_expr(&mut pat);
                 self.visit_val_expr(&mut value);
+            }
+            FileStatement::FnDef {
+                typarams,
+                params,
+                returnty,
+                body,
+                ..
+            } => {
+                for typaram in typarams {
+                    self.visit_type_pat_expr(&mut typaram);
+                }
+                for param in params {
+                    self.visit_pat_expr(&mut param);
+                }
+                self.visit_type_expr(&mut returnty);
+                self.visit_block_expr(&mut body);
             }
             FileStatement::Prefix { prefix, items } => {
                 for item in items {
@@ -335,8 +358,7 @@ pub trait HirVisitor {
                 self.visit_type_pat_expr(&mut typat);
                 self.visit_type_expr(&mut value);
             }
-            BlockStatement::Use { prefix } => {}
-            BlockStatement::Let {
+            BlockStatement::ValDef {
                 typarams,
                 pat,
                 value,
@@ -347,6 +369,23 @@ pub trait HirVisitor {
                 self.visit_pat_expr(&mut pat);
                 self.visit_val_expr(&mut value);
             }
+            BlockStatement::FnDef {
+                typarams,
+                params,
+                returnty,
+                body,
+                ..
+            } => {
+                for typaram in typarams {
+                    self.visit_type_pat_expr(&mut typaram);
+                }
+                for param in params {
+                    self.visit_pat_expr(&mut param);
+                }
+                self.visit_type_expr(&mut returnty);
+                self.visit_block_expr(&mut body);
+            }
+            BlockStatement::Use { prefix } => {}
             BlockStatement::Set { place, value } => {
                 self.visit_val_expr(&mut place);
                 self.visit_val_expr(&mut value);
@@ -557,17 +596,6 @@ pub trait HirVisitor {
                 }
             }
             ValExpr::Identifier(_) => {}
-            ValExpr::FnLiteral {
-                params,
-                returnty,
-                body,
-            } => {
-                for param in params {
-                    self.visit_pat_expr(&mut param);
-                }
-                self.visit_type_expr(&mut returnty);
-                self.visit_block_expr(&mut body);
-            }
             ValExpr::ArrayAccess { root, index } => {
                 self.visit_val_expr(&mut root);
                 self.visit_val_expr(&mut index);
