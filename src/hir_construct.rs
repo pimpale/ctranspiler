@@ -259,7 +259,7 @@ fn translate_kindexpr(k: ast::KindExpr, env: &mut Environment) -> KindExpr {
 fn translate_augtypepatexpr(
     ast::Augmented { range, val, .. }: ast::Augmented<ast::TypePatExpr>,
     env: &mut Environment,
-    should_prefix: bool
+    should_prefix: bool,
 ) -> Augmented<TypePatExpr> {
     match val {
         ast::TypePatExpr::Error => Augmented {
@@ -1045,7 +1045,16 @@ fn translate_augfilestatement(
     }
 }
 
-pub fn construct_hir(tu: ast::TranslationUnit, dlogger: DiagnosticLogger) -> TranslationUnit {
+pub fn construct_hir(
+    tu: ast::TranslationUnit,
+    dlogger: DiagnosticLogger,
+) -> (
+    TranslationUnit,
+    Vec<String>,
+    Vec<Range>,
+    Vec<String>,
+    Vec<Range>,
+) {
     let mut env = Environment {
         type_names_in_scope: vec![HashMap::new()],
         val_names_in_scope: vec![HashMap::new()],
@@ -1057,12 +1066,18 @@ pub fn construct_hir(tu: ast::TranslationUnit, dlogger: DiagnosticLogger) -> Tra
         val_name_table: vec![],
         val_range_table: vec![],
     };
-    TranslationUnit {
-        declarations: tu
-            .declarations
-            .into_iter()
-            .flat_map(|x| translate_augfilestatement(x, &mut env))
-            .collect(),
-        phase: HirPhase::Raw,
-    }
+    (
+        TranslationUnit {
+            declarations: tu
+                .declarations
+                .into_iter()
+                .flat_map(|x| translate_augfilestatement(x, &mut env))
+                .collect(),
+            phase: HirPhase::Raw,
+        },
+        env.type_name_table,
+        env.type_range_table,
+        env.val_name_table,
+        env.val_range_table,
+    )
 }

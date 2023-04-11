@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 
-use crate::ast::Augmented;
 use crate::dlogger::DiagnosticLogger;
 use crate::hir;
+use crate::hir::Augmented;
 use lsp_types::Range;
 use num_bigint::BigInt;
 use num_rational::BigRational;
@@ -74,26 +74,26 @@ pub enum TypeValue {
     Error,
     Identifier(usize),
     // types
-    UnitTy,
-    BoolTy,
+    Unit,
+    Bool,
     // constructors
-    RefConstructorTy,
-    ArrayConstructorTy,
-    SliceConstructorTy,
-    IntConstructorTy,
-    UIntConstructorTy,
-    FloatConstructorTy,
+    RefConstructor,
+    ArrayConstructor,
+    SliceConstructor,
+    IntConstructor,
+    UIntConstructor,
+    FloatConstructor,
     // the constructed type
-    RefTy(Box<TypeValue>),
-    ArrayTy(Box<TypeValue>, u64),
-    SliceTy(Box<TypeValue>),
-    IntTy(u8),
-    UIntTy(u8),
-    FloatTy(u8),
+    Ref(Box<TypeValue>),
+    Array(Box<TypeValue>, u64),
+    Slice(Box<TypeValue>),
+    Int(u8),
+    UInt(u8),
+    Float(u8),
     // const literals
-    Int(BigInt),
-    Bool(bool),
-    Float(BigRational),
+    IntLit(BigInt),
+    BoolLit(bool),
+    FloatLit(BigRational),
     // type of a function
     Fn {
         paramtys: Vec<TypeValue>,
@@ -122,10 +122,7 @@ pub fn kindcheck_hir_type_infermode(
 ) -> KindValue {
     match v.val {
         hir::TypeExpr::Error => KindValue::Error,
-        hir::TypeExpr::Identifier(_) => {
-            unreachable!("identifiers should have been resolved by now")
-        }
-        hir::TypeExpr::Identifier2(id) => type_kind_table[id].expect("kind not initialized yet"),
+        hir::TypeExpr::Identifier(id) => type_kind_table[id].expect("kind not initialized yet"),
         hir::TypeExpr::UnitTy => KindValue::Type,
         hir::TypeExpr::BoolTy => KindValue::Type,
         hir::TypeExpr::RefConstructorTy => KindValue::Constructor {
@@ -155,7 +152,10 @@ pub fn kindcheck_hir_type_infermode(
         hir::TypeExpr::Int(_) => KindValue::Int,
         hir::TypeExpr::Bool(_) => KindValue::Bool,
         hir::TypeExpr::Float(_) => KindValue::Float,
-        hir::TypeExpr::Fn { paramtys, tyreturn } => {
+        hir::TypeExpr::Fn {
+            paramtys,
+            ref mut returnty,
+        } => {
             for ref mut arg in paramtys {
                 kindcheck_hir_type_checkmode(
                     arg,
@@ -165,6 +165,13 @@ pub fn kindcheck_hir_type_infermode(
                     type_kind_table,
                 );
             }
+            kindcheck_hir_type_checkmode(
+                returnty,
+                &KindValue::Type,
+                dlogger,
+                type_name_table,
+                type_kind_table,
+            );
             KindValue::Type
         }
         hir::TypeExpr::Struct(ref fields) => {
@@ -284,8 +291,8 @@ fn intro_typepat(
         hir::TypePatExpr::Identifier { .. } => {
             unreachable!("identifiers should be resolved by now")
         }
-        hir::TypePatExpr::Identifier2 { identifier, .. } => {
-            type_typevalue_table[identifier].push(tyval);
+        hir::TypePatExpr::Identifier { id, .. } => {
+            type_typevalue_table[id].push(tyval);
         }
     }
 }
@@ -299,8 +306,8 @@ fn elim_typepat(
         hir::TypePatExpr::Identifier { .. } => {
             unreachable!("identifiers should be resolved by now")
         }
-        hir::TypePatExpr::Identifier2 { identifier, .. } => {
-            type_typevalue_table[identifier].pop();
+        hir::TypePatExpr::Identifier { id, .. } => {
+            type_typevalue_table[id].pop();
         }
     }
 }
@@ -317,19 +324,18 @@ pub fn evaluate_hir_type(
 ) -> TypeValue {
     match v.val {
         hir::TypeExpr::Error => TypeValue::Error,
-        hir::TypeExpr::Identifier(_) => unreachable!("identifiers should be resolved by now"),
-        hir::TypeExpr::Identifier2(id) => TypeValue::Identifier(id),
-        hir::TypeExpr::UnitTy => TypeValue::UnitTy,
-        hir::TypeExpr::BoolTy => TypeValue::BoolTy,
-        hir::TypeExpr::RefConstructorTy => TypeValue::RefConstructorTy,
-        hir::TypeExpr::ArrayConstructorTy => TypeValue::ArrayConstructorTy,
-        hir::TypeExpr::SliceConstructorTy => TypeValue::SliceConstructorTy,
-        hir::TypeExpr::IntConstructorTy => TypeValue::IntConstructorTy,
-        hir::TypeExpr::UIntConstructorTy => TypeValue::UIntConstructorTy,
-        hir::TypeExpr::FloatConstructorTy => TypeValue::FloatConstructorTy,
-        hir::TypeExpr::Int(x) => TypeValue::Int(x),
-        hir::TypeExpr::Bool(x) => TypeValue::Bool(x),
-        hir::TypeExpr::Float(x) => TypeValue::Float(x),
+        hir::TypeExpr::Identifier(id) => TypeValue::Identifier(id),
+        hir::TypeExpr::UnitTy => TypeValue::Unit,
+        hir::TypeExpr::BoolTy => TypeValue::Bool,
+        hir::TypeExpr::RefConstructorTy => TypeValue::RefConstructor,
+        hir::TypeExpr::ArrayConstructorTy => TypeValue::ArrayConstructor,
+        hir::TypeExpr::SliceConstructorTy => TypeValue::SliceConstructor,
+        hir::TypeExpr::IntConstructorTy => TypeValue::IntConstructor,
+        hir::TypeExpr::UIntConstructorTy => TypeValue::UIntConstructor,
+        hir::TypeExpr::FloatConstructorTy => TypeValue::FloatConstructor,
+        hir::TypeExpr::Int(x) => TypeValue::IntLit(x),
+        hir::TypeExpr::Bool(x) => TypeValue::BoolLit(x),
+        hir::TypeExpr::Float(x) => TypeValue::FloatLit(x),
         hir::TypeExpr::Struct(fields) => {
             let mut s_fields = vec![];
             for (identifier, expr) in fields {
@@ -360,13 +366,13 @@ pub fn evaluate_hir_type(
             }
             TypeValue::Union(s_fields)
         }
-        hir::TypeExpr::Fn { paramtys, tyreturn } => TypeValue::Fn {
+        hir::TypeExpr::Fn { paramtys, returnty } => TypeValue::Fn {
             paramtys: paramtys
                 .iter()
                 .map(|x| evaluate_hir_type(x, dlogger, type_name_table, type_typevalue_table))
                 .collect(),
             returntype: Box::new(evaluate_hir_type(
-                &tyreturn,
+                &returnty,
                 dlogger,
                 type_name_table,
                 type_typevalue_table,
@@ -393,16 +399,16 @@ pub fn evaluate_hir_type(
             );
             match generic_val {
                 TypeValue::Error => TypeValue::Error,
-                TypeValue::RefConstructorTy => {
+                TypeValue::RefConstructor => {
                     assert!(tyargs.len() == 1, "wrong number of arguments");
-                    TypeValue::RefTy(Box::new(evaluate_hir_type(
+                    TypeValue::Ref(Box::new(evaluate_hir_type(
                         &tyargs[0],
                         dlogger,
                         type_name_table,
                         type_typevalue_table,
                     )))
                 }
-                TypeValue::ArrayConstructorTy => {
+                TypeValue::ArrayConstructor => {
                     assert!(tyargs.len() == 2, "wrong number of arguments");
                     let elem_type = evaluate_hir_type(
                         &tyargs[0],
@@ -424,18 +430,18 @@ pub fn evaluate_hir_type(
                         // should have been kindchecked
                         _ => unreachable!(),
                     };
-                    TypeValue::ArrayTy(Box::new(elem_type), elem_num)
+                    TypeValue::Array(Box::new(elem_type), elem_num)
                 }
-                TypeValue::SliceConstructorTy => {
+                TypeValue::SliceConstructor => {
                     assert!(tyargs.len() == 1, "wrong number of arguments");
-                    TypeValue::SliceTy(Box::new(evaluate_hir_type(
+                    TypeValue::Slice(Box::new(evaluate_hir_type(
                         &tyargs[0],
                         dlogger,
                         type_name_table,
                         type_typevalue_table,
                     )))
                 }
-                TypeValue::IntConstructorTy => {
+                TypeValue::IntConstructor => {
                     assert!(tyargs.len() == 1, "wrong number of arguments");
                     let bits_num_tyval = evaluate_hir_type(
                         &tyargs[0],
@@ -451,9 +457,9 @@ pub fn evaluate_hir_type(
                         // should have been kindchecked
                         _ => unreachable!(),
                     };
-                    TypeValue::IntTy(bits_num)
+                    TypeValue::Int(bits_num)
                 }
-                TypeValue::UIntConstructorTy => {
+                TypeValue::UIntConstructor => {
                     assert!(tyargs.len() == 1, "wrong number of arguments");
                     let bits_num_tyval = evaluate_hir_type(
                         &tyargs[0],
@@ -469,9 +475,9 @@ pub fn evaluate_hir_type(
                         // should have been kindchecked
                         _ => unreachable!(),
                     };
-                    TypeValue::UIntTy(bits_num)
+                    TypeValue::UInt(bits_num)
                 }
-                TypeValue::FloatConstructorTy => {
+                TypeValue::FloatConstructor => {
                     assert!(tyargs.len() == 1, "wrong number of arguments");
                     let bits_num_tyval = evaluate_hir_type(
                         &tyargs[0],
@@ -487,7 +493,7 @@ pub fn evaluate_hir_type(
                         // should have been kindchecked
                         _ => unreachable!(),
                     };
-                    TypeValue::FloatTy(bits_num)
+                    TypeValue::Float(bits_num)
                 }
                 TypeValue::Constructor { typarams, body, .. } => {
                     assert!(typarams.len() == tyargs.len(), "wrong number of arguments");
@@ -521,14 +527,14 @@ pub fn typecheck_hir_value_infermode(
     val_name_table: &mut Vec<String>,
     val_type_table: &mut Vec<Option<TypeValue>>,
 ) -> TypeValue {
-    match &mut v.value {
+    match &mut v.val {
         hir::ValExpr::Error => TypeValue::Error,
-        hir::ValExpr::Unit => TypeValue::UnitTy,
-        hir::ValExpr::Int(_) => TypeValue::IntTy(64),
-        hir::ValExpr::Bool(_) => TypeValue::BoolTy,
-        hir::ValExpr::Float(_) => TypeValue::FloatTy(64),
-        hir::ValExpr::String(_) => TypeValue::SliceTy(Box::new(TypeValue::IntTy(8))),
-        hir::ValExpr::Ref(v) => TypeValue::RefTy(Box::new(typecheck_hir_value_infermode(
+        hir::ValExpr::Unit => TypeValue::Unit,
+        hir::ValExpr::Int(_) => TypeValue::Int(64),
+        hir::ValExpr::Bool(_) => TypeValue::Bool,
+        hir::ValExpr::Float(_) => TypeValue::Float(64),
+        hir::ValExpr::String(_) => TypeValue::Slice(Box::new(TypeValue::Int(8))),
+        hir::ValExpr::Ref(v) => TypeValue::Ref(Box::new(typecheck_hir_value_infermode(
             v,
             dlogger,
             val_name_table,
@@ -537,7 +543,7 @@ pub fn typecheck_hir_value_infermode(
         hir::ValExpr::Deref(v) => {
             let vtype = typecheck_hir_value_infermode(v, dlogger, val_name_table, val_type_table);
             match vtype {
-                TypeValue::RefTy(x) => *x,
+                TypeValue::Ref(x) => *x,
                 _ => {
                     dlogger.log_deref_of_non_ref(v.range);
                     TypeValue::Error
@@ -554,7 +560,7 @@ pub fn typecheck_hir_value_infermode(
                     val_type_table,
                 ));
             }
-            TypeValue::StructTy(fieldtypes)
+            TypeValue::Struct(fieldtypes)
         }
         hir::ValExpr::BinaryOp {
             op,
@@ -582,7 +588,7 @@ pub fn typecheck_hir_value_infermode(
                 );
 
                 match left_type {
-                    k @ (TypeValue::IntTy(_) | TypeValue::UIntTy(_) | TypeValue::FloatTy(_)) => k,
+                    k @ (TypeValue::Int(_) | TypeValue::UInt(_) | TypeValue::Float(_)) => k,
                     _ => {
                         dlogger.log_type_error(left_operand.range, "expected int, uint, or float");
                         TypeValue::Error
@@ -608,8 +614,8 @@ pub fn typecheck_hir_value_infermode(
                 );
 
                 match left_type {
-                    TypeValue::IntTy(_) | TypeValue::UIntTy(_) | TypeValue::FloatTy(_) => {
-                        TypeValue::BoolTy
+                    TypeValue::Int(_) | TypeValue::UInt(_) | TypeValue::Float(_) => {
+                        TypeValue::Bool
                     }
                     _ => {
                         dlogger.log_type_error(left_operand.range, "expected int, uint, or float");
@@ -623,16 +629,16 @@ pub fn typecheck_hir_value_infermode(
                     dlogger,
                     val_name_table,
                     val_type_table,
-                    &TypeValue::BoolTy,
+                    &TypeValue::Bool,
                 );
                 typecheck_hir_value_checkmode(
                     right_operand,
                     dlogger,
                     val_name_table,
                     val_type_table,
-                    &TypeValue::BoolTy,
+                    &TypeValue::Bool,
                 );
-                TypeValue::BoolTy
+                TypeValue::Bool
             }
             hir::ValBinaryOpKind::Eq | hir::ValBinaryOpKind::Neq => {
                 let left_type = typecheck_hir_value_infermode(
@@ -650,19 +656,18 @@ pub fn typecheck_hir_value_infermode(
                 );
 
                 match left_type {
-                    TypeValue::IntTy(_) | TypeValue::UIntTy(_) | TypeValue::FloatTy(_) => {
-                        TypeValue::BoolTy
+                    TypeValue::Int(_) | TypeValue::UInt(_) | TypeValue::Float(_) => {
+                        TypeValue::Bool
                     }
                     _ => {
                         dlogger.log_type_error(
                             left_operand.range,
                             "expected int, uint, float, or bool",
                         );
-                        TypeValue::BoolTy
+                        TypeValue::Bool
                     }
                 }
-
-                TypeValue::BoolTy
+                TypeValue::Bool
             }
         },
         hir::ValExpr::IfThen {
@@ -675,7 +680,7 @@ pub fn typecheck_hir_value_infermode(
                 dlogger,
                 val_name_table,
                 val_type_table,
-                &TypeValue::BoolTy,
+                &TypeValue::Bool,
             );
             let if_type =
                 typecheck_hir_value_infermode(then_branch, dlogger, val_name_table, val_type_table);
@@ -691,7 +696,8 @@ pub fn typecheck_hir_value_infermode(
             if_type
         }
         hir::ValExpr::CaseOf { expr, cases } => {
-            let expr_type = typecheck_hir_value_infermode(expr, dlogger, val_name_table, val_type_table);
+            let expr_type =
+                typecheck_hir_value_infermode(expr, dlogger, val_name_table, val_type_table);
             let mut case_types = Vec::new();
             for case in cases.iter_mut() {
                 let case_type = typecheck_hir_case_checkmode(
@@ -707,10 +713,7 @@ pub fn typecheck_hir_value_infermode(
             let first_case_type = case_types_iter.next().unwrap();
             for case_type in case_types_iter {
                 if case_type != first_case_type {
-                    dlogger.log_type_error(
-                        v.range,
-                        "all cases must have the same type",
-                    );
+                    dlogger.log_type_error(v.range, "all cases must have the same type");
                     return TypeValue::Error;
                 }
             }
@@ -719,12 +722,10 @@ pub fn typecheck_hir_value_infermode(
         hir::ValExpr::Block(block) => {
             for statement in block.val.statements {
                 match statement.val {
-                    hir::BlockStatement::NoOp => {},
-                    hir::BlockStatement::TypeDef { .. } => {},
+                    hir::BlockStatement::NoOp => {}
+                    hir::BlockStatement::TypeDef { .. } => {}
                     hir::BlockStatement::Use { .. } => unreachable!("should have been resolved"),
-                    hir::BlockStatement::Let { pat, value, .. } => {
-                        
-                    }
+                    hir::BlockStatement::Let { pat, value, .. } => {}
                 }
             }
         }
