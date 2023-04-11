@@ -21,9 +21,9 @@ pub struct Augmented<T> {
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub enum StructItemExpr<T> {
     Error,
-    Eponymous(String),
+    Eponymous(Identifier),
     Identified {
-        identifier: String,
+        identifier: Identifier,
         expr: Box<Augmented<T>>,
     },
 }
@@ -256,10 +256,10 @@ pub enum BlockStatement {
         typarams: Option<Box<Augmented<ArgsExpr<TypePatExpr>>>>,
         params: Box<Augmented<ArgsExpr<PatExpr>>>,
         returnty: Box<Augmented<TypeExpr>>,
-        body: Box<Augmented<ValExpr>>,
+        body: Box<Augmented<BlockExpr>>,
     },
     Use {
-        prefix: String,
+        prefix: Identifier,
     },
     Set {
         place: Box<Augmented<ValExpr>>,
@@ -299,11 +299,11 @@ pub enum FileStatement {
         body: Box<Augmented<BlockExpr>>,
     },
     Prefix {
-        prefix: String,
+        prefix: Identifier,
         items: Vec<Augmented<FileStatement>>,
     },
     Use {
-        prefix: String,
+        prefix: Identifier,
     },
 }
 

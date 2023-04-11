@@ -3,7 +3,11 @@ use lsp_types::Range;
 use num_bigint::BigInt;
 use num_rational::BigRational;
 
-use crate::ast::Augmented;
+#[derive(Clone, Debug)]
+pub struct Augmented<T> {
+    pub range: Range,
+    pub val: T,
+}
 
 #[derive(Clone, Debug)]
 pub enum HirPhase {
@@ -29,16 +33,10 @@ pub enum KindExpr {
 }
 
 #[derive(Clone, Debug)]
-pub struct Identifier {
-    id: usize,
-    range: Range,
-}
-
-#[derive(Clone, Debug)]
 pub enum TypeExpr {
     // An error when parsing
     Error,
-    Identifier(Identifier),
+    Identifier(usize),
     // types
     UnitTy,
     BoolTy,
@@ -55,7 +53,7 @@ pub enum TypeExpr {
     // type of a function
     Fn {
         paramtys: Vec<Augmented<TypeExpr>>,
-        tyreturn: Box<Augmented<TypeExpr>>,
+        returnty: Box<Augmented<TypeExpr>>,
     },
     // struct and enumify
     Struct(IndexMap<String, Augmented<TypeExpr>>),
@@ -72,7 +70,7 @@ pub enum TypeExpr {
 pub enum TypePatExpr {
     Error,
     Identifier {
-        identifier: Identifier,
+        id: usize,
         kind: Box<Augmented<KindExpr>>,
     },
 }
@@ -119,7 +117,7 @@ pub enum PatExpr {
     Ignore,
     Identifier {
         mutable: bool,
-        identifier: Identifier,
+        id: usize,
     },
     StructLiteral(IndexMap<String, Augmented<PatExpr>>),
     Typed {
@@ -174,7 +172,7 @@ pub enum ValExpr {
     // Inline array
     ArrayLiteral(Vec<Augmented<ValExpr>>),
     // A reference to a previously defined variable
-    Identifier(Identifier),
+    Identifier(usize),
     // index into an array
     ArrayAccess {
         root: Box<Augmented<ValExpr>>,
@@ -218,13 +216,10 @@ pub enum BlockStatement {
     },
     FnDef {
         typarams: Vec<Augmented<TypePatExpr>>,
-        identifier: Identifier,
+        identifier: usize,
         params: Vec<Augmented<PatExpr>>,
         returnty: Box<Augmented<TypeExpr>>,
         body: Box<Augmented<BlockExpr>>,
-    },
-    Use {
-        prefix: String,
     },
     Set {
         place: Box<Augmented<ValExpr>>,
@@ -260,17 +255,10 @@ pub enum FileStatement {
     },
     FnDef {
         typarams: Vec<Augmented<TypePatExpr>>,
-        identifier: Identifier,
+        identifier: usize,
         params: Vec<Augmented<PatExpr>>,
         returnty: Box<Augmented<TypeExpr>>,
         body: Box<Augmented<BlockExpr>>,
-    },
-    Prefix {
-        prefix: String,
-        items: Vec<Augmented<FileStatement>>,
-    },
-    Use {
-        prefix: String,
     },
 }
 
@@ -329,12 +317,6 @@ pub trait HirVisitor {
                 self.visit_type_expr(&mut returnty);
                 self.visit_block_expr(&mut body);
             }
-            FileStatement::Prefix { prefix, items } => {
-                for item in items {
-                    self.visit_file_statement(&mut item);
-                }
-            }
-            FileStatement::Use { prefix } => {}
         }
     }
 
@@ -385,7 +367,6 @@ pub trait HirVisitor {
                 self.visit_type_expr(&mut returnty);
                 self.visit_block_expr(&mut body);
             }
-            BlockStatement::Use { prefix } => {}
             BlockStatement::Set { place, value } => {
                 self.visit_val_expr(&mut place);
                 self.visit_val_expr(&mut value);
@@ -477,11 +458,11 @@ pub trait HirVisitor {
                     self.visit_type_expr(&mut tyarg);
                 }
             }
-            TypeExpr::Fn { paramtys, tyreturn } => {
+            TypeExpr::Fn { paramtys, returnty } => {
                 for paramty in paramtys {
                     self.visit_type_expr(&mut paramty);
                 }
-                self.visit_type_expr(&mut tyreturn);
+                self.visit_type_expr(&mut returnty);
             }
         }
     }
@@ -490,10 +471,7 @@ pub trait HirVisitor {
         match expr.val {
             PatExpr::Error => {}
             PatExpr::Ignore => {}
-            PatExpr::Identifier {
-                mutable,
-                identifier,
-            } => {}
+            PatExpr::Identifier { .. } => {}
             PatExpr::StructLiteral(items) => {
                 for (_, item) in items {
                     self.visit_pat_expr(&mut item);
