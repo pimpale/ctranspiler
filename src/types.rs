@@ -1,11 +1,9 @@
-use std::collections::HashMap;
-
 use crate::dlogger::DiagnosticLogger;
 use crate::hir;
 use crate::hir::Augmented;
-use lsp_types::Range;
-use num_bigint::BigInt;
+use num_bigint::{BigInt, Sign};
 use num_rational::BigRational;
+use num_traits::Signed;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum KindValue {
@@ -115,7 +113,7 @@ pub enum TypeValue {
 // if we encounter an error, we log it, and modify the hir to be an error.
 // NOTE: we assume that all identifiers have already been resolved.
 pub fn kindcheck_hir_type_infermode(
-    v: &mut Augmented<hir::TypeExpr>,
+    v: &Augmented<hir::TypeExpr>,
     dlogger: &mut DiagnosticLogger,
     type_name_table: &mut Vec<String>,
     type_kind_table: &mut Vec<Option<KindValue>>,
@@ -257,7 +255,7 @@ pub fn kindcheck_hir_type_infermode(
 // if not, then an error is reported, and we modify the hir to eliminate the error
 // NOTE: we assume that all identifiers have already been resolved.
 pub fn kindcheck_hir_type_checkmode(
-    v: &mut Augmented<hir::TypeExpr>,
+    v: &Augmented<hir::TypeExpr>,
     expected_kind: &KindValue,
     dlogger: &mut DiagnosticLogger,
     type_name_table: &mut Vec<String>,
@@ -423,12 +421,16 @@ pub fn evaluate_hir_type(
                         type_typevalue_table,
                     );
                     let elem_num = match elem_num_tyval {
-                        TypeValue::Int(x) => x.try_into().unwrap_or_else(|_| {
-                            dlogger.log_type_error(v.range, &format!("array size invalid: {}", x));
+                        TypeValue::IntLit(x) => x.try_into().unwrap_or_else(|_| {
+                            if x.is_negative() {
+                                dlogger.log_array_length_negative(tyargs[1].range, x);
+                            } else {
+                                dlogger.log_array_length_too_large(tyargs[1].range, x);
+                            }
                             0
                         }),
                         // should have been kindchecked
-                        _ => unreachable!(),
+                        _ => unreachable!("invalid kind"),
                     };
                     TypeValue::Array(Box::new(elem_type), elem_num)
                 }
@@ -450,10 +452,14 @@ pub fn evaluate_hir_type(
                         type_typevalue_table,
                     );
                     let bits_num = match bits_num_tyval {
-                        TypeValue::Int(x) => x.try_into().unwrap_or_else(|_| {
-                            dlogger.log_type_error(v.range, &format!("num bits invalid: {}", x));
+                        TypeValue::IntLit(x) => {
+                            if x.is_negative() {
+                                dlogger.log_num_bits_negative(tyargs[1].range, x);
+                            } else {
+                                dlogger.log_num_bits_too_large(tyargs[1].range, u8::MAX as u32, x);
+                            }
                             0
-                        }),
+                        }
                         // should have been kindchecked
                         _ => unreachable!(),
                     };
@@ -468,10 +474,14 @@ pub fn evaluate_hir_type(
                         type_typevalue_table,
                     );
                     let bits_num = match bits_num_tyval {
-                        TypeValue::Int(x) => x.try_into().unwrap_or_else(|_| {
-                            dlogger.log_type_error(v.range, &format!("num bits invalid: {}", x));
+                        TypeValue::IntLit(x) => {
+                            if x.is_negative() {
+                                dlogger.log_num_bits_negative(tyargs[1].range, x);
+                            } else {
+                                dlogger.log_num_bits_too_large(tyargs[1].range, u8::MAX as u32, x);
+                            }
                             0
-                        }),
+                        }
                         // should have been kindchecked
                         _ => unreachable!(),
                     };
@@ -486,10 +496,14 @@ pub fn evaluate_hir_type(
                         type_typevalue_table,
                     );
                     let bits_num = match bits_num_tyval {
-                        TypeValue::Int(x) => x.try_into().unwrap_or_else(|_| {
-                            dlogger.log_type_error(v.range, &format!("num bits invalid: {}", x));
+                        TypeValue::IntLit(x) => {
+                            if x.is_negative() {
+                                dlogger.log_num_bits_negative(tyargs[1].range, x);
+                            } else {
+                                dlogger.log_num_bits_too_large(tyargs[1].range, u8::MAX as u32, x);
+                            }
                             0
-                        }),
+                        }
                         // should have been kindchecked
                         _ => unreachable!(),
                     };
@@ -502,13 +516,13 @@ pub fn evaluate_hir_type(
                         .map(|x| {
                             evaluate_hir_type(x, dlogger, type_name_table, type_typevalue_table)
                         })
-                        .collect();
-                    for (typat, tyval) in std::iter::zip(typarams.iter(), tyvalues.iter()) {
+                        .collect::<Vec<_>>();
+                    for (typat, tyval) in std::iter::zip(typarams, tyvalues) {
                         intro_typepat(typat, tyval, type_typevalue_table)
                     }
                     let bodytype =
                         evaluate_hir_type(&body, dlogger, type_name_table, type_typevalue_table);
-                    for (typat, tyval) in std::iter::zip(typarams.iter(), tyvalues.iter()) {
+                    for (typat, tyval) in std::iter::zip(typarams, tyvalues.iter()) {
                         elim_typepat(typat, type_typevalue_table)
                     }
                     bodytype
@@ -521,13 +535,103 @@ pub fn evaluate_hir_type(
     }
 }
 
-pub fn typecheck_hir_value_infermode(
-    v: &mut Augmented<hir::ValExpr>,
+pub fn typecheck_hir_elseexpr_checkmode(
+    v: &Augmented<hir::ElseExpr>,
+    dlogger: &mut DiagnosticLogger,
+    val_name_table: &mut Vec<String>,
+    val_type_table: &mut Vec<Option<TypeValue>>,
+    expected_type: &TypeValue,
+) {
+    match v.val {
+        hir::ElseExpr::Error => {}
+        hir::ElseExpr::Else(ref e) => typecheck_hir_blockexpr_checkmode(
+            e,
+            dlogger,
+            val_name_table,
+            val_type_table,
+            expected_type,
+        ),
+        hir::ElseExpr::Elif {
+            ref cond,
+            ref then_branch,
+            ref else_branch,
+        } => {
+            typecheck_hir_value_checkmode(
+                cond,
+                dlogger,
+                val_name_table,
+                val_type_table,
+                &TypeValue::Bool,
+            );
+            typecheck_hir_blockexpr_checkmode(
+                then_branch,
+                dlogger,
+                val_name_table,
+                val_type_table,
+                expected_type,
+            );
+            if let Some(else_branch) = else_branch {
+                typecheck_hir_elseexpr_checkmode(
+                    else_branch,
+                    dlogger,
+                    val_name_table,
+                    val_type_table,
+                    expected_type,
+                );
+            }
+        }
+    }
+}
+
+pub fn typecheck_hir_blockstatement(
+    v: &Augmented<hir::BlockStatement>,
+    dlogger: &mut DiagnosticLogger,
+    val_name_table: &mut Vec<String>,
+    val_type_table: &mut Vec<Option<TypeValue>>,
+) {
+    match v.val {
+        
+    }
+}
+
+pub fn typecheck_hir_blockexpr_checkmode(
+    v: &Augmented<hir::BlockExpr>,
+    dlogger: &mut DiagnosticLogger,
+    val_name_table: &mut Vec<String>,
+    val_type_table: &mut Vec<Option<TypeValue>>,
+    expected_type: &TypeValue,
+) {
+    for s in v.val.statements.iter() {
+        typecheck_hir_statement(s, dlogger, val_name_table, val_type_table);
+    }
+    if let Some(ref e) = v.val.last_expression {
+        typecheck_hir_value_checkmode(e, dlogger, val_name_table, val_type_table, expected_type);
+    }
+}
+
+pub fn typecheck_hir_blockexpr_infermode(
+    v: &Augmented<hir::BlockExpr>,
     dlogger: &mut DiagnosticLogger,
     val_name_table: &mut Vec<String>,
     val_type_table: &mut Vec<Option<TypeValue>>,
 ) -> TypeValue {
-    match &mut v.val {
+    for s in v.val.statements.iter() {
+        typecheck_hir_statement(s, dlogger, val_name_table, val_type_table);
+    }
+    if let Some(ref e) = v.val.last_expression {
+        typecheck_hir_value_infermode(e, dlogger, val_name_table, val_type_table)
+    } else {
+        TypeValue::Unit
+    }
+}
+
+pub fn typecheck_hir_value_infermode(
+    v: &Augmented<hir::ValExpr>,
+    dlogger: &mut DiagnosticLogger,
+    val_name_table: &mut Vec<String>,
+    val_type_table: &mut Vec<Option<TypeValue>>,
+) -> TypeValue {
+    match &v.val {
         hir::ValExpr::Error => TypeValue::Error,
         hir::ValExpr::Unit => TypeValue::Unit,
         hir::ValExpr::Int(_) => TypeValue::Int(64),
@@ -545,7 +649,7 @@ pub fn typecheck_hir_value_infermode(
             match vtype {
                 TypeValue::Ref(x) => *x,
                 _ => {
-                    dlogger.log_deref_of_non_ref(v.range);
+                    dlogger.log_deref_of_non_reference(v.range);
                     TypeValue::Error
                 }
             }
@@ -553,11 +657,9 @@ pub fn typecheck_hir_value_infermode(
         hir::ValExpr::StructLiteral(fields) => {
             let mut fieldtypes = Vec::new();
             for (name, field) in fields.iter_mut() {
-                fieldtypes.push(typecheck_hir_value_infermode(
-                    field,
-                    dlogger,
-                    val_name_table,
-                    val_type_table,
+                fieldtypes.push((
+                    name.clone(),
+                    typecheck_hir_value_infermode(field, dlogger, val_name_table, val_type_table),
                 ));
             }
             TypeValue::Struct(fieldtypes)
@@ -579,18 +681,20 @@ pub fn typecheck_hir_value_infermode(
                     val_name_table,
                     val_type_table,
                 );
-                typecheck_hir_value_checkmode(
-                    right_operand,
-                    dlogger,
-                    val_name_table,
-                    val_type_table,
-                    &left_type,
-                );
 
                 match left_type {
-                    k @ (TypeValue::Int(_) | TypeValue::UInt(_) | TypeValue::Float(_)) => k,
+                    binop_type @ (TypeValue::Int(_) | TypeValue::UInt(_) | TypeValue::Float(_)) => {
+                        typecheck_hir_value_checkmode(
+                            right_operand,
+                            dlogger,
+                            val_name_table,
+                            val_type_table,
+                            &binop_type,
+                        );
+                        binop_type
+                    }
                     _ => {
-                        dlogger.log_type_error(left_operand.range, "expected int, uint, or float");
+                        dlogger.log_math_on_non_numeric(v.range);
                         TypeValue::Error
                     }
                 }
@@ -605,26 +709,26 @@ pub fn typecheck_hir_value_infermode(
                     val_name_table,
                     val_type_table,
                 );
-                typecheck_hir_value_checkmode(
-                    right_operand,
-                    dlogger,
-                    val_name_table,
-                    val_type_table,
-                    &left_type,
-                );
 
                 match left_type {
                     TypeValue::Int(_) | TypeValue::UInt(_) | TypeValue::Float(_) => {
+                        typecheck_hir_value_checkmode(
+                            right_operand,
+                            dlogger,
+                            val_name_table,
+                            val_type_table,
+                            &left_type,
+                        );
                         TypeValue::Bool
                     }
                     _ => {
-                        dlogger.log_type_error(left_operand.range, "expected int, uint, or float");
-                        TypeValue::BoolTy
+                        dlogger.log_comparison_on_non_numeric(v.range);
+                        TypeValue::Bool
                     }
                 }
             }
             hir::ValBinaryOpKind::And | hir::ValBinaryOpKind::Or => {
-                let _ = typecheck_hir_value_checkmode(
+                typecheck_hir_value_checkmode(
                     left_operand,
                     dlogger,
                     val_name_table,
@@ -656,18 +760,12 @@ pub fn typecheck_hir_value_infermode(
                 );
 
                 match left_type {
-                    TypeValue::Int(_) | TypeValue::UInt(_) | TypeValue::Float(_) => {
-                        TypeValue::Bool
-                    }
+                    TypeValue::Int(_) | TypeValue::UInt(_) | TypeValue::Float(_) => TypeValue::Bool,
                     _ => {
-                        dlogger.log_type_error(
-                            left_operand.range,
-                            "expected int, uint, float, or bool",
-                        );
+                        dlogger.log_equality_on_non_integral(left_operand.range);
                         TypeValue::Bool
                     }
                 }
-                TypeValue::Bool
             }
         },
         hir::ValExpr::IfThen {
@@ -682,8 +780,12 @@ pub fn typecheck_hir_value_infermode(
                 val_type_table,
                 &TypeValue::Bool,
             );
-            let if_type =
-                typecheck_hir_value_infermode(then_branch, dlogger, val_name_table, val_type_table);
+            let if_type = typecheck_hir_blockexpr_infermode(
+                then_branch,
+                dlogger,
+                val_name_table,
+                val_type_table,
+            );
             if let Some(elseexpr) = else_branch {
                 typecheck_hir_elseexpr_checkmode(
                     elseexpr,
@@ -695,38 +797,139 @@ pub fn typecheck_hir_value_infermode(
             }
             if_type
         }
-        hir::ValExpr::CaseOf { expr, cases } => {
+        hir::ValExpr::CaseOf {
+            expr,
+            first_case,
+            rest_cases,
+        } => {
             let expr_type =
                 typecheck_hir_value_infermode(expr, dlogger, val_name_table, val_type_table);
-            let mut case_types = Vec::new();
-            for case in cases.iter_mut() {
-                let case_type = typecheck_hir_case_checkmode(
+            let first_case_type = typecheck_hir_case_checkpat_inferbody(
+                first_case,
+                dlogger,
+                val_name_table,
+                val_type_table,
+                &expr_type,
+            );
+            for case in rest_cases {
+                let case_type = typecheck_hir_case_checkpat_checkbody(
                     case,
                     dlogger,
                     val_name_table,
                     val_type_table,
                     &expr_type,
+                    &first_case_type,
                 );
-                case_types.push(case_type);
             }
-            let mut case_types_iter = case_types.iter();
-            let first_case_type = case_types_iter.next().unwrap();
-            for case_type in case_types_iter {
-                if case_type != first_case_type {
-                    dlogger.log_type_error(v.range, "all cases must have the same type");
-                    return TypeValue::Error;
-                }
-            }
-            first_case_type.clone()
+            first_case_type
         }
         hir::ValExpr::Block(block) => {
-            for statement in block.val.statements {
-                match statement.val {
-                    hir::BlockStatement::NoOp => {}
-                    hir::BlockStatement::TypeDef { .. } => {}
-                    hir::BlockStatement::Use { .. } => unreachable!("should have been resolved"),
-                    hir::BlockStatement::Let { pat, value, .. } => {}
-                }
+            typecheck_hir_blockexpr_infermode(block, dlogger, val_name_table, val_type_table)
+        }
+    }
+}
+
+pub fn typecheck_hir_value_checkmode(
+    v: &Augmented<hir::ValExpr>,
+    dlogger: &mut DiagnosticLogger,
+    val_name_table: &mut Vec<String>,
+    val_type_table: &mut Vec<Option<TypeValue>>,
+    expected_type: &TypeValue,
+) {
+    match (v.val, expected_type) {
+        // special case for literals
+        (hir::ValExpr::Int(i), TypeValue::Int(nbits)) => {
+            if i >= BigInt::from(2).pow(*nbits as u32) {
+                dlogger.log_int_too_large(v.range, *nbits);
+            } else if i < BigInt::from(2).pow(*nbits as u32 - 1) {
+                dlogger.log_int_too_small(v.range, *nbits);
+            }
+        }
+        (hir::ValExpr::Int(i), TypeValue::UInt(nbits)) => {
+            if i.is_negative() {
+                dlogger.log_uint_negative(v.range);
+            } else if i >= Bigint::from(2).pow(*nbits as u32) {
+                dlogger.log_int_too_large(v.range, *nbits);
+            }
+        }
+        (hir::ValExpr::Float(_), TypeValue::Float(_)) => {}
+        // block expressions
+        (hir::ValExpr::Block(ref block), _) => {
+            typecheck_hir_blockexpr_checkmode(
+                block,
+                dlogger,
+                val_name_table,
+                val_type_table,
+                expected_type,
+            );
+        }
+        (
+            hir::ValExpr::IfThen {
+                ref cond,
+                ref then_branch,
+                ref else_branch,
+            },
+            _,
+        ) => {
+            typecheck_hir_value_checkmode(
+                cond,
+                dlogger,
+                val_name_table,
+                val_type_table,
+                &TypeValue::Bool,
+            );
+            typecheck_hir_blockexpr_checkmode(
+                then_branch,
+                dlogger,
+                val_name_table,
+                val_type_table,
+                expected_type,
+            );
+            if let Some(ref elseexpr) = else_branch {
+                typecheck_hir_elseexpr_checkmode(
+                    elseexpr,
+                    dlogger,
+                    val_name_table,
+                    val_type_table,
+                    expected_type,
+                );
+            }
+        }
+        (
+            hir::ValExpr::CaseOf {
+                ref expr,
+                ref first_case,
+                ref rest_cases,
+            },
+            _,
+        ) => {
+            let expr_type =
+                typecheck_hir_value_infermode(expr, dlogger, val_name_table, val_type_table);
+            typecheck_hir_case_checkpat_checkbody(
+                first_case,
+                dlogger,
+                val_name_table,
+                val_type_table,
+                &expr_type,
+                expected_type,
+            );
+            for case in rest_cases {
+                typecheck_hir_case_checkpat_checkbody(
+                    case,
+                    dlogger,
+                    val_name_table,
+                    val_type_table,
+                    &expr_type,
+                    expected_type,
+                );
+            }
+        }
+        // everything else
+        _ => {
+            let actual_type =
+                typecheck_hir_value_infermode(v, dlogger, val_name_table, val_type_table);
+            if actual_type.is_subtype_of(expected_type) {
+                dlogger.log_type_mismatch(v.range, expected_type, &actual_type);
             }
         }
     }

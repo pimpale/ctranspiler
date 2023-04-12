@@ -165,7 +165,8 @@ pub enum ValExpr {
     // Matches an expression to the first matching pattern and destructures it
     CaseOf {
         expr: Box<Augmented<ValExpr>>,
-        cases: Vec<Augmented<CaseExpr>>,
+        first_case: Augmented<CaseExpr>,
+        rest_cases: Vec<Augmented<CaseExpr>>,
     },
     // Block
     Block(Box<Augmented<BlockExpr>>),
@@ -559,9 +560,10 @@ pub trait HirVisitor {
                     self.visit_else_expr(&mut else_branch);
                 }
             }
-            ValExpr::CaseOf { expr, cases } => {
+            ValExpr::CaseOf { expr, first_case, rest_cases } => {
                 self.visit_val_expr(&mut expr);
-                for case in cases {
+                self.visit_case_expr(&mut first_case);
+                for case in rest_cases {
                     self.visit_case_expr(&mut case);
                 }
             }

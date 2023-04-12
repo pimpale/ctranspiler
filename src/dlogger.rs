@@ -457,7 +457,10 @@ impl DiagnosticLogger {
             code: Some(NumberOrString::Number(39)),
             code_description: None,
             source: self.source.clone(),
-            message: format!("array length must be non-negative, but found {}", provided_length),
+            message: format!(
+                "array length must be non-negative, but found {}",
+                provided_length
+            ),
             related_information: None,
             tags: None,
             data: None,
@@ -475,6 +478,122 @@ impl DiagnosticLogger {
                 "array length must be less than 2^64, but found {}",
                 provided_length
             ),
+            related_information: None,
+            tags: None,
+            data: None,
+        })
+    }
+
+    pub fn log_num_bits_negative(&mut self, range: Range, provided_bits: BigInt) {
+        self.log(Diagnostic {
+            range,
+            severity: Some(DiagnosticSeverity::ERROR),
+            code: Some(NumberOrString::Number(41)),
+            code_description: None,
+            source: self.source.clone(),
+            message: format!("num bits must be non-negative, but found {}", provided_bits),
+            related_information: None,
+            tags: None,
+            data: None,
+        })
+    }
+
+    pub fn log_num_bits_too_large(&mut self, range: Range, max_bits: u32, provided_bits: BigInt) {
+        self.log(Diagnostic {
+            range,
+            severity: Some(DiagnosticSeverity::ERROR),
+            code: Some(NumberOrString::Number(42)),
+            code_description: None,
+            source: self.source.clone(),
+            message: format!(
+                "num bits must be less than {}, but found {}",
+                max_bits,
+                provided_bits
+            ),
+            related_information: None,
+            tags: None,
+            data: None,
+        })
+    }
+
+    pub fn log_deref_of_non_reference(&mut self, range: Range) {
+        self.log(Diagnostic {
+            range,
+            severity: Some(DiagnosticSeverity::ERROR),
+            code: Some(NumberOrString::Number(43)),
+            code_description: None,
+            source: self.source.clone(),
+            message: "cannot dereference a non-reference".to_owned(),
+            related_information: None,
+            tags: None,
+            data: None,
+        })
+    }
+
+    pub fn log_empty_caseof(&mut self, range: Range) {
+        self.log(Diagnostic {
+            range,
+            severity: Some(DiagnosticSeverity::ERROR),
+            code: Some(NumberOrString::Number(44)),
+            code_description: None,
+            source: self.source.clone(),
+            message: "caseof must have at least one case".to_owned(),
+            related_information: None,
+            tags: None,
+            data: None,
+        })
+    }
+
+    pub fn log_math_on_non_numeric(&mut self, range: Range) {
+        self.log(Diagnostic {
+            range,
+            severity: Some(DiagnosticSeverity::ERROR),
+            code: Some(NumberOrString::Number(45)),
+            code_description: None,
+            source: self.source.clone(),
+            message: format!("cannot perform math operation on non-numeric type"),
+            related_information: None,
+            tags: None,
+            data: None,
+        })
+    }
+
+    pub fn log_comparison_on_non_numeric(&mut self, range: Range) {
+        self.log(Diagnostic {
+            range,
+            severity: Some(DiagnosticSeverity::ERROR),
+            code: Some(NumberOrString::Number(46)),
+            code_description: None,
+            source: self.source.clone(),
+            message: format!("cannot perform comparison on non-numeric type"),
+            related_information: None,
+            tags: None,
+            data: None,
+        })
+    }
+
+    pub fn log_equality_on_non_integral(&mut self, range: Range) {
+        self.log(Diagnostic {
+            range,
+            severity: Some(DiagnosticSeverity::ERROR),
+            code: Some(NumberOrString::Number(47)),
+            code_description: None,
+            source: self.source.clone(),
+            message: format!("cannot perform equality comparison on non-integral type"),
+            related_information: None,
+            tags: None,
+            data: None,
+        })
+    }
+
+    pub fn log_type_mismatch(&mut self, range: Range, expected: &str, found: &str) {
+        self.log(Diagnostic {
+            range,
+            severity: Some(DiagnosticSeverity::ERROR),
+            code: Some(NumberOrString::Number(48)),
+            code_description: None,
+            source: self.source.clone(),
+            message: format!("expected `{}`, found `{}`", expected, found),
             related_information: None,
             tags: None,
             data: None,

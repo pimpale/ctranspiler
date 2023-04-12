@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 
 use indexmap::IndexMap;
 use lsp_types::Range;
@@ -609,13 +609,24 @@ fn translate_valexpr(v: ast::ValExpr, env: &mut Environment) -> ValExpr {
             then_branch: Box::new(tr_aug(*then_branch, env, translate_blockexpr)),
             else_branch: else_branch.map(|x| Box::new(tr_aug(*x, env, translate_elseexpr))),
         },
-        ast::ValExpr::CaseOf { expr, cases } => ValExpr::CaseOf {
-            expr: Box::new(tr_aug(*expr, env, translate_valexpr)),
-            cases: cases
+        ast::ValExpr::CaseOf { expr, cases } => {
+            let cases = cases
                 .into_iter()
                 .map(|x| tr_aug(x, env, translate_caseexpr))
-                .collect(),
-        },
+                .collect::<VecDeque<_>>();
+            match cases.pop_front() {
+                None => {
+                    env.dlogger
+                        .log_empty_caseof(expr.range);
+                    ValExpr::Error
+                }
+                Some(first_case) => ValExpr::CaseOf {
+                    expr: Box::new(tr_aug(*expr, env, translate_valexpr)),
+                    first_case,
+                    rest_cases: cases.into(),
+                },
+            }
+        }
         ast::ValExpr::Block(b) => ValExpr::Block(Box::new(tr_aug(*b, env, translate_blockexpr))),
         ast::ValExpr::Group(v) => translate_valexpr(v.val, env),
         ast::ValExpr::Array(items) => ValExpr::ArrayLiteral(
