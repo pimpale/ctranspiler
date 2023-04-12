@@ -127,22 +127,6 @@ pub enum PatExpr {
 }
 
 #[derive(Clone, Debug)]
-pub enum PlaceExpr {
-    Error,
-    Deref(Box<Augmented<ValExpr>>),
-    Identifier(usize),
-    ArrayAccess {
-        root: Box<Augmented<PlaceExpr>>,
-        index: Box<Augmented<ValExpr>>,
-    },
-    // FieldAccess
-    FieldAccess {
-        root: Box<Augmented<PlaceExpr>>,
-        field: String,
-    },
-}
-
-#[derive(Clone, Debug)]
 pub enum ElseExpr {
     // An error when parsing
     Error,
@@ -163,7 +147,7 @@ pub enum ValExpr {
     Bool(bool),
     Float(BigRational),
     String(Vec<u8>),
-    Ref(Box<Augmented<PlaceExpr>>),
+    Ref(Box<Augmented<ValExpr>>),
     Deref(Box<Augmented<ValExpr>>),
     // Constructs a new compound type
     StructLiteral(IndexMap<String, Augmented<ValExpr>>),
@@ -239,7 +223,7 @@ pub enum BlockStatement {
         body: Box<Augmented<BlockExpr>>,
     },
     Set {
-        place: Box<Augmented<PlaceExpr>>,
+        place: Box<Augmented<ValExpr>>,
         value: Box<Augmented<ValExpr>>,
     },
     While {
@@ -385,7 +369,7 @@ pub trait HirVisitor {
                 self.visit_block_expr(&mut body);
             }
             BlockStatement::Set { place, value } => {
-                self.visit_place_expr(&mut place);
+                self.visit_val_expr(&mut place);
                 self.visit_val_expr(&mut value);
             }
             BlockStatement::While { cond, body } => {
@@ -518,20 +502,6 @@ pub trait HirVisitor {
         self.visit_val_expr(&mut expr.val.body)
     }
 
-    fn dfs_visit_place_expr(&mut self, expr: &mut Augmented<PlaceExpr>) {
-        match expr.val {
-            PlaceExpr::Error => {},
-            PlaceExpr::Identifier(_) => {},
-            PlaceExpr::FieldAccess { root, .. } => {
-                self.visit_place_expr(&mut root)
-            }
-            PlaceExpr::ArrayAccess { root, index } => {
-                self.visit_place_expr(&mut root);
-                self.visit_val_expr(&mut index);
-            }
-        }
-    }
-
     fn dfs_visit_else_expr(&mut self, expr: &mut Augmented<ElseExpr>) {
         match expr.val {
             ElseExpr::Error => {}
@@ -561,7 +531,7 @@ pub trait HirVisitor {
             ValExpr::Float(_) => {}
             ValExpr::String(_) => {}
             ValExpr::Ref(expr) => {
-                self.visit_place_expr(&mut expr);
+                self.visit_val_expr(&mut expr);
             }
             ValExpr::Deref(expr) => {
                 self.visit_val_expr(&mut expr);
@@ -633,9 +603,6 @@ pub trait HirVisitor {
     }
     fn visit_kind_expr(&mut self, expr: &mut Augmented<KindExpr>) {
         self.dfs_visit_kind_expr(expr);
-    }
-    fn visit_place_expr(&mut self, expr: &mut Augmented<PlaceExpr>) {
-        self.dfs_visit_place_expr(expr);
     }
     fn visit_val_expr(&mut self, expr: &mut Augmented<ValExpr>) {
         self.dfs_visit_val_expr(expr);

@@ -698,65 +698,6 @@ pub fn typecheck_hir_blockexpr_infermode(
     }
 }
 
-pub fn typecheck_hir_place_infermode(
-    v: &Augmented<hir::PlaceExpr>,
-    dlogger: &mut DiagnosticLogger,
-    val_name_table: &mut Vec<String>,
-    val_type_table: &mut Vec<Vec<TypeValue>>,
-) -> TypeValue {
-    match &v.val {
-        hir::PlaceExpr::Error => TypeValue::Error,
-        hir::PlaceExpr::Deref(ref v) => {
-            let vtype = typecheck_hir_value_infermode(v, dlogger, val_name_table, val_type_table);
-            match vtype {
-                TypeValue::Ref(x) => *x,
-                _ => {
-                    dlogger.log_deref_of_non_reference(v.range);
-                    TypeValue::Error
-                }
-            }
-        }
-        hir::PlaceExpr::Identifier(id) => val_type_table[*id].last().unwrap().clone(),
-        hir::PlaceExpr::ArrayAccess { root, index } => {
-            let rtype =
-                typecheck_hir_place_infermode(root, dlogger, val_name_table, val_type_table);
-            typecheck_hir_value_checkmode(
-                index,
-                dlogger,
-                val_name_table,
-                val_type_table,
-                &TypeValue::Int(64),
-            );
-            match rtype {
-                TypeValue::Array(x, _) => *x,
-                _ => {
-                    dlogger.log_array_access_of_non_array(root.range);
-                    TypeValue::Error
-                }
-            }
-        }
-        hir::PlaceExpr::FieldAccess { root, field } => {
-            let rtype =
-                typecheck_hir_place_infermode(root, dlogger, val_name_table, val_type_table);
-            match rtype {
-                TypeValue::Struct(fields) => {
-                    for (i, f) in fields.iter().enumerate() {
-                        if f.0 == *field {
-                            return f.1.clone();
-                        }
-                    }
-                    dlogger.log_field_access_of_nonexistent_field(root.range, field);
-                    TypeValue::Error
-                }
-                _ => {
-                    dlogger.log_field_access_of_non_struct(root.range);
-                    TypeValue::Error
-                }
-            }
-        }
-    }
-}
-
 pub fn typecheck_hir_value_infermode(
     v: &Augmented<hir::ValExpr>,
     dlogger: &mut DiagnosticLogger,
@@ -770,7 +711,8 @@ pub fn typecheck_hir_value_infermode(
         hir::ValExpr::Bool(_) => TypeValue::Bool,
         hir::ValExpr::Float(_) => TypeValue::Float(64),
         hir::ValExpr::String(_) => TypeValue::Slice(Box::new(TypeValue::Int(8))),
-        hir::ValExpr::Ref(v) => TypeValue::Ref(Box::new(typecheck_hir_place_infermode(
+        hir::ValExpr::Identifier(id) => TypeValue::Identifier(*id),
+        hir::ValExpr::Ref(v) => TypeValue::Ref(Box::new(typecheck_hir_value_infermode(
             v,
             dlogger,
             val_name_table,
@@ -958,8 +900,109 @@ pub fn typecheck_hir_value_infermode(
         hir::ValExpr::Block(block) => {
             typecheck_hir_blockexpr_infermode(block, dlogger, val_name_table, val_type_table)
         }
+        hir::ValExpr::ArrayAccess { root, index } => {
+            let rtype =
+                typecheck_hir_value_infermode(root, dlogger, val_name_table, val_type_table);
+            typecheck_hir_value_checkmode(
+                index,
+                dlogger,
+                val_name_table,
+                val_type_table,
+                &TypeValue::Int(64),
+            );
+            match rtype {
+                TypeValue::Array(x, _) => *x,
+                _ => {
+                    dlogger.log_array_access_of_non_array(root.range);
+                    TypeValue::Error
+                }
+            }
+        }
+        hir::ValExpr::FieldAccess { root, field } => {
+            let rtype =
+                typecheck_hir_value_infermode(root, dlogger, val_name_table, val_type_table);
+            match rtype {
+                TypeValue::Struct(fields) => {
+                    for (i, f) in fields.iter().enumerate() {
+                        if f.0 == *field {
+                            return f.1.clone();
+                        }
+                    }
+                    dlogger.log_field_access_of_nonexistent_field(root.range, field);
+                    TypeValue::Error
+                }
+                _ => {
+                    dlogger.log_field_access_of_non_struct(root.range);
+                    TypeValue::Error
+                }
+            }
+        }
     }
 }
+
+// checks that the pattern is compatible with the type of the expression
+pub fn typecheck_hir_pat_checkmode(
+    pat: &Augmented<hir::PatExpr>,
+    dlogger: &mut DiagnosticLogger,
+    val_name_table: &mut Vec<String>,
+    val_type_table: &mut Vec<Vec<TypeValue>>,
+    expected_type: &TypeValue,
+) {
+    match pat.val {
+        
+    }
+}
+
+
+pub fn typecheck_hir_case_checkpat_inferbody(
+    case: &Augmented<hir::CaseExpr>,
+    dlogger: &mut DiagnosticLogger,
+    val_name_table: &mut Vec<String>,
+    val_type_table: &mut Vec<Vec<TypeValue>>,
+    expr_type: &TypeValue,
+) -> TypeValue {
+    match (case.val.target.val, expr_type) {
+        (hir::CaseTargetExpr::Unit, TypeValue::Unit) => {}
+        (hir::CaseTargetExpr::Bool(_), TypeValue::Bool) => {}
+        (hir::CaseTargetExpr::Int(i), TypeValue::Int(nbits)) => {
+            if i >= BigInt::from(2).pow(*nbits as u32) {
+                dlogger.log_int_too_large(case.val.target.range, *nbits as u32);
+            } else if i < BigInt::from(2).pow(*nbits as u32 - 1) {
+                dlogger.log_int_too_small(case.val.target.range, *nbits as u32);
+            }
+        }
+        (hir::CaseTargetExpr::Int(i), TypeValue::UInt(nbits)) => {
+            if i.is_negative() {
+                dlogger.log_uint_negative(case.val.target.range);
+            } else if i >= BigInt::from(2).pow(*nbits as u32) {
+                dlogger.log_uint_too_large(case.val.target.range, *nbits as u32);
+            }
+        }
+        (hir::CaseTargetExpr::PatExpr(ref pat), _) => {
+            typecheck_hir_pat_checkmode(
+                pat,
+                dlogger,
+                val_name_table,
+                val_type_table,
+                expr_type,
+            );
+        }
+        _ => {
+            dlogger.log_case_target_type_mismatch(
+                case.val.target.range,
+                expr_type,
+                &case.val.target.val,
+            );
+        }
+    }
+    typecheck_hir_value_infermode(
+        &case.val.body,
+        dlogger,
+        val_name_table,
+        val_type_table,
+    )
+}
+
 
 pub fn typecheck_hir_value_checkmode(
     v: &Augmented<hir::ValExpr>,
