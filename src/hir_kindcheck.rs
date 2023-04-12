@@ -73,26 +73,7 @@ impl<'d, 't> hir::HirVisitor for KindChecker<'d, 't> {
                     for ref mut typaram in typarams {
                         self.visit_type_pat_expr(typaram);
                     }
-                    match typat.val {
-                        hir::TypePatExpr::Error => {}
-                        hir::TypePatExpr::Identifier { id, .. } => {
-                            let kind = if typarams.len() == 0 {
-                                self.type_kind_table[id].unwrap()
-                            } else {
-                                match self.type_kind_table[id].unwrap() {
-                                    KindValue::Constructor { returnkind, .. } => *returnkind,
-                                    _ => unreachable!("this should be a type constructor"),
-                                }
-                            };
-                            types::kindcheck_hir_type_checkmode(
-                                value,
-                                &kind,
-                                self.dlogger,
-                                &mut self.type_name_table,
-                                &mut self.type_kind_table,
-                            );
-                        }
-                    }
+                    
                 }
             }
             _ => self.dfs_visit_file_statement(statement),
