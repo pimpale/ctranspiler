@@ -539,7 +539,7 @@ pub fn typecheck_hir_elseexpr_checkmode(
     v: &Augmented<hir::ElseExpr>,
     dlogger: &mut DiagnosticLogger,
     val_name_table: &mut Vec<String>,
-    val_type_table: &mut Vec<Option<TypeValue>>,
+    val_type_table: &mut Vec<Vec<TypeValue>>,
     expected_type: &TypeValue,
 ) {
     match v.val {
@@ -587,10 +587,83 @@ pub fn typecheck_hir_blockstatement(
     v: &Augmented<hir::BlockStatement>,
     dlogger: &mut DiagnosticLogger,
     val_name_table: &mut Vec<String>,
-    val_type_table: &mut Vec<Option<TypeValue>>,
+    val_type_table: &mut Vec<Vec<TypeValue>>,
 ) {
     match v.val {
-        
+        hir::BlockStatement::NoOp => {}
+        hir::BlockStatement::TypeDef { .. } => {}
+        hir::BlockStatement::ValDef {
+            typarams,
+            pat,
+            value,
+        } => val_type_t,
+        hir::BlockStatement::FnDef {
+            typarams,
+            identifier,
+            params,
+            returnty,
+            body,
+        } => todo!(),
+        hir::BlockStatement::Set { place, value } => todo!(),
+        hir::BlockStatement::While { ref cond, ref body } => {
+            typecheck_hir_value_checkmode(
+                cond,
+                dlogger,
+                val_name_table,
+                val_type_table,
+                &TypeValue::Bool,
+            );
+            typecheck_hir_blockexpr_checkmode(
+                body,
+                dlogger,
+                val_name_table,
+                val_type_table,
+                &TypeValue::Unit,
+            );
+        }
+        hir::BlockStatement::For {
+            pattern,
+            start,
+            end,
+            by,
+            body,
+            ..
+        } => {
+            let index_type =
+                typecheck_hir_value_infermode(&start, dlogger, val_name_table, val_type_table);
+            typecheck_hir_value_checkmode(
+                &end,
+                dlogger,
+                val_name_table,
+                val_type_table,
+                &index_type,
+            );
+            if let Some(by) = by {
+                typecheck_hir_value_checkmode(
+                    &by,
+                    dlogger,
+                    val_name_table,
+                    val_type_table,
+                    &index_type,
+                );
+            }
+            typecheck_hir_blockexpr_checkmode(
+                &body,
+                dlogger,
+                val_name_table,
+                val_type_table,
+                &TypeValue::Unit,
+            );
+        }
+        hir::BlockStatement::Do(ref expr) => {
+            typecheck_hir_value_checkmode(
+                expr,
+                dlogger,
+                val_name_table,
+                val_type_table,
+                &TypeValue::Unit,
+            );
+        }
     }
 }
 
@@ -598,11 +671,11 @@ pub fn typecheck_hir_blockexpr_checkmode(
     v: &Augmented<hir::BlockExpr>,
     dlogger: &mut DiagnosticLogger,
     val_name_table: &mut Vec<String>,
-    val_type_table: &mut Vec<Option<TypeValue>>,
+    val_type_table: &mut Vec<Vec<TypeValue>>,
     expected_type: &TypeValue,
 ) {
     for s in v.val.statements.iter() {
-        typecheck_hir_statement(s, dlogger, val_name_table, val_type_table);
+        typecheck_hir_blockstatement(s, dlogger, val_name_table, val_type_table);
     }
     if let Some(ref e) = v.val.last_expression {
         typecheck_hir_value_checkmode(e, dlogger, val_name_table, val_type_table, expected_type);
@@ -613,10 +686,10 @@ pub fn typecheck_hir_blockexpr_infermode(
     v: &Augmented<hir::BlockExpr>,
     dlogger: &mut DiagnosticLogger,
     val_name_table: &mut Vec<String>,
-    val_type_table: &mut Vec<Option<TypeValue>>,
+    val_type_table: &mut Vec<Vec<TypeValue>>,
 ) -> TypeValue {
     for s in v.val.statements.iter() {
-        typecheck_hir_statement(s, dlogger, val_name_table, val_type_table);
+        typecheck_hir_blockstatement(s, dlogger, val_name_table, val_type_table);
     }
     if let Some(ref e) = v.val.last_expression {
         typecheck_hir_value_infermode(e, dlogger, val_name_table, val_type_table)
@@ -625,11 +698,70 @@ pub fn typecheck_hir_blockexpr_infermode(
     }
 }
 
+pub fn typecheck_hir_place_infermode(
+    v: &Augmented<hir::PlaceExpr>,
+    dlogger: &mut DiagnosticLogger,
+    val_name_table: &mut Vec<String>,
+    val_type_table: &mut Vec<Vec<TypeValue>>,
+) -> TypeValue {
+    match &v.val {
+        hir::PlaceExpr::Error => TypeValue::Error,
+        hir::PlaceExpr::Deref(ref v) => {
+            let vtype = typecheck_hir_value_infermode(v, dlogger, val_name_table, val_type_table);
+            match vtype {
+                TypeValue::Ref(x) => *x,
+                _ => {
+                    dlogger.log_deref_of_non_reference(v.range);
+                    TypeValue::Error
+                }
+            }
+        }
+        hir::PlaceExpr::Identifier(id) => val_type_table[*id].last().unwrap().clone(),
+        hir::PlaceExpr::ArrayAccess { root, index } => {
+            let rtype =
+                typecheck_hir_place_infermode(root, dlogger, val_name_table, val_type_table);
+            typecheck_hir_value_checkmode(
+                index,
+                dlogger,
+                val_name_table,
+                val_type_table,
+                &TypeValue::Int(64),
+            );
+            match rtype {
+                TypeValue::Array(x, _) => *x,
+                _ => {
+                    dlogger.log_array_access_of_non_array(root.range);
+                    TypeValue::Error
+                }
+            }
+        }
+        hir::PlaceExpr::FieldAccess { root, field } => {
+            let rtype =
+                typecheck_hir_place_infermode(root, dlogger, val_name_table, val_type_table);
+            match rtype {
+                TypeValue::Struct(fields) => {
+                    for (i, f) in fields.iter().enumerate() {
+                        if f.0 == *field {
+                            return f.1.clone();
+                        }
+                    }
+                    dlogger.log_field_access_of_nonexistent_field(root.range, field);
+                    TypeValue::Error
+                }
+                _ => {
+                    dlogger.log_field_access_of_non_struct(root.range);
+                    TypeValue::Error
+                }
+            }
+        }
+    }
+}
+
 pub fn typecheck_hir_value_infermode(
     v: &Augmented<hir::ValExpr>,
     dlogger: &mut DiagnosticLogger,
     val_name_table: &mut Vec<String>,
-    val_type_table: &mut Vec<Option<TypeValue>>,
+    val_type_table: &mut Vec<Vec<TypeValue>>,
 ) -> TypeValue {
     match &v.val {
         hir::ValExpr::Error => TypeValue::Error,
@@ -638,7 +770,7 @@ pub fn typecheck_hir_value_infermode(
         hir::ValExpr::Bool(_) => TypeValue::Bool,
         hir::ValExpr::Float(_) => TypeValue::Float(64),
         hir::ValExpr::String(_) => TypeValue::Slice(Box::new(TypeValue::Int(8))),
-        hir::ValExpr::Ref(v) => TypeValue::Ref(Box::new(typecheck_hir_value_infermode(
+        hir::ValExpr::Ref(v) => TypeValue::Ref(Box::new(typecheck_hir_place_infermode(
             v,
             dlogger,
             val_name_table,
@@ -833,23 +965,23 @@ pub fn typecheck_hir_value_checkmode(
     v: &Augmented<hir::ValExpr>,
     dlogger: &mut DiagnosticLogger,
     val_name_table: &mut Vec<String>,
-    val_type_table: &mut Vec<Option<TypeValue>>,
+    val_type_table: &mut Vec<Vec<TypeValue>>,
     expected_type: &TypeValue,
 ) {
     match (v.val, expected_type) {
         // special case for literals
         (hir::ValExpr::Int(i), TypeValue::Int(nbits)) => {
             if i >= BigInt::from(2).pow(*nbits as u32) {
-                dlogger.log_int_too_large(v.range, *nbits);
+                dlogger.log_int_too_large(v.range, *nbits as u32);
             } else if i < BigInt::from(2).pow(*nbits as u32 - 1) {
-                dlogger.log_int_too_small(v.range, *nbits);
+                dlogger.log_int_too_small(v.range, *nbits as u32);
             }
         }
         (hir::ValExpr::Int(i), TypeValue::UInt(nbits)) => {
             if i.is_negative() {
                 dlogger.log_uint_negative(v.range);
-            } else if i >= Bigint::from(2).pow(*nbits as u32) {
-                dlogger.log_int_too_large(v.range, *nbits);
+            } else if i >= BigInt::from(2).pow(*nbits as u32) {
+                dlogger.log_uint_too_large(v.range, *nbits as u32);
             }
         }
         (hir::ValExpr::Float(_), TypeValue::Float(_)) => {}

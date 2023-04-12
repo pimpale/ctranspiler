@@ -599,4 +599,102 @@ impl DiagnosticLogger {
             data: None,
         })
     }
+
+    pub fn log_int_too_large(&mut self, range: Range, nbits: u32) {
+        self.log(Diagnostic {
+            range,
+            severity: Some(DiagnosticSeverity::ERROR),
+            code: Some(NumberOrString::Number(49)),
+            code_description: None,
+            source: self.source.clone(),
+            message: format!("integer literal too large for {}-bit signed integer", nbits),
+            related_information: None,
+            tags: None,
+            data: None,
+        })
+    }
+
+    pub fn log_int_too_small(&mut self, range: Range, nbits: u32) {
+        self.log(Diagnostic {
+            range,
+            severity: Some(DiagnosticSeverity::ERROR),
+            code: Some(NumberOrString::Number(50)),
+            code_description: None,
+            source: self.source.clone(),
+            message: format!("integer literal too small for {}-bit signed integer", nbits),
+            related_information: None,
+            tags: None,
+            data: None,
+        })
+    }
+
+    pub fn log_uint_negative(&mut self, range: Range) {
+        self.log(Diagnostic {
+            range,
+            severity: Some(DiagnosticSeverity::ERROR),
+            code: Some(NumberOrString::Number(51)),
+            code_description: None,
+            source: self.source.clone(),
+            message: format!("unsigned integer literal cannot be negative"),
+            related_information: None,
+            tags: None,
+            data: None,
+        })
+    }
+
+    pub fn log_uint_too_large(&mut self, range: Range, nbits: u32) {
+        self.log(Diagnostic {
+            range,
+            severity: Some(DiagnosticSeverity::ERROR),
+            code: Some(NumberOrString::Number(52)),
+            code_description: None,
+            source: self.source.clone(),
+            message: format!("unsigned integer literal too large for {}-bit unsigned integer", nbits),
+            related_information: None,
+            tags: None,
+            data: None,
+        })
+    }
+
+    pub fn log_array_access_of_non_array(&mut self, range: Range) {
+        self.log(Diagnostic {
+            range,
+            severity: Some(DiagnosticSeverity::ERROR),
+            code: Some(NumberOrString::Number(53)),
+            code_description: None,
+            source: self.source.clone(),
+            message: format!("cannot access array element of non-array type"),
+            related_information: None,
+            tags: None,
+            data: None,
+        })
+    }
+
+    pub fn log_field_access_of_non_struct(&mut self, range: Range) {
+        self.log(Diagnostic {
+            range,
+            severity: Some(DiagnosticSeverity::ERROR),
+            code: Some(NumberOrString::Number(54)),
+            code_description: None,
+            source: self.source.clone(),
+            message: format!("cannot access field of non-struct type"),
+            related_information: None,
+            tags: None,
+            data: None,
+        })
+    }
+
+    pub fn log_field_access_of_nonexistent_field(&mut self, range: Range, field: &str) {
+        self.log(Diagnostic {
+            range,
+            severity: Some(DiagnosticSeverity::ERROR),
+            code: Some(NumberOrString::Number(55)),
+            code_description: None,
+            source: self.source.clone(),
+            message: format!("cannot access nonexistent field `{}`", field),
+            related_information: None,
+            tags: None,
+            data: None,
+        })
+    }
 }
