@@ -1,7 +1,7 @@
 use crate::dlogger::DiagnosticLogger;
 use crate::hir;
 use crate::hir::Augmented;
-use num_bigint::{BigInt, Sign};
+use num_bigint::BigInt;
 use num_rational::BigRational;
 use num_traits::Signed;
 
@@ -70,7 +70,9 @@ pub fn evaluate_hir_kind(
 pub enum TypeValue {
     // An error when parsing
     Error,
-    Identifier(usize),
+    SymbolicVariable(usize),
+    // a nominal type
+    Nominal(usize),
     // types
     Unit,
     Bool,
@@ -83,11 +85,11 @@ pub enum TypeValue {
     FloatConstructor,
     // the constructed type
     Ref(Box<TypeValue>),
-    Array(Box<TypeValue>, u64),
+    Array(Box<TypeValue>, Box<TypeValue>),
     Slice(Box<TypeValue>),
-    Int(u8),
-    UInt(u8),
-    Float(u8),
+    Int(Box<TypeValue>),
+    UInt(Box<TypeValue>),
+    Float(Box<TypeValue>),
     // const literals
     IntLit(BigInt),
     BoolLit(bool),
@@ -101,10 +103,20 @@ pub enum TypeValue {
     Struct(Vec<(String, TypeValue)>),
     Enum(Vec<(String, TypeValue)>),
     Union(Vec<(String, TypeValue)>),
+    // type of a type constructor. Instantiated at every use point.
     Constructor {
         typarams: Vec<Augmented<hir::TypePatExpr>>,
-        returnkind: Box<KindValue>,
-        body: Box<Augmented<hir::TypeExpr>>,
+        body: Box<TypeValue>,
+    },
+    // type of a generic value. Instantiated at every use point
+    Generic {
+        typarams: Vec<Augmented<hir::TypePatExpr>>,
+        body: Box<TypeValue>,
+    },
+    // where the type constructor is symbolic
+    Concretization {
+        symbolic_constructor: usize,
+        tyargs: Vec<TypeValue>,
     },
 }
 
@@ -278,34 +290,41 @@ pub fn kindcheck_hir_type_checkmode(
     }
 }
 
-// introduces the variables bound by type pattern to this scope
-fn intro_typepat(
-    typat: Augmented<hir::TypePatExpr>,
-    tyval: TypeValue,
-    type_typevalue_table: &mut Vec<Vec<TypeValue>>,
-) {
-    match typat.val {
-        hir::TypePatExpr::Error => {}
-        hir::TypePatExpr::Identifier { .. } => {
-            unreachable!("identifiers should be resolved by now")
-        }
-        hir::TypePatExpr::Identifier { id, .. } => {
-            type_typevalue_table[id].push(tyval);
+pub struct Env {
+    pub type_name_table: Vec<String>,
+    pub type_value_table: Vec<Option<TypeValue>>,
+    pub type_bindings: Vec<Vec<TypeValue>>,
+    pub val_name_table: Vec<String>,
+    pub val_type_table: Vec<Option<TypeValue>>,
+}
+impl Env {
+    fn evaluate_nominal(&self, v: TypeValue) -> TypeValue {
+        match v {
+            TypeValue::Nominal(id) => self.evaluate_nominal(
+                self.type_value_table[id]
+                    .expect("nominal should be initialized")
+                    .clone(),
+            ),
+            x => x,
         }
     }
-}
-// removes the variables bound by type pattern from this scope
-fn elim_typepat(
-    typat: Augmented<hir::TypePatExpr>,
-    type_typevalue_table: &mut Vec<Vec<TypeValue>>,
-) {
-    match typat.val {
-        hir::TypePatExpr::Error => {}
-        hir::TypePatExpr::Identifier { .. } => {
-            unreachable!("identifiers should be resolved by now")
+
+    // introduces the variables bound by type pattern to this scope
+    fn intro_type_binding(&mut self, typat: &Augmented<hir::TypePatExpr>, tyval: TypeValue) {
+        match typat.val {
+            hir::TypePatExpr::Error => {}
+            hir::TypePatExpr::Identifier { id, .. } => {
+                self.type_bindings[id].push(tyval);
+            }
         }
-        hir::TypePatExpr::Identifier { id, .. } => {
-            type_typevalue_table[id].pop();
+    }
+    // removes the variables bound by type pattern from this scope
+    fn elim_type_binding(&mut self, typat: &Augmented<hir::TypePatExpr>) {
+        match typat.val {
+            hir::TypePatExpr::Error => {}
+            hir::TypePatExpr::Identifier { id, .. } => {
+                self.type_bindings[id].pop().unwrap();
+            }
         }
     }
 }
@@ -316,13 +335,14 @@ fn elim_typepat(
 pub fn evaluate_hir_type(
     v: &Augmented<hir::TypeExpr>,
     dlogger: &mut DiagnosticLogger,
-    type_name_table: &mut Vec<String>,
-    // this is a cache, and the values may change depending on instantiation
-    type_typevalue_table: &mut Vec<Vec<TypeValue>>,
+    env: &mut Env,
 ) -> TypeValue {
     match v.val {
         hir::TypeExpr::Error => TypeValue::Error,
-        hir::TypeExpr::Identifier(id) => TypeValue::Identifier(id),
+        hir::TypeExpr::Identifier(id) => match env.type_bindings[id].last() {
+            Some(v) => v.clone(),
+            _ => TypeValue::Nominal(id),
+        },
         hir::TypeExpr::UnitTy => TypeValue::Unit,
         hir::TypeExpr::BoolTy => TypeValue::Bool,
         hir::TypeExpr::RefConstructorTy => TypeValue::RefConstructor,
@@ -337,193 +357,77 @@ pub fn evaluate_hir_type(
         hir::TypeExpr::Struct(fields) => {
             let mut s_fields = vec![];
             for (identifier, expr) in fields {
-                s_fields.push((
-                    identifier,
-                    evaluate_hir_type(&expr, dlogger, type_name_table, type_typevalue_table),
-                ));
+                s_fields.push((identifier, evaluate_hir_type(&expr, dlogger, env)));
             }
             TypeValue::Struct(s_fields)
         }
         hir::TypeExpr::Enum(fields) => {
             let mut s_fields = vec![];
             for (identifier, expr) in fields {
-                s_fields.push((
-                    identifier,
-                    evaluate_hir_type(&expr, dlogger, type_name_table, type_typevalue_table),
-                ));
+                s_fields.push((identifier, evaluate_hir_type(&expr, dlogger, env)));
             }
             TypeValue::Enum(s_fields)
         }
         hir::TypeExpr::Union(fields) => {
             let mut s_fields = vec![];
             for (identifier, expr) in fields {
-                s_fields.push((
-                    identifier,
-                    evaluate_hir_type(&expr, dlogger, type_name_table, type_typevalue_table),
-                ));
+                s_fields.push((identifier, evaluate_hir_type(&expr, dlogger, env)));
             }
             TypeValue::Union(s_fields)
         }
         hir::TypeExpr::Fn { paramtys, returnty } => TypeValue::Fn {
             paramtys: paramtys
                 .iter()
-                .map(|x| evaluate_hir_type(x, dlogger, type_name_table, type_typevalue_table))
+                .map(|x| evaluate_hir_type(x, dlogger, env))
                 .collect(),
-            returntype: Box::new(evaluate_hir_type(
-                &returnty,
-                dlogger,
-                type_name_table,
-                type_typevalue_table,
-            )),
+            returntype: Box::new(evaluate_hir_type(&returnty, dlogger, env)),
         },
         // substitute the generic arguments into the body
         hir::TypeExpr::Concretization { genericty, tyargs } => {
             // first we evaluate the type of the generic function (peeking past identifiers)
-            fn evaluate_past_identifiers(
-                v: TypeValue,
-                type_typevalue_table: &mut Vec<Vec<TypeValue>>,
-            ) -> TypeValue {
-                match v {
-                    TypeValue::Identifier(id) => evaluate_past_identifiers(
-                        type_typevalue_table[id].last().unwrap().clone(),
-                        type_typevalue_table,
-                    ),
-                    x => x,
-                }
-            }
-            let generic_val = evaluate_past_identifiers(
-                evaluate_hir_type(&genericty, dlogger, type_name_table, type_typevalue_table),
-                type_typevalue_table,
-            );
+            let generic_val = env.evaluate_nominal(evaluate_hir_type(&genericty, dlogger, env));
+            let tyargs = tyargs
+                .iter()
+                .map(|x| evaluate_hir_type(x, dlogger, env))
+                .collect::<Vec<_>>();
             match generic_val {
                 TypeValue::Error => TypeValue::Error,
+                TypeValue::SymbolicVariable(id) => TypeValue::Concretization {
+                    symbolic_constructor: id,
+                    tyargs,
+                },
                 TypeValue::RefConstructor => {
                     assert!(tyargs.len() == 1, "wrong number of arguments");
-                    TypeValue::Ref(Box::new(evaluate_hir_type(
-                        &tyargs[0],
-                        dlogger,
-                        type_name_table,
-                        type_typevalue_table,
-                    )))
+                    TypeValue::Ref(Box::new(tyargs[0]))
                 }
                 TypeValue::ArrayConstructor => {
                     assert!(tyargs.len() == 2, "wrong number of arguments");
-                    let elem_type = evaluate_hir_type(
-                        &tyargs[0],
-                        dlogger,
-                        type_name_table,
-                        type_typevalue_table,
-                    );
-                    let elem_num_tyval = evaluate_hir_type(
-                        &tyargs[1],
-                        dlogger,
-                        type_name_table,
-                        type_typevalue_table,
-                    );
-                    let elem_num = match elem_num_tyval {
-                        TypeValue::IntLit(x) => x.try_into().unwrap_or_else(|_| {
-                            if x.is_negative() {
-                                dlogger.log_array_length_negative(tyargs[1].range, x);
-                            } else {
-                                dlogger.log_array_length_too_large(tyargs[1].range, x);
-                            }
-                            0
-                        }),
-                        // should have been kindchecked
-                        _ => unreachable!("invalid kind"),
-                    };
-                    TypeValue::Array(Box::new(elem_type), elem_num)
+                    TypeValue::Array(Box::new(tyargs[0]), Box::new(tyargs[1]))
                 }
                 TypeValue::SliceConstructor => {
                     assert!(tyargs.len() == 1, "wrong number of arguments");
-                    TypeValue::Slice(Box::new(evaluate_hir_type(
-                        &tyargs[0],
-                        dlogger,
-                        type_name_table,
-                        type_typevalue_table,
-                    )))
+                    TypeValue::Ref(Box::new(tyargs[0]))
                 }
                 TypeValue::IntConstructor => {
                     assert!(tyargs.len() == 1, "wrong number of arguments");
-                    let bits_num_tyval = evaluate_hir_type(
-                        &tyargs[0],
-                        dlogger,
-                        type_name_table,
-                        type_typevalue_table,
-                    );
-                    let bits_num = match bits_num_tyval {
-                        TypeValue::IntLit(x) => {
-                            if x.is_negative() {
-                                dlogger.log_num_bits_negative(tyargs[1].range, x);
-                            } else {
-                                dlogger.log_num_bits_too_large(tyargs[1].range, u8::MAX as u32, x);
-                            }
-                            0
-                        }
-                        // should have been kindchecked
-                        _ => unreachable!(),
-                    };
-                    TypeValue::Int(bits_num)
+                    TypeValue::Int(Box::new(tyargs[0]))
                 }
                 TypeValue::UIntConstructor => {
                     assert!(tyargs.len() == 1, "wrong number of arguments");
-                    let bits_num_tyval = evaluate_hir_type(
-                        &tyargs[0],
-                        dlogger,
-                        type_name_table,
-                        type_typevalue_table,
-                    );
-                    let bits_num = match bits_num_tyval {
-                        TypeValue::IntLit(x) => {
-                            if x.is_negative() {
-                                dlogger.log_num_bits_negative(tyargs[1].range, x);
-                            } else {
-                                dlogger.log_num_bits_too_large(tyargs[1].range, u8::MAX as u32, x);
-                            }
-                            0
-                        }
-                        // should have been kindchecked
-                        _ => unreachable!(),
-                    };
-                    TypeValue::UInt(bits_num)
+                    TypeValue::UInt(Box::new(tyargs[0]))
                 }
                 TypeValue::FloatConstructor => {
                     assert!(tyargs.len() == 1, "wrong number of arguments");
-                    let bits_num_tyval = evaluate_hir_type(
-                        &tyargs[0],
-                        dlogger,
-                        type_name_table,
-                        type_typevalue_table,
-                    );
-                    let bits_num = match bits_num_tyval {
-                        TypeValue::IntLit(x) => {
-                            if x.is_negative() {
-                                dlogger.log_num_bits_negative(tyargs[1].range, x);
-                            } else {
-                                dlogger.log_num_bits_too_large(tyargs[1].range, u8::MAX as u32, x);
-                            }
-                            0
-                        }
-                        // should have been kindchecked
-                        _ => unreachable!(),
-                    };
-                    TypeValue::Float(bits_num)
+                    TypeValue::Float(Box::new(tyargs[0]))
                 }
-                TypeValue::Constructor { typarams, body, .. } => {
+                TypeValue::Constructor { typarams, body } => {
                     assert!(typarams.len() == tyargs.len(), "wrong number of arguments");
-                    let tyvalues = tyargs
-                        .iter()
-                        .map(|x| {
-                            evaluate_hir_type(x, dlogger, type_name_table, type_typevalue_table)
-                        })
-                        .collect::<Vec<_>>();
-                    for (typat, tyval) in std::iter::zip(typarams, tyvalues) {
-                        intro_typepat(typat, tyval, type_typevalue_table)
+                    for (ref typat, tyarg) in std::iter::zip(typarams, tyargs) {
+                        env.intro_type_binding(typat, tyarg)
                     }
-                    let bodytype =
-                        evaluate_hir_type(&body, dlogger, type_name_table, type_typevalue_table);
-                    for (typat, tyval) in std::iter::zip(typarams, tyvalues.iter()) {
-                        elim_typepat(typat, type_typevalue_table)
+                    let bodytype = substitute_symbolic_typevalue(&body, dlogger, env);
+                    for ref typat in typarams {
+                        env.elim_type_binding(typat)
                     }
                     bodytype
                 }
@@ -532,6 +436,112 @@ pub fn evaluate_hir_type(
                 }
             }
         }
+    }
+}
+
+fn substitute_symbolic_typevalue(
+    v: &TypeValue,
+    dlogger: &mut DiagnosticLogger,
+    env: &mut Env,
+) -> TypeValue {
+    match v {
+        TypeValue::SymbolicVariable(id) => match env.type_bindings[*id].last() {
+            Some(ty) => ty.clone(),
+            None => TypeValue::SymbolicVariable(*id),
+        },
+        TypeValue::Ref(v) => {
+            TypeValue::Ref(Box::new(substitute_symbolic_typevalue(v, dlogger, env)))
+        }
+        TypeValue::Array(v, s) => TypeValue::Array(
+            Box::new(substitute_symbolic_typevalue(v, dlogger, env)),
+            Box::new(substitute_symbolic_typevalue(s, dlogger, env)),
+        ),
+        TypeValue::Slice(v) => {
+            TypeValue::Slice(Box::new(substitute_symbolic_typevalue(v, dlogger, env)))
+        }
+        TypeValue::Int(v) => {
+            TypeValue::Int(Box::new(substitute_symbolic_typevalue(v, dlogger, env)))
+        }
+        TypeValue::UInt(v) => {
+            TypeValue::UInt(Box::new(substitute_symbolic_typevalue(v, dlogger, env)))
+        }
+        TypeValue::Float(v) => {
+            TypeValue::Float(Box::new(substitute_symbolic_typevalue(v, dlogger, env)))
+        }
+        TypeValue::Fn {
+            paramtys,
+            returntype,
+        } => TypeValue::Fn {
+            paramtys: paramtys
+                .iter()
+                .map(|ty| substitute_symbolic_typevalue(ty, dlogger, env))
+                .collect(),
+            returntype: Box::new(substitute_symbolic_typevalue(&returntype, dlogger, env)),
+        },
+        TypeValue::Struct(fields) => TypeValue::Struct(
+            fields
+                .iter()
+                .map(|(name, ty)| {
+                    (
+                        name.clone(),
+                        substitute_symbolic_typevalue(ty, dlogger, env),
+                    )
+                })
+                .collect(),
+        ),
+        TypeValue::Enum(fields) => TypeValue::Enum(
+            fields
+                .iter()
+                .map(|(name, ty)| {
+                    (
+                        name.clone(),
+                        substitute_symbolic_typevalue(ty, dlogger, env),
+                    )
+                })
+                .collect(),
+        ),
+        TypeValue::Union(fields) => TypeValue::Union(
+            fields
+                .iter()
+                .map(|(name, ty)| {
+                    (
+                        name.clone(),
+                        substitute_symbolic_typevalue(ty, dlogger, env),
+                    )
+                })
+                .collect(),
+        ),
+        TypeValue::Constructor { typarams, body } => TypeValue::Constructor {
+            typarams: typarams.clone(),
+            body: Box::new(substitute_symbolic_typevalue(&body, dlogger, env)),
+        },
+        TypeValue::Generic { typarams, body } => TypeValue::Generic {
+            typarams: typarams.clone(),
+            body: Box::new(substitute_symbolic_typevalue(&body, dlogger, env)),
+        },
+        TypeValue::Concretization {
+            symbolic_constructor,
+            tyargs,
+        } => {
+            let tyargs = tyargs
+                .iter()
+                .map(|ty| substitute_symbolic_typevalue(ty, dlogger, env))
+                .collect::<Vec<_>>();
+            match env.type_bindings[*symbolic_constructor].last() {
+                Some(TypeValue::Constructor { typarams, body }) => {
+                    for (typat, tyarg) in std::iter::zip(typarams, tyargs) {
+                        env.intro_type_binding(typat, tyarg)
+                    }
+                    substitute_symbolic_typevalue(&body, dlogger, &mut env)
+                }
+                Some(_) => unreachable!("concretization of a non-constructor"),
+                None => TypeValue::Concretization {
+                    symbolic_constructor: *symbolic_constructor,
+                    tyargs,
+                },
+            }
+        }
+        _ => v.clone(),
     }
 }
 
@@ -591,12 +601,31 @@ pub fn typecheck_hir_blockstatement(
 ) {
     match v.val {
         hir::BlockStatement::NoOp => {}
-        hir::BlockStatement::TypeDef { .. } => {}
+        // should already be typechecked
+        hir::BlockStatement::TypeDef {
+            typarams,
+            typat,
+            value,
+        } => match typarams.as_slice() {
+            [] => {
+                let tyval = evaluate_hir_type(
+                    &value,
+                    dlogger,
+                    val_name_table,
+                    val_type_table,
+                    &mut Vec::new(),
+                );
+                intro_type_binding_typat(&typat, tyval, val_type_table);
+            }
+        },
         hir::BlockStatement::ValDef {
             typarams,
             pat,
             value,
-        } => val_type_t,
+        } => {
+            // need to push the type params onto the type stack
+            // then we value in terms of
+        }
         hir::BlockStatement::FnDef {
             typarams,
             identifier,
@@ -604,7 +633,13 @@ pub fn typecheck_hir_blockstatement(
             returnty,
             body,
         } => todo!(),
-        hir::BlockStatement::Set { place, value } => todo!(),
+        hir::BlockStatement::Set {
+            ref place,
+            ref value,
+        } => {
+            let ty = typecheck_hir_value_infermode(place, dlogger, val_name_table, val_type_table);
+            typecheck_hir_value_checkmode(value, dlogger, val_name_table, val_type_table, &ty);
+        }
         hir::BlockStatement::While { ref cond, ref body } => {
             typecheck_hir_value_checkmode(
                 cond,
@@ -711,7 +746,10 @@ pub fn typecheck_hir_value_infermode(
         hir::ValExpr::Bool(_) => TypeValue::Bool,
         hir::ValExpr::Float(_) => TypeValue::Float(64),
         hir::ValExpr::String(_) => TypeValue::Slice(Box::new(TypeValue::Int(8))),
-        hir::ValExpr::Identifier(id) => TypeValue::Identifier(*id),
+        hir::ValExpr::Identifier(id) => val_type_table[*id]
+            .last()
+            .expect("identifier not initialized with type")
+            .clone(),
         hir::ValExpr::Ref(v) => TypeValue::Ref(Box::new(typecheck_hir_value_infermode(
             v,
             dlogger,
@@ -937,6 +975,36 @@ pub fn typecheck_hir_value_infermode(
                 }
             }
         }
+        hir::ValExpr::ArrayLiteral(ref elems) => {
+            let elems_iter = elems.iter();
+            match elems_iter.next() {
+                None => {
+                    dlogger.log_cannot_infer_array_type(v.range);
+                    TypeValue::Error
+                }
+                Some(first) => {
+                    let first_type = typecheck_hir_value_infermode(
+                        first,
+                        dlogger,
+                        val_name_table,
+                        val_type_table,
+                    );
+                    for elem in elems_iter {
+                        typecheck_hir_value_checkmode(
+                            elem,
+                            dlogger,
+                            val_name_table,
+                            val_type_table,
+                            &first_type,
+                        );
+                    }
+                    TypeValue::Array(Box::new(first_type), elems.len().try_into().unwrap())
+                }
+            }
+        }
+        // concretize a generic val
+        hir::ValExpr::Concretization { generic, tyargs } => {}
+        hir::ValExpr::App { fun, args } => todo!(),
     }
 }
 
@@ -948,11 +1016,8 @@ pub fn typecheck_hir_pat_checkmode(
     val_type_table: &mut Vec<Vec<TypeValue>>,
     expected_type: &TypeValue,
 ) {
-    match pat.val {
-        
-    }
+    match pat.val {}
 }
-
 
 pub fn typecheck_hir_case_checkpat_inferbody(
     case: &Augmented<hir::CaseExpr>,
@@ -979,13 +1044,7 @@ pub fn typecheck_hir_case_checkpat_inferbody(
             }
         }
         (hir::CaseTargetExpr::PatExpr(ref pat), _) => {
-            typecheck_hir_pat_checkmode(
-                pat,
-                dlogger,
-                val_name_table,
-                val_type_table,
-                expr_type,
-            );
+            typecheck_hir_pat_checkmode(pat, dlogger, val_name_table, val_type_table, expr_type);
         }
         _ => {
             dlogger.log_case_target_type_mismatch(
@@ -995,14 +1054,8 @@ pub fn typecheck_hir_case_checkpat_inferbody(
             );
         }
     }
-    typecheck_hir_value_infermode(
-        &case.val.body,
-        dlogger,
-        val_name_table,
-        val_type_table,
-    )
+    typecheck_hir_value_infermode(&case.val.body, dlogger, val_name_table, val_type_table)
 }
-
 
 pub fn typecheck_hir_value_checkmode(
     v: &Augmented<hir::ValExpr>,

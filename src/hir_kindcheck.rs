@@ -1,8 +1,8 @@
 use lsp_types::Range;
 
-use crate::hir::Augmented;
 use crate::dlogger::DiagnosticLogger;
 use crate::hir;
+use crate::hir::Augmented;
 use crate::types;
 use crate::types::KindValue;
 
@@ -48,13 +48,14 @@ impl<'d, 't> hir::HirVisitor for KindChecker<'d, 't> {
                 match typat.val {
                     hir::TypePatExpr::Error => {}
                     hir::TypePatExpr::Identifier { id, .. } => {
-                        let kind = if typarams.len() == 0 {
-                            self.type_kind_table[id].unwrap()
-                        } else {
-                            match self.type_kind_table[id].unwrap() {
+                        let kind = match typarams.len() {
+                            // if no type params then we get the value
+                            0 => self.type_kind_table[id].unwrap(),
+                            // if it has type params then we check the return type
+                            _ => match self.type_kind_table[id].unwrap() {
                                 KindValue::Constructor { returnkind, .. } => *returnkind,
                                 _ => unreachable!("this should be a type constructor"),
-                            }
+                            },
                         };
                         types::kindcheck_hir_type_checkmode(
                             value,
@@ -64,16 +65,6 @@ impl<'d, 't> hir::HirVisitor for KindChecker<'d, 't> {
                             &mut self.type_kind_table,
                         );
                     }
-                }
-                hir::FileStatement::ValDef {
-                    typarams,
-                    ref mut value,
-                    ..
-                } => {
-                    for ref mut typaram in typarams {
-                        self.visit_type_pat_expr(typaram);
-                    }
-                    
                 }
             }
             _ => self.dfs_visit_file_statement(statement),
@@ -133,7 +124,8 @@ pub fn do_kindcheck(
         dlogger,
         type_range_table,
         type_name_table,
-        type_kind_table: gkc.type_kind_table,
+        // vec of nones with same length as the type range table
+        type_kind_table: type_range_table.iter().map(|_| None).collect(),
     };
     hir::HirVisitor::visit_translation_unit(&mut kc, ast);
     kc.type_kind_table.into_iter().map(|x| x.unwrap()).collect()

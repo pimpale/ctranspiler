@@ -697,4 +697,18 @@ impl DiagnosticLogger {
             data: None,
         })
     }
+
+    pub fn log_cannot_infer_array_type(&mut self, range: Range) {
+        self.log(Diagnostic {
+            range,
+            severity: Some(DiagnosticSeverity::ERROR),
+            code: Some(NumberOrString::Number(56)),
+            code_description: None,
+            source: self.source.clone(),
+            message: format!("cannot infer array type"),
+            related_information: None,
+            tags: None,
+            data: None,
+        })
+    }
 }
