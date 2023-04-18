@@ -7,6 +7,7 @@ use lsp_types::NumberOrString;
 use lsp_types::Range;
 use lsp_types::Url;
 use num_bigint::BigInt;
+use std::ops::BitAnd;
 use std::sync::mpsc::channel;
 use std::sync::mpsc::Receiver;
 use std::sync::mpsc::Sender;
@@ -507,8 +508,7 @@ impl DiagnosticLogger {
             source: self.source.clone(),
             message: format!(
                 "num bits must be less than {}, but found {}",
-                max_bits,
-                provided_bits
+                max_bits, provided_bits
             ),
             related_information: None,
             tags: None,
@@ -600,7 +600,7 @@ impl DiagnosticLogger {
         })
     }
 
-    pub fn log_int_too_large(&mut self, range: Range, nbits: u32) {
+    pub fn log_int_too_large(&mut self, range: Range, nbits: &BigInt) {
         self.log(Diagnostic {
             range,
             severity: Some(DiagnosticSeverity::ERROR),
@@ -614,7 +614,7 @@ impl DiagnosticLogger {
         })
     }
 
-    pub fn log_int_too_small(&mut self, range: Range, nbits: u32) {
+    pub fn log_int_too_small(&mut self, range: Range, nbits: &BigInt) {
         self.log(Diagnostic {
             range,
             severity: Some(DiagnosticSeverity::ERROR),
@@ -642,14 +642,17 @@ impl DiagnosticLogger {
         })
     }
 
-    pub fn log_uint_too_large(&mut self, range: Range, nbits: u32) {
+    pub fn log_uint_too_large(&mut self, range: Range, nbits: &BigInt) {
         self.log(Diagnostic {
             range,
             severity: Some(DiagnosticSeverity::ERROR),
             code: Some(NumberOrString::Number(52)),
             code_description: None,
             source: self.source.clone(),
-            message: format!("unsigned integer literal too large for {}-bit unsigned integer", nbits),
+            message: format!(
+                "unsigned integer literal too large for {}-bit unsigned integer",
+                nbits
+            ),
             related_information: None,
             tags: None,
             data: None,
@@ -706,6 +709,48 @@ impl DiagnosticLogger {
             code_description: None,
             source: self.source.clone(),
             message: format!("cannot infer array type"),
+            related_information: None,
+            tags: None,
+            data: None,
+        })
+    }
+
+    pub fn log_concretization_of_non_generic(&mut self, range: Range) {
+        self.log(Diagnostic {
+            range,
+            severity: Some(DiagnosticSeverity::ERROR),
+            code: Some(NumberOrString::Number(57)),
+            code_description: None,
+            source: self.source.clone(),
+            message: format!("trying to concretize non-generic"),
+            related_information: None,
+            tags: None,
+            data: None,
+        })
+    }
+
+    pub fn log_struct_pattern_field_not_in_struct(&mut self, range: Range, field: &str) {
+        self.log(Diagnostic {
+            range,
+            severity: Some(DiagnosticSeverity::ERROR),
+            code: Some(NumberOrString::Number(58)),
+            code_description: None,
+            source: self.source.clone(),
+            message: format!("field `{}` not in struct", field),
+            related_information: None,
+            tags: None,
+            data: None,
+        })
+    }
+    
+    pub fn log_struct_pattern_on_non_struct(&mut self, range: Range) {
+        self.log(Diagnostic {
+            range,
+            severity: Some(DiagnosticSeverity::ERROR),
+            code: Some(NumberOrString::Number(59)),
+            code_description: None,
+            source: self.source.clone(),
+            message: format!("cannot destructure on non-struct type"),
             related_information: None,
             tags: None,
             data: None,

@@ -610,7 +610,7 @@ fn translate_valexpr(v: ast::ValExpr, env: &mut Environment) -> ValExpr {
             else_branch: else_branch.map(|x| Box::new(tr_aug(*x, env, translate_elseexpr))),
         },
         ast::ValExpr::CaseOf { expr, cases } => {
-            let cases = cases
+            let mut cases = cases
                 .into_iter()
                 .map(|x| tr_aug(x, env, translate_caseexpr))
                 .collect::<VecDeque<_>>();

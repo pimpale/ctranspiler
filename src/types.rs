@@ -1,6 +1,7 @@
 use crate::dlogger::DiagnosticLogger;
 use crate::hir;
 use crate::hir::Augmented;
+use lsp_types::Range;
 use num_bigint::BigInt;
 use num_rational::BigRational;
 use num_traits::Signed;
@@ -37,6 +38,103 @@ impl std::fmt::Display for KindValue {
                 write!(f, "], returnkind: {} }}", returnkind)
             }
         }
+    }
+}
+
+pub fn print_type_value(ty: &TypeValue, env: &Env) -> String {
+    match ty {
+        TypeValue::Error => "Error".to_string(),
+        TypeValue::SymbolicVariable(id) => {
+            format!("SymbolicVariable({})", env.type_name_table[*id])
+        }
+        TypeValue::Nominal(id) => format!("Nominal({})", env.type_name_table[*id]),
+        TypeValue::Unit => "Unit".to_string(),
+        TypeValue::Bool => "Bool".to_string(),
+        TypeValue::RefConstructor => "RefConstructor".to_string(),
+        TypeValue::ArrayConstructor => "ArrayConstructor".to_string(),
+        TypeValue::SliceConstructor => "SliceConstructor".to_string(),
+        TypeValue::IntConstructor => "IntConstructor".to_string(),
+        TypeValue::UIntConstructor => "UIntConstructor".to_string(),
+        TypeValue::FloatConstructor => "FloatConstructor".to_string(),
+        TypeValue::Ref(ty) => format!("Ref({})", print_type_value(ty, env)),
+        TypeValue::Array(ty, size) => format!(
+            "Array({}, {})",
+            print_type_value(ty, env),
+            print_type_value(size, env)
+        ),
+        TypeValue::Slice(ty) => format!("Slice({})", print_type_value(ty, env)),
+        TypeValue::Int(ty) => format!("Int({})", print_type_value(ty, env)),
+        TypeValue::UInt(ty) => format!("UInt({})", print_type_value(ty, env)),
+        TypeValue::Float(ty) => format!("Float({})", print_type_value(ty, env)),
+        TypeValue::IntLit(n) => format!("IntLit({})", n),
+        TypeValue::BoolLit(b) => format!("BoolLit({})", b),
+        TypeValue::FloatLit(n) => format!("FloatLit({})", n),
+        TypeValue::Fn {
+            paramtys,
+            returntype,
+        } => format!(
+            "Fn {{ paramtys: [{}], returntype: {} }}",
+            paramtys
+                .iter()
+                .map(|ty| print_type_value(ty, env))
+                .collect::<Vec<String>>()
+                .join(", "),
+            print_type_value(returntype, env)
+        ),
+        TypeValue::Struct(fields) => format!(
+            "Struct {{ fields: [{}] }}",
+            fields
+                .iter()
+                .map(|(name, ty)| format!("{}: {}", name, print_type_value(ty, env)))
+                .collect::<Vec<String>>()
+                .join(", ")
+        ),
+        TypeValue::Enum(fields) => format!(
+            "Enum {{ fields: [{}] }}",
+            fields
+                .iter()
+                .map(|(name, ty)| format!("{}: {}", name, print_type_value(ty, env)))
+                .collect::<Vec<String>>()
+                .join(", ")
+        ),
+        TypeValue::Union(fields) => format!(
+            "Union {{ fields: [{}] }}",
+            fields
+                .iter()
+                .map(|(name, ty)| format!("{}: {}", name, print_type_value(ty, env)))
+                .collect::<Vec<String>>()
+                .join(", ")
+        ),
+        TypeValue::Constructor { typarams, body } => format!(
+            "Constructor {{ typarams: [{}], body: {} }}",
+            typarams
+                .iter()
+                .map(|ty| print_type_value(ty, env))
+                .collect::<Vec<String>>()
+                .join(", "),
+            print_type_value(body, env)
+        ),
+        TypeValue::Generic { typarams, body } => format!(
+            "Generic {{ typarams: [{}], body: {} }}",
+            typarams
+                .iter()
+                .map(|ty| print_type_value(ty, env))
+                .collect::<Vec<String>>()
+                .join(", "),
+            print_type_value(body, env)
+        ),
+        TypeValue::Concretization {
+            symbolic_constructor,
+            tyargs,
+        } => format!(
+            "Concretization {{ symbolic_constructor: {}, tyargs: [{}] }}",
+            env.type_name_table[*symbolic_constructor],
+            tyargs
+                .iter()
+                .map(|ty| print_type_value(ty, env))
+                .collect::<Vec<String>>()
+                .join(", ")
+        ),
     }
 }
 
@@ -410,21 +508,30 @@ pub fn typecheck_hir_type_infermode(
         hir::TypeExpr::Struct(fields) => {
             let mut s_fields = vec![];
             for (identifier, expr) in fields {
-                s_fields.push((identifier, typecheck_hir_type_infermode(&expr, dlogger, env)));
+                s_fields.push((
+                    identifier,
+                    typecheck_hir_type_infermode(&expr, dlogger, env),
+                ));
             }
             TypeValue::Struct(s_fields)
         }
         hir::TypeExpr::Enum(fields) => {
             let mut s_fields = vec![];
             for (identifier, expr) in fields {
-                s_fields.push((identifier, typecheck_hir_type_infermode(&expr, dlogger, env)));
+                s_fields.push((
+                    identifier,
+                    typecheck_hir_type_infermode(&expr, dlogger, env),
+                ));
             }
             TypeValue::Enum(s_fields)
         }
         hir::TypeExpr::Union(fields) => {
             let mut s_fields = vec![];
             for (identifier, expr) in fields {
-                s_fields.push((identifier, typecheck_hir_type_infermode(&expr, dlogger, env)));
+                s_fields.push((
+                    identifier,
+                    typecheck_hir_type_infermode(&expr, dlogger, env),
+                ));
             }
             TypeValue::Union(s_fields)
         }
@@ -438,7 +545,8 @@ pub fn typecheck_hir_type_infermode(
         // substitute the generic arguments into the body
         hir::TypeExpr::Concretization { genericty, tyargs } => {
             // first we evaluate the type of the generic function (peeking past identifiers)
-            let generic_val = env.evaluate_nominal(typecheck_hir_type_infermode(&genericty, dlogger, env));
+            let generic_val =
+                env.evaluate_nominal(typecheck_hir_type_infermode(&genericty, dlogger, env));
             let tyargs = tyargs
                 .iter()
                 .map(|x| typecheck_hir_type_infermode(x, dlogger, env))
@@ -829,7 +937,7 @@ pub fn typecheck_hir_value_infermode(
             }
         }
         hir::ValExpr::ArrayLiteral(ref elems) => {
-            let elems_iter = elems.iter();
+            let mut elems_iter = elems.iter();
             match elems_iter.next() {
                 None => {
                     dlogger.log_cannot_infer_array_type(v.range);
@@ -855,20 +963,18 @@ pub fn typecheck_hir_value_infermode(
                 .map(|tyarg| typecheck_hir_type_infermode(tyarg, dlogger, env))
                 .collect::<Vec<_>>();
             match generic_type {
-                TypeValue::Generic { ref body, ref typarams } => {
+                TypeValue::Generic {
+                    ref body,
+                    ref typarams,
+                } => {
                     if tyargs.len() != typarams.len() {
-                        dlogger.log_generic_type_mismatch(
-                            v.range,
-                            name,
-                            typarams.len(),
-                            tyargs.len(),
-                        );
+                        dlogger.log_wrong_number_type_args(v.range, typarams.len(), tyargs.len());
                         TypeValue::Error
                     } else {
                         for (tyval, typat) in std::iter::zip(tyargs, typarams) {
                             env.intro_type_binding(typat, tyval);
                         }
-                        let ty = substitute_symbolic_typevalue(body, dlogger, env)
+                        let ty = substitute_symbolic_typevalue(body, dlogger, env);
                         for typat in typarams {
                             env.elim_type_binding(typat);
                         }
@@ -892,31 +998,30 @@ fn intro_and_typecheck_hir_pat_checkmode(
     expected_type: &TypeValue,
 ) {
     match pat.val {
-        hir::PatExpr::Error => {},
-        hir::PatExpr::Ignore => {},
+        hir::PatExpr::Error => {}
+        hir::PatExpr::Ignore => {}
         hir::PatExpr::Identifier { mutable, id } => {
             env.val_type_table[id] = Some(expected_type.clone());
-        },
+        }
         hir::PatExpr::StructLiteral(got_fields) => match expected_type {
             TypeValue::Struct(expected_fields) => {
                 for (ref field_name, ref field_pat) in got_fields {
-                    let mut found = false;
-                    for (expected_name, expected_type) in expected_fields {
-                        if field_name == expected_name {
-                            found = true;
+                    let field_type = expected_fields
+                        .iter()
+                        .find(|(n, _)| n == field_name)
+                        .map(|(_, t)| t);
+                    match field_type {
+                        Some(field_type) => {
                             intro_and_typecheck_hir_pat_checkmode(
-                                field_pat,
-                                dlogger,
-                                env,
-                                expected_type,
+                                field_pat, dlogger, env, field_type,
                             );
                         }
-                    }
-                    if !found {
-                        dlogger.log_struct_pattern_field_not_in_struct(
-                            field_pat.range,
-                            field_name,
-                        );
+                        None => {
+                            dlogger.log_struct_pattern_field_not_in_struct(
+                                field_pat.range,
+                                field_name,
+                            );
+                        }
                     }
                 }
             }
@@ -925,12 +1030,48 @@ fn intro_and_typecheck_hir_pat_checkmode(
             }
         },
         hir::PatExpr::Typed { ref pat, ref ty } => {
-            let pat_ty = evaluate_hir_type(ty, dlogger, env);
+            let pat_ty = typecheck_hir_type_infermode(ty, dlogger, env);
             if !pat_ty.is_subtype_of(expected_type) {
-                dlogger.log_type_mismatch(ty.range, expected_type, &pat_ty);
+                dlogger.log_type_mismatch(
+                    ty.range,
+                    &print_type_value(expected_type, env),
+                    &print_type_value(&pat_ty, env),
+                );
             }
             intro_and_typecheck_hir_pat_checkmode(pat, dlogger, env, &pat_ty);
-        },
+        }
+    }
+}
+
+fn typecheck_numerical_literal(
+    i: &BigInt,
+    nbits: &TypeValue,
+    signed: bool,
+    dlogger: &mut DiagnosticLogger,
+    range: Range,
+) {
+    // the number of bits needed to fully represent the magnitude of i
+    let ibits = BigInt::from(i.bits());
+    // the number of bits needed to fully represent the magnitude of (i + 1)
+    let i_plus_one_bits = BigInt::from((i + BigInt::from(1)).bits());
+    match nbits {
+        TypeValue::IntLit(nbits) => {
+            if signed {
+                if i.is_negative() && &i_plus_one_bits >= nbits {
+                    dlogger.log_int_too_small(range, nbits);
+                } else if ibits >= nbits - 1 {
+                    dlogger.log_int_too_large(range, nbits);
+                }
+            } else {
+                if i.is_negative() {
+                    dlogger.log_uint_negative(range);
+                } else if &ibits >= nbits {
+                    dlogger.log_uint_too_large(range, nbits);
+                }
+            }
+        }
+        TypeValue::SymbolicVariable(_) => {}
+        _ => unreachable!("should have been kindchecked"),
     }
 }
 
@@ -943,48 +1084,23 @@ fn intro_and_typecheck_hir_targetexpr(
     match (target.val, expr_type) {
         (hir::CaseTargetExpr::Unit, TypeValue::Unit) => {}
         (hir::CaseTargetExpr::Bool(_), TypeValue::Bool) => {}
-        (hir::CaseTargetExpr::Int(i), TypeValue::Int(nbits)) => {
-            if i >= BigInt::from(2).pow(*nbits as u32) {
-                dlogger.log_int_too_large(target.range, *nbits as u32);
-            } else if i < BigInt::from(2).pow(*nbits as u32 - 1) {
-                dlogger.log_int_too_small(target.range, *nbits as u32);
-            }
+        (hir::CaseTargetExpr::Int(ref i), TypeValue::Int(nbits)) => {
+            typecheck_numerical_literal(i, nbits, true, dlogger, target.range)
         }
-        (hir::CaseTargetExpr::Int(i), TypeValue::UInt(nbits)) => {
-            if i.is_negative() {
-                dlogger.log_uint_negative(target.range);
-            } else if i >= BigInt::from(2).pow(*nbits as u32) {
-                dlogger.log_uint_too_large(target.range, *nbits as u32);
-            }
+        (hir::CaseTargetExpr::Int(ref i), TypeValue::UInt(nbits)) => {
+            typecheck_numerical_literal(i, nbits, false, dlogger, target.range)
         }
         (hir::CaseTargetExpr::PatExpr(ref pat), _) => {
             intro_and_typecheck_hir_pat_checkmode(pat, dlogger, env, expr_type);
         }
         _ => {
-            dlogger.log_case_target_type_mismatch(target.range, expr_type, &target.val);
+            dlogger.log_case_target_type_mismatch(
+                target.range,
+                print_type_value(expr_type, env),
+                print_case_target(&target.val),
+            );
         }
     }
-}
-
-pub fn typecheck_hir_case_checkpat_checkbody(
-    case: &Augmented<hir::CaseExpr>,
-    dlogger: &mut DiagnosticLogger,
-    env: &mut Env,
-    expr_type: &TypeValue,
-    body_type: &TypeValue,
-) {
-    intro_and_typecheck_hir_targetexpr(&case.val.target, dlogger, env, expr_type);
-    typecheck_hir_value_checkmode(&case.val.body, dlogger, env, body_type);
-}
-
-pub fn typecheck_hir_case_checkpat_inferbody(
-    case: &Augmented<hir::CaseExpr>,
-    dlogger: &mut DiagnosticLogger,
-    env: &mut Env,
-    expr_type: &TypeValue,
-) -> TypeValue {
-    intro_and_typecheck_hir_targetexpr(&case.val.target, dlogger, env, expr_type);
-    typecheck_hir_value_infermode(&case.val.body, dlogger, env)
 }
 
 pub fn typecheck_hir_value_checkmode(
@@ -995,19 +1111,11 @@ pub fn typecheck_hir_value_checkmode(
 ) {
     match (v.val, expected_type) {
         // special case for literals
-        (hir::ValExpr::Int(i), TypeValue::Int(nbits)) => {
-            if i >= BigInt::from(2).pow(*nbits as u32) {
-                dlogger.log_int_too_large(v.range, *nbits as u32);
-            } else if i < BigInt::from(2).pow(*nbits as u32 - 1) {
-                dlogger.log_int_too_small(v.range, *nbits as u32);
-            }
+        (hir::ValExpr::Int(ref i), TypeValue::Int(nbits)) => {
+            typecheck_numerical_literal(i, nbits, true, dlogger, v.range)
         }
-        (hir::ValExpr::Int(i), TypeValue::UInt(nbits)) => {
-            if i.is_negative() {
-                dlogger.log_uint_negative(v.range);
-            } else if i >= BigInt::from(2).pow(*nbits as u32) {
-                dlogger.log_uint_too_large(v.range, *nbits as u32);
-            }
+        (hir::ValExpr::Int(ref i), TypeValue::UInt(nbits)) => {
+            typecheck_numerical_literal(i, nbits, false, dlogger, v.range)
         }
         (hir::ValExpr::Float(_), TypeValue::Float(_)) => {}
         // block expressions
@@ -1037,28 +1145,22 @@ pub fn typecheck_hir_value_checkmode(
             _,
         ) => {
             let expr_type = typecheck_hir_value_infermode(expr, dlogger, env);
-            typecheck_hir_case_checkpat_checkbody(
-                first_case,
-                dlogger,
-                env,
-                &expr_type,
-                expected_type,
-            );
+            intro_and_typecheck_hir_targetexpr(&first_case.val.target, dlogger, env, &expr_type);
+            typecheck_hir_value_checkmode(&first_case.val.body, dlogger, env, expected_type);
             for case in rest_cases {
-                typecheck_hir_case_checkpat_checkbody(
-                    case,
-                    dlogger,
-                    env,
-                    &expr_type,
-                    expected_type,
-                );
+                intro_and_typecheck_hir_targetexpr(&case.val.target, dlogger, env, &expr_type);
+                typecheck_hir_value_checkmode(&case.val.body, dlogger, env, expected_type);
             }
         }
         // everything else
         _ => {
             let actual_type = typecheck_hir_value_infermode(v, dlogger, env);
             if actual_type.is_subtype_of(expected_type) {
-                dlogger.log_type_mismatch(v.range, expected_type, &actual_type);
+                dlogger.log_type_mismatch(
+                    v.range,
+                    &print_type_value(expected_type, env),
+                    &print_type_value(&actual_type, env),
+                );
             }
         }
     }
