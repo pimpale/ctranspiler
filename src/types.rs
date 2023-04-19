@@ -732,7 +732,11 @@ pub fn typecheck_hir_blockstatement(
             // get returntype
             let returnty = typecheck_hir_type_infermode(returnty, dlogger, env);
 
-            // TODO: bind function to identifier 
+            // intro the function
+            env.val_type_table[*identifier] = Some(TypeValue::Fn {
+                paramtys: params,
+                returntype: Box::new(returnty),
+            }); 
 
             // typecheck the body now that we know what type it should be as well as the param types
             typecheck_hir_blockexpr_checkmode(body, dlogger, env, &returnty);
