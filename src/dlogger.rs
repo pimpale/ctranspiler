@@ -7,7 +7,6 @@ use lsp_types::NumberOrString;
 use lsp_types::Range;
 use lsp_types::Url;
 use num_bigint::BigInt;
-use std::ops::BitAnd;
 use std::sync::mpsc::channel;
 use std::sync::mpsc::Receiver;
 use std::sync::mpsc::Sender;
@@ -742,7 +741,7 @@ impl DiagnosticLogger {
             data: None,
         })
     }
-    
+
     pub fn log_struct_pattern_on_non_struct(&mut self, range: Range) {
         self.log(Diagnostic {
             range,
@@ -751,6 +750,42 @@ impl DiagnosticLogger {
             code_description: None,
             source: self.source.clone(),
             message: format!("cannot destructure on non-struct type"),
+            related_information: None,
+            tags: None,
+            data: None,
+        })
+    }
+
+    pub fn log_case_target_type_mismatch(
+        &mut self,
+        range: Range,
+        expected_type: &str,
+        found_pattern: &str,
+    ) {
+        self.log(Diagnostic {
+            range,
+            severity: Some(DiagnosticSeverity::ERROR),
+            code: Some(NumberOrString::Number(60)),
+            code_description: None,
+            source: self.source.clone(),
+            message: format!(
+                "pattern `{}` is invalid for type `{}`",
+                found_pattern, expected_type,
+            ),
+            related_information: None,
+            tags: None,
+            data: None,
+        })
+    }
+
+    pub fn log_cannot_infer_pattern_type(&mut self, range: Range) {
+        self.log(Diagnostic {
+            range,
+            severity: Some(DiagnosticSeverity::ERROR),
+            code: Some(NumberOrString::Number(61)),
+            code_description: None,
+            source: self.source.clone(),
+            message: format!("cannot infer pattern type"),
             related_information: None,
             tags: None,
             data: None,

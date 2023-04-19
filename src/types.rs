@@ -109,7 +109,7 @@ pub fn print_type_value(ty: &TypeValue, env: &Env) -> String {
             "Constructor {{ typarams: [{}], body: {} }}",
             typarams
                 .iter()
-                .map(|ty| print_type_value(ty, env))
+                .map(|typaram| print_typaram(typaram, env))
                 .collect::<Vec<String>>()
                 .join(", "),
             print_type_value(body, env)
@@ -118,7 +118,7 @@ pub fn print_type_value(ty: &TypeValue, env: &Env) -> String {
             "Generic {{ typarams: [{}], body: {} }}",
             typarams
                 .iter()
-                .map(|ty| print_type_value(ty, env))
+                .map(|typaram| print_typaram(typaram, env))
                 .collect::<Vec<String>>()
                 .join(", "),
             print_type_value(body, env)
@@ -135,6 +135,15 @@ pub fn print_type_value(ty: &TypeValue, env: &Env) -> String {
                 .collect::<Vec<String>>()
                 .join(", ")
         ),
+    }
+}
+
+fn print_typaram(typaram: &TypeParam, env: &Env) -> String {
+    match typaram {
+        TypeParam::Error => "Error".to_string(),
+        TypeParam::SymbolicVariable { ref id, ref kind } => {
+            format!("Identifier {{ id: {}, kind: {} }}", id, kind)
+        }
     }
 }
 
@@ -162,6 +171,12 @@ pub fn evaluate_hir_kind(
             }
         }
     }
+}
+
+#[derive(Clone, Debug)]
+pub enum TypeParam {
+    Error,
+    SymbolicVariable { id: usize, kind: KindValue },
 }
 
 #[derive(Clone, Debug)]
@@ -203,12 +218,12 @@ pub enum TypeValue {
     Union(Vec<(String, TypeValue)>),
     // type of a type constructor. Instantiated at every use point.
     Constructor {
-        typarams: Vec<Augmented<hir::TypePatExpr>>,
+        typarams: Vec<TypeParam>,
         body: Box<TypeValue>,
     },
     // type of a generic value. Instantiated at every use point
     Generic {
-        typarams: Vec<Augmented<hir::TypePatExpr>>,
+        typarams: Vec<TypeParam>,
         body: Box<TypeValue>,
     },
     // where the type constructor is symbolic
@@ -216,6 +231,72 @@ pub enum TypeValue {
         symbolic_constructor: usize,
         tyargs: Vec<TypeValue>,
     },
+}
+
+impl TypeValue {
+    fn subst(self: &Self, env: &Env) -> TypeValue {
+        match self {
+            TypeValue::SymbolicVariable(id) => match env.type_bindings[*id].last() {
+                Some(ty) => ty.clone(),
+                None => TypeValue::SymbolicVariable(*id),
+            },
+            TypeValue::Ref(v) => TypeValue::Ref(Box::new(v.subst(env))),
+            TypeValue::Array(v, s) => {
+                TypeValue::Array(Box::new(v.subst(env)), Box::new(s.subst(env)))
+            }
+            TypeValue::Slice(v) => TypeValue::Slice(Box::new(v.subst(env))),
+            TypeValue::Int(v) => TypeValue::Int(Box::new(v.subst(env))),
+            TypeValue::UInt(v) => TypeValue::UInt(Box::new(v.subst(env))),
+            TypeValue::Float(v) => TypeValue::Float(Box::new(v.subst(env))),
+            TypeValue::Fn {
+                paramtys,
+                returntype,
+            } => TypeValue::Fn {
+                paramtys: paramtys.iter().map(|ty| ty.subst(env)).collect(),
+                returntype: Box::new(returntype.subst(env)),
+            },
+            TypeValue::Struct(fields) => TypeValue::Struct(
+                fields
+                    .iter()
+                    .map(|(name, ty)| (name.clone(), ty.subst(env)))
+                    .collect(),
+            ),
+            TypeValue::Enum(fields) => TypeValue::Enum(
+                fields
+                    .iter()
+                    .map(|(name, ty)| (name.clone(), ty.subst(env)))
+                    .collect(),
+            ),
+            TypeValue::Union(fields) => TypeValue::Union(
+                fields
+                    .iter()
+                    .map(|(name, ty)| (name.clone(), ty.subst(env)))
+                    .collect(),
+            ),
+            TypeValue::Constructor { typarams, body } => TypeValue::Constructor {
+                typarams: typarams.clone(),
+                body: Box::new(body.subst(env)),
+            },
+            TypeValue::Generic { typarams, body } => TypeValue::Generic {
+                typarams: typarams.clone(),
+                body: Box::new(body.subst(env)),
+            },
+            TypeValue::Concretization {
+                symbolic_constructor,
+                tyargs,
+            } => {
+                let tyargs = tyargs.iter().map(|ty| ty.subst(env)).collect::<Vec<_>>();
+                match env.type_bindings[*symbolic_constructor].last() {
+                    Some(constructor) => concretize_type_expr(constructor, tyargs, env),
+                    None => TypeValue::Concretization {
+                        symbolic_constructor: *symbolic_constructor,
+                        tyargs,
+                    },
+                }
+            }
+            _ => self.clone(),
+        }
+    }
 }
 
 // in infermode, we don't already know what kind the given expression has to be, so we infer it.
@@ -395,6 +476,7 @@ pub struct Env {
     pub val_name_table: Vec<String>,
     pub val_type_table: Vec<Option<TypeValue>>,
 }
+
 impl Env {
     fn evaluate_nominal(&self, v: TypeValue) -> TypeValue {
         match v {
@@ -408,31 +490,26 @@ impl Env {
     }
 
     // introduces the variables bound by type pattern to this scope
-    fn intro_type_binding(&mut self, typat: &Augmented<hir::TypePatExpr>, tyval: TypeValue) {
-        match typat.val {
-            hir::TypePatExpr::Error => {}
-            hir::TypePatExpr::Identifier { id, .. } => {
-                self.type_bindings[id].push(tyval);
+    fn bind_typaram(&mut self, typaram: &TypeParam, tyval: TypeValue) {
+        match typaram {
+            TypeParam::Error => {}
+            TypeParam::SymbolicVariable { id, .. } => {
+                self.type_bindings[*id].push(tyval);
             }
         }
     }
     // removes the variables bound by type pattern from this scope
-    fn elim_type_binding(&mut self, typat: &Augmented<hir::TypePatExpr>) {
-        match typat.val {
-            hir::TypePatExpr::Error => {}
-            hir::TypePatExpr::Identifier { id, .. } => {
-                self.type_bindings[id].pop().unwrap();
+    fn unbind_typaram(&mut self, typaram: &TypeParam) {
+        match typaram {
+            TypeParam::Error => {}
+            TypeParam::SymbolicVariable { id, .. } => {
+                self.type_bindings[*id].pop().unwrap();
             }
         }
     }
 }
 
-fn concretize_type_expr(
-    constructor: &TypeValue,
-    tyargs: Vec<TypeValue>,
-    dlogger: &mut DiagnosticLogger,
-    env: &mut Env,
-) -> TypeValue {
+fn concretize_type_expr(constructor: &TypeValue, tyargs: Vec<TypeValue>, env: &Env) -> TypeValue {
     match constructor {
         TypeValue::Error => TypeValue::Error,
         TypeValue::SymbolicVariable(id) => TypeValue::Concretization {
@@ -466,13 +543,13 @@ fn concretize_type_expr(
         TypeValue::Constructor { typarams, body } => {
             assert!(typarams.len() == tyargs.len(), "wrong number of arguments");
             for (ref typat, tyarg) in std::iter::zip(typarams, tyargs) {
-                env.intro_type_binding(typat, tyarg)
+                env.bind_typaram(typat, tyarg)
             }
-            let bodytype = substitute_symbolic_typevalue(&body, dlogger, env);
+            let body = body.subst(env);
             for ref typat in typarams {
-                env.elim_type_binding(typat)
+                env.unbind_typaram(typat)
             }
-            bodytype
+            body
         }
         _ => {
             unreachable!("concretization of a non-generic");
@@ -551,108 +628,8 @@ pub fn typecheck_hir_type_infermode(
                 .iter()
                 .map(|x| typecheck_hir_type_infermode(x, dlogger, env))
                 .collect::<Vec<_>>();
-            concretize_type_expr(&generic_val, tyargs, dlogger, env)
+            concretize_type_expr(&generic_val, tyargs, env)
         }
-    }
-}
-
-fn substitute_symbolic_typevalue(
-    v: &TypeValue,
-    dlogger: &mut DiagnosticLogger,
-    env: &mut Env,
-) -> TypeValue {
-    match v {
-        TypeValue::SymbolicVariable(id) => match env.type_bindings[*id].last() {
-            Some(ty) => ty.clone(),
-            None => TypeValue::SymbolicVariable(*id),
-        },
-        TypeValue::Ref(v) => {
-            TypeValue::Ref(Box::new(substitute_symbolic_typevalue(v, dlogger, env)))
-        }
-        TypeValue::Array(v, s) => TypeValue::Array(
-            Box::new(substitute_symbolic_typevalue(v, dlogger, env)),
-            Box::new(substitute_symbolic_typevalue(s, dlogger, env)),
-        ),
-        TypeValue::Slice(v) => {
-            TypeValue::Slice(Box::new(substitute_symbolic_typevalue(v, dlogger, env)))
-        }
-        TypeValue::Int(v) => {
-            TypeValue::Int(Box::new(substitute_symbolic_typevalue(v, dlogger, env)))
-        }
-        TypeValue::UInt(v) => {
-            TypeValue::UInt(Box::new(substitute_symbolic_typevalue(v, dlogger, env)))
-        }
-        TypeValue::Float(v) => {
-            TypeValue::Float(Box::new(substitute_symbolic_typevalue(v, dlogger, env)))
-        }
-        TypeValue::Fn {
-            paramtys,
-            returntype,
-        } => TypeValue::Fn {
-            paramtys: paramtys
-                .iter()
-                .map(|ty| substitute_symbolic_typevalue(ty, dlogger, env))
-                .collect(),
-            returntype: Box::new(substitute_symbolic_typevalue(&returntype, dlogger, env)),
-        },
-        TypeValue::Struct(fields) => TypeValue::Struct(
-            fields
-                .iter()
-                .map(|(name, ty)| {
-                    (
-                        name.clone(),
-                        substitute_symbolic_typevalue(ty, dlogger, env),
-                    )
-                })
-                .collect(),
-        ),
-        TypeValue::Enum(fields) => TypeValue::Enum(
-            fields
-                .iter()
-                .map(|(name, ty)| {
-                    (
-                        name.clone(),
-                        substitute_symbolic_typevalue(ty, dlogger, env),
-                    )
-                })
-                .collect(),
-        ),
-        TypeValue::Union(fields) => TypeValue::Union(
-            fields
-                .iter()
-                .map(|(name, ty)| {
-                    (
-                        name.clone(),
-                        substitute_symbolic_typevalue(ty, dlogger, env),
-                    )
-                })
-                .collect(),
-        ),
-        TypeValue::Constructor { typarams, body } => TypeValue::Constructor {
-            typarams: typarams.clone(),
-            body: Box::new(substitute_symbolic_typevalue(&body, dlogger, env)),
-        },
-        TypeValue::Generic { typarams, body } => TypeValue::Generic {
-            typarams: typarams.clone(),
-            body: Box::new(substitute_symbolic_typevalue(&body, dlogger, env)),
-        },
-        TypeValue::Concretization {
-            symbolic_constructor,
-            tyargs,
-        } => {
-            let tyargs = tyargs
-                .iter()
-                .map(|ty| substitute_symbolic_typevalue(ty, dlogger, env))
-                .collect::<Vec<_>>();
-            match env.type_bindings[*symbolic_constructor].last() {
-                Some(constructor) => concretize_type_expr(constructor, tyargs, dlogger, env),
-                None => TypeValue::Concretization {
-                    symbolic_constructor: *symbolic_constructor,
-                    tyargs,
-                },
-            }
-        }
-        _ => v.clone(),
     }
 }
 
@@ -681,6 +658,20 @@ pub fn typecheck_hir_elseexpr_checkmode(
     }
 }
 
+fn hir_typat_to_param(
+    v: &Augmented<hir::TypePatExpr>,
+    dlogger: &mut DiagnosticLogger,
+    _env: &mut Env,
+) -> TypeParam {
+    match v.val {
+        hir::TypePatExpr::Error => TypeParam::Error,
+        hir::TypePatExpr::Identifier { id, ref kind } => TypeParam::SymbolicVariable {
+            id,
+            kind: evaluate_hir_kind(kind, dlogger),
+        },
+    }
+}
+
 pub fn typecheck_hir_blockstatement(
     v: &Augmented<hir::BlockStatement>,
     dlogger: &mut DiagnosticLogger,
@@ -690,31 +681,62 @@ pub fn typecheck_hir_blockstatement(
         hir::BlockStatement::NoOp => {}
         // should already be typechecked
         hir::BlockStatement::TypeDef {
-            typarams,
-            typat,
-            value,
-        } => match typarams.as_slice() {
-            [] => {
-                let tyval = typecheck_hir_type_infermode(&value, dlogger, env);
-                env.intro_type_binding(&typat, tyval);
-            }
-            k => {}
-        },
-        hir::BlockStatement::ValDef {
-            typarams,
-            pat,
-            value,
+            ref typarams,
+            ref typat,
+            ref value,
         } => {
-            // need to push the type params onto the type stack
-            // then we value in terms of
+            for typat in typarams {
+                intro_hir_typat_symbolic(typat, dlogger, env);
+            }
+            let tyval = typecheck_hir_type_infermode(value, dlogger, env);
+            let typarams = typarams
+                .iter()
+                .map(|x| hir_typat_to_param(x, dlogger, env))
+                .collect::<Vec<_>>();
+            intro_hir_typat(typat, dlogger, env, tyval, typarams);
+        }
+        hir::BlockStatement::ValDef {
+            ref typarams,
+            ref pat,
+            ref value,
+        } => {
+            for typat in typarams {
+                intro_hir_typat_symbolic(typat, dlogger, env);
+            }
+            let valty = typecheck_hir_value_infermode(value, dlogger, env);
+            let typarams = typarams
+                .iter()
+                .map(|x| hir_typat_to_param(x, dlogger, env))
+                .collect::<Vec<_>>();
+            intro_and_typecheck_hir_pat_checkmode(pat, dlogger, env, &valty, &typarams);
         }
         hir::BlockStatement::FnDef {
-            typarams,
-            identifier,
-            params,
-            returnty,
-            body,
-        } => todo!(),
+            ref typarams,
+            ref identifier,
+            ref params,
+            ref returnty,
+            ref body,
+        } => {
+            for typat in typarams {
+                intro_hir_typat_symbolic(typat, dlogger, env);
+            }
+            let typarams = typarams
+                .iter()
+                .map(|x| hir_typat_to_param(x, dlogger, env))
+                .collect::<Vec<_>>();
+            // get param types and intro them
+            let params = params
+                .iter()
+                .map(|x| intro_and_typecheck_hir_pat_infermode(x, dlogger, env, &typarams))
+                .collect::<Vec<_>>();
+            // get returntype
+            let returnty = typecheck_hir_type_infermode(returnty, dlogger, env);
+
+            // TODO: bind function to identifier 
+
+            // typecheck the body now that we know what type it should be as well as the param types
+            typecheck_hir_blockexpr_checkmode(body, dlogger, env, &returnty);
+        }
         hir::BlockStatement::Set {
             ref place,
             ref value,
@@ -936,25 +958,22 @@ pub fn typecheck_hir_value_infermode(
                 }
             }
         }
-        hir::ValExpr::ArrayLiteral(ref elems) => {
-            let mut elems_iter = elems.iter();
-            match elems_iter.next() {
-                None => {
-                    dlogger.log_cannot_infer_array_type(v.range);
-                    TypeValue::Error
-                }
-                Some(first) => {
-                    let first_type = typecheck_hir_value_infermode(first, dlogger, env);
-                    for elem in elems_iter {
-                        typecheck_hir_value_checkmode(elem, dlogger, env, &first_type);
-                    }
-                    TypeValue::Array(
-                        Box::new(first_type),
-                        Box::new(TypeValue::IntLit(elems.len().into())),
-                    )
-                }
+        hir::ValExpr::ArrayLiteral(ref elems) => match elems.as_slice() {
+            [] => {
+                dlogger.log_cannot_infer_array_type(v.range);
+                TypeValue::Error
             }
-        }
+            [first, others @ ..] => {
+                let first_type = typecheck_hir_value_infermode(first, dlogger, env);
+                for elem in others {
+                    typecheck_hir_value_checkmode(elem, dlogger, env, &first_type);
+                }
+                TypeValue::Array(
+                    Box::new(first_type),
+                    Box::new(TypeValue::IntLit(elems.len().into())),
+                )
+            }
+        },
         // concretize a generic val
         hir::ValExpr::Concretization { generic, tyargs } => {
             let generic_type = typecheck_hir_value_infermode(generic, dlogger, env);
@@ -972,11 +991,11 @@ pub fn typecheck_hir_value_infermode(
                         TypeValue::Error
                     } else {
                         for (tyval, typat) in std::iter::zip(tyargs, typarams) {
-                            env.intro_type_binding(typat, tyval);
+                            env.bind_typaram(typat, tyval);
                         }
-                        let ty = substitute_symbolic_typevalue(body, dlogger, env);
+                        let ty = body.subst(env);
                         for typat in typarams {
-                            env.elim_type_binding(typat);
+                            env.unbind_typaram(typat);
                         }
                         ty
                     }
@@ -991,17 +1010,58 @@ pub fn typecheck_hir_value_infermode(
     }
 }
 
+fn intro_hir_typat(
+    typat: &Augmented<hir::TypePatExpr>,
+    dlogger: &mut DiagnosticLogger,
+    env: &mut Env,
+    typeval: TypeValue,
+    typarams: Vec<TypeParam>,
+) {
+    match typat.val {
+        hir::TypePatExpr::Error => {}
+        hir::TypePatExpr::Identifier { id, kind } => match typarams.len() {
+            0 => env.type_value_table[id] = Some(typeval),
+            _ => {
+                env.type_value_table[id] = Some(TypeValue::Constructor {
+                    typarams,
+                    body: Box::new(typeval),
+                })
+            }
+        },
+    }
+}
+
+fn intro_hir_typat_symbolic(
+    typat: &Augmented<hir::TypePatExpr>,
+    dlogger: &mut DiagnosticLogger,
+    env: &mut Env,
+) {
+    match typat.val {
+        hir::TypePatExpr::Error => {}
+        hir::TypePatExpr::Identifier { id, kind } => {
+            env.type_value_table[id] = Some(TypeValue::SymbolicVariable(id));
+        }
+    }
+}
+
 fn intro_and_typecheck_hir_pat_checkmode(
     pat: &Augmented<hir::PatExpr>,
     dlogger: &mut DiagnosticLogger,
     env: &mut Env,
     expected_type: &TypeValue,
+    typarams: &Vec<TypeParam>,
 ) {
     match pat.val {
         hir::PatExpr::Error => {}
         hir::PatExpr::Ignore => {}
         hir::PatExpr::Identifier { mutable, id } => {
-            env.val_type_table[id] = Some(expected_type.clone());
+            env.val_type_table[id] = match typarams.len() {
+                0 => Some(expected_type.clone()),
+                _ => Some(TypeValue::Generic {
+                    body: Box::new(expected_type.clone()),
+                    typarams: typarams.clone(),
+                }),
+            };
         }
         hir::PatExpr::StructLiteral(got_fields) => match expected_type {
             TypeValue::Struct(expected_fields) => {
@@ -1013,7 +1073,7 @@ fn intro_and_typecheck_hir_pat_checkmode(
                     match field_type {
                         Some(field_type) => {
                             intro_and_typecheck_hir_pat_checkmode(
-                                field_pat, dlogger, env, field_type,
+                                field_pat, dlogger, env, field_type, typarams,
                             );
                         }
                         None => {
@@ -1038,7 +1098,68 @@ fn intro_and_typecheck_hir_pat_checkmode(
                     &print_type_value(&pat_ty, env),
                 );
             }
-            intro_and_typecheck_hir_pat_checkmode(pat, dlogger, env, &pat_ty);
+            intro_and_typecheck_hir_pat_checkmode(pat, dlogger, env, &pat_ty, typarams);
+        }
+    }
+}
+
+// this function recursively introduces all variables in a pattern into the environment, with the error type.
+// we do this to ensure that following pieces of code can assume that all variables are in the environment.
+fn intro_hir_pat_errors(
+    pat: &Augmented<hir::PatExpr>,
+    dlogger: &mut DiagnosticLogger,
+    env: &mut Env,
+    typarams: &Vec<TypeParam>,
+) {
+    match pat.val {
+        hir::PatExpr::Error => {}
+        hir::PatExpr::Ignore => {}
+        hir::PatExpr::Identifier { mutable, id } => {
+            env.val_type_table[id] = match typarams.len() {
+                0 => Some(TypeValue::Error),
+                _ => Some(TypeValue::Generic {
+                    body: Box::new(TypeValue::Error),
+                    typarams: typarams.clone(),
+                }),
+            };
+        }
+        hir::PatExpr::StructLiteral(got_fields) => {
+            for (_, ref field_pat) in got_fields {
+                intro_hir_pat_errors(field_pat, dlogger, env, typarams);
+            }
+        }
+        hir::PatExpr::Typed { ref pat, ref ty } => {
+            intro_hir_pat_errors(pat, dlogger, env, typarams);
+        }
+    }
+}
+
+fn intro_and_typecheck_hir_pat_infermode(
+    pat: &Augmented<hir::PatExpr>,
+    dlogger: &mut DiagnosticLogger,
+    env: &mut Env,
+    typarams: &Vec<TypeParam>,
+) -> TypeValue {
+    match pat.val {
+        hir::PatExpr::Error => TypeValue::Error,
+        hir::PatExpr::Ignore => {
+            dlogger.log_cannot_infer_pattern_type(pat.range);
+            TypeValue::Error
+        }
+        hir::PatExpr::Identifier { .. } => {
+            dlogger.log_cannot_infer_pattern_type(pat.range);
+            intro_hir_pat_errors(pat, dlogger, env, typarams);
+            TypeValue::Error
+        }
+        hir::PatExpr::StructLiteral(_) => {
+            dlogger.log_cannot_infer_pattern_type(pat.range);
+            intro_hir_pat_errors(pat, dlogger, env, typarams);
+            TypeValue::Error
+        }
+        hir::PatExpr::Typed { ref pat, ref ty } => {
+            let pat_ty = typecheck_hir_type_infermode(ty, dlogger, env);
+            intro_and_typecheck_hir_pat_checkmode(pat, dlogger, env, &pat_ty, typarams);
+            pat_ty
         }
     }
 }
@@ -1082,22 +1203,30 @@ fn intro_and_typecheck_hir_targetexpr(
     expr_type: &TypeValue,
 ) {
     match (target.val, expr_type) {
+        (hir::CaseTargetExpr::Error, _) => {}
         (hir::CaseTargetExpr::Unit, TypeValue::Unit) => {}
         (hir::CaseTargetExpr::Bool(_), TypeValue::Bool) => {}
-        (hir::CaseTargetExpr::Int(ref i), TypeValue::Int(nbits)) => {
+        (hir::CaseTargetExpr::Int(ref i), TypeValue::Int(ref nbits)) => {
             typecheck_numerical_literal(i, nbits, true, dlogger, target.range)
         }
-        (hir::CaseTargetExpr::Int(ref i), TypeValue::UInt(nbits)) => {
+        (hir::CaseTargetExpr::Int(ref i), TypeValue::UInt(ref nbits)) => {
             typecheck_numerical_literal(i, nbits, false, dlogger, target.range)
         }
         (hir::CaseTargetExpr::PatExpr(ref pat), _) => {
-            intro_and_typecheck_hir_pat_checkmode(pat, dlogger, env, expr_type);
+            intro_and_typecheck_hir_pat_checkmode(pat, dlogger, env, expr_type, &vec![]);
         }
         _ => {
+            let case_target_str = match target.val {
+                hir::CaseTargetExpr::Error => unreachable!(),
+                hir::CaseTargetExpr::Unit => "unit".to_string(),
+                hir::CaseTargetExpr::Bool(_) => "bool".to_string(),
+                hir::CaseTargetExpr::Int(_) => "int".to_string(),
+                hir::CaseTargetExpr::PatExpr(_) => unreachable!(),
+            };
             dlogger.log_case_target_type_mismatch(
                 target.range,
-                print_type_value(expr_type, env),
-                print_case_target(&target.val),
+                &print_type_value(expr_type, env),
+                &case_target_str,
             );
         }
     }
@@ -1110,13 +1239,6 @@ pub fn typecheck_hir_value_checkmode(
     expected_type: &TypeValue,
 ) {
     match (v.val, expected_type) {
-        // special case for literals
-        (hir::ValExpr::Int(ref i), TypeValue::Int(nbits)) => {
-            typecheck_numerical_literal(i, nbits, true, dlogger, v.range)
-        }
-        (hir::ValExpr::Int(ref i), TypeValue::UInt(nbits)) => {
-            typecheck_numerical_literal(i, nbits, false, dlogger, v.range)
-        }
         (hir::ValExpr::Float(_), TypeValue::Float(_)) => {}
         // block expressions
         (hir::ValExpr::Block(ref block), _) => {
