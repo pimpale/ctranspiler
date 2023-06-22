@@ -27,7 +27,15 @@ fn main() {
     let ast = construct_ast(tokenstream, log.get_logger(Some(String::from("acnc-ast"))));
 
     // create and lower hir
-    let (hir, type_name_table, type_range_table, val_name_table, val_range_table) = construct_hir(
+    let (
+        hir,
+        nominal_name_table,
+        nominal_range_table,
+        type_name_table,
+        type_range_table,
+        val_name_table,
+        val_range_table,
+    ) = construct_hir(
         ast,
         log.get_logger(Some(String::from("acnc-hir (construct)"))),
     );
@@ -43,6 +51,8 @@ fn main() {
     // typecheck
     let val_kind_table = hir_typecheck::do_typecheck(
         &mut hir,
+        &nominal_range_table,
+        &nominal_name_table,
         &type_range_table,
         &type_name_table,
         &type_kind_table,

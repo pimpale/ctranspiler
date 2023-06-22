@@ -77,6 +77,7 @@ impl<Source: Iterator<Item = u8>> Tokenizer<Source> {
             b"case" => TokenKind::Case,
             b"enum" => TokenKind::Enum,
             b"union" => TokenKind::Union,
+            b"nominal" => TokenKind::Nominal,
             b"val" => TokenKind::Valdef,
             b"type" => TokenKind::Typedef,
             b"mut" => TokenKind::Mut,
@@ -95,7 +96,7 @@ impl<Source: Iterator<Item = u8>> Tokenizer<Source> {
             b"IntKind" => TokenKind::IntKind,
             b"FloatKind" => TokenKind::FloatKind,
             b"use" => TokenKind::Use,
-            _ => TokenKind::Identifier(word),
+            _ => TokenKind::Identifier(String::from_utf8_lossy(&word).into()),
         };
 
         Token::new(tk, range)
@@ -381,7 +382,7 @@ impl<Source: Iterator<Item = u8>> Tokenizer<Source> {
 
     fn lex_strop(&mut self) -> Token {
         let (ident, range) = self.internal_lex_delimited_string(b'`');
-        Token::new(TokenKind::Identifier(ident), range)
+        Token::new(TokenKind::Identifier(String::from_utf8_lossy(&ident).into()), range)
     }
 
     fn lex_string(&mut self) -> Token {

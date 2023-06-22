@@ -1701,6 +1701,27 @@ fn parse_exact_typeexpr_union<TkIter: Iterator<Item = Token>>(
     }
 }
 
+fn parse_exact_typeexpr_nominal<TkIter: Iterator<Item = Token>>(
+    tkiter: &mut PeekMoreIterator<TkIter>,
+    dlogger: &mut DiagnosticLogger,
+) -> Augmented<TypeExpr> {
+    let metadata = get_metadata(tkiter);
+    let nominal_tk = exact_token(tkiter, TokenKind::Nominal);
+
+    let idet_tk = expect_identifier(tkiter, dlogger, "nominal type");
+
+    let encapsulated = parse_typeexpr_term(tkiter, dlogger);
+
+    Augmented {
+        range: union_of(nominal_tk.range, encapsulated.range),
+        metadata,
+        val: TypeExpr::Nominal {
+            identifier: idet_tk,
+            inner: Box::new(encapsulated),
+        },
+    }
+}
+
 fn parse_exact_typeexpr_fn<TkIter: Iterator<Item = Token>>(
     tkiter: &mut PeekMoreIterator<TkIter>,
     dlogger: &mut DiagnosticLogger,
@@ -1746,6 +1767,7 @@ pub fn parse_typeexpr_term<TkIter: Iterator<Item = Token>>(
         Some(TokenKind::BraceLeft) => parse_exact_typeexpr_struct(tkiter, dlogger),
         Some(TokenKind::Enum) => parse_exact_typeexpr_enum(tkiter, dlogger),
         Some(TokenKind::Union) => parse_exact_typeexpr_union(tkiter, dlogger),
+        Some(TokenKind::Nominal) => parse_exact_typeexpr_nominal(tkiter, dlogger),
         Some(TokenKind::ParenLeft) => parse_exact_typeexpr_group(tkiter, dlogger),
         Some(TokenKind::Fn) => parse_exact_typeexpr_fn(tkiter, dlogger),
         k => {
@@ -1841,7 +1863,7 @@ fn parse_kind_expr<TkIter: Iterator<Item = Token>>(
             let (range, metadata, args, _) = parse_delimited_statement_seq(
                 tkiter,
                 dlogger,
-                "type arguments",
+                "generic argument kinds",
                 parse_kind_expr,
                 TokenKind::BracketLeft,
                 TokenKind::BracketRight,
@@ -1859,7 +1881,7 @@ fn parse_kind_expr<TkIter: Iterator<Item = Token>>(
             let metadata = get_metadata(tkiter);
             dlogger.log_unexpected_token_specific(
                 range,
-                "type pattern expression",
+                "kind expression",
                 vec![TokenKind::Identifier(String::new())],
                 k,
             );
@@ -1884,7 +1906,7 @@ fn parse_typepatexpr<TkIter: Iterator<Item = Token>>(
 
     match maybe_kind {
         Some(TokenKind::Identifier(_)) => {
-            let identifier = expect_identifier(tkiter, dlogger, "type patern expression");
+            let identifier = expect_identifier(tkiter, dlogger, "type pattern expression");
             match tkiter.peek_nth(0).unwrap().kind {
                 Some(TokenKind::Constrain) => {
                     tkiter.next().unwrap();
@@ -1938,8 +1960,7 @@ fn parse_exact_fn<TkIter: Iterator<Item = Token>>(
     Box<Augmented<BlockExpr>>,
 ) {
     let metadata = get_metadata(tkiter);
-    let fn_tk = tkiter.next().unwrap();
-    assert!(fn_tk.kind == Some(TokenKind::Fn));
+    let fn_tk = exact_token(tkiter, TokenKind::Fn);
 
     let typarams = match tkiter.peek_nth(0).unwrap().kind {
         Some(TokenKind::BracketLeft) => Some(Box::new(parse_tyargs_expr(

@@ -76,6 +76,11 @@ pub enum TypeExpr {
     Struct(Vec<Augmented<StructItemExpr<TypeExpr>>>),
     Enum(Vec<Augmented<StructItemExpr<TypeExpr>>>),
     Union(Vec<Augmented<StructItemExpr<TypeExpr>>>),
+    // Nominal
+    Nominal {
+        identifier: Identifier,
+        inner: Box<Augmented<TypeExpr>>
+    },
     // For grouping apps
     Group(Box<Augmented<TypeExpr>>),
     // generic

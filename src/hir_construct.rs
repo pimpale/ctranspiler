@@ -12,6 +12,8 @@ struct Environment {
     prefixes: Vec<String>,
     use_prefixes: Vec<IndexMap<String, Range>>,
     // the global identifier tables
+    nominal_range_table: Vec<Range>,
+    nominal_name_table: Vec<String>,
     type_range_table: Vec<Range>,
     type_name_table: Vec<String>,
     val_range_table: Vec<Range>,
@@ -124,6 +126,41 @@ impl Environment {
                         .insert(identifier.clone(), id);
                     self.val_name_table.push(identifier.clone());
                     self.val_range_table.push(range);
+                    Some(id)
+                }
+            }
+            None => None,
+        }
+    }
+
+    fn introduce_nominal_identifier(
+        &mut self,
+        ast::Identifier { identifier, range }: ast::Identifier,
+        should_prefix: bool,
+    ) -> Option<usize> {
+        match identifier {
+            Some(identifier) => {
+                let identifier = if should_prefix {
+                    [self.prefixes.concat(), identifier].concat()
+                } else {
+                    identifier
+                };
+
+                if let Some(id) = self
+                    .nominal_name_table
+                    .iter()
+                    .position(|x| x == &identifier)
+                {
+                    self.dlogger.log_duplicate_identifier(
+                        range,
+                        self.nominal_range_table[id],
+                        &identifier,
+                    );
+                    None
+                } else {
+                    let id = self.nominal_name_table.len();
+                    self.nominal_name_table.push(identifier.clone());
+                    self.nominal_range_table.push(range);
                     Some(id)
                 }
             }
@@ -391,6 +428,16 @@ fn translate_augtypeexpr(
                 items,
             )),
         },
+        ast::TypeExpr::Nominal { identifier, inner } => Augmented {
+            range,
+            val: match env.introduce_nominal_identifier(identifier, true) {
+                Some(id) => TypeExpr::Nominal {
+                    identifier: id,
+                    inner: Box::new(translate_augtypeexpr(*inner, env)),
+                },
+                None => TypeExpr::Error,
+            },
+        },
         ast::TypeExpr::Group(t) => translate_augtypeexpr(*t, env),
         ast::TypeExpr::Generic { fun, args } => Augmented {
             range,
@@ -616,8 +663,7 @@ fn translate_valexpr(v: ast::ValExpr, env: &mut Environment) -> ValExpr {
                 .collect::<VecDeque<_>>();
             match cases.pop_front() {
                 None => {
-                    env.dlogger
-                        .log_empty_caseof(expr.range);
+                    env.dlogger.log_empty_caseof(expr.range);
                     ValExpr::Error
                 }
                 Some(first_case) => ValExpr::CaseOf {
@@ -1065,6 +1111,8 @@ pub fn construct_hir(
     Vec<Range>,
     Vec<String>,
     Vec<Range>,
+    Vec<String>,
+    Vec<Range>,
 ) {
     let mut env = Environment {
         type_names_in_scope: vec![HashMap::new()],
@@ -1072,6 +1120,8 @@ pub fn construct_hir(
         prefixes: vec![],
         use_prefixes: vec![IndexMap::new()],
         dlogger,
+        nominal_name_table: vec![],
+        nominal_range_table: vec![],
         type_name_table: vec![],
         type_range_table: vec![],
         val_name_table: vec![],
@@ -1086,6 +1136,8 @@ pub fn construct_hir(
                 .collect(),
             phase: HirPhase::Raw,
         },
+        env.nominal_name_table,
+        env.nominal_range_table,
         env.type_name_table,
         env.type_range_table,
         env.val_name_table,

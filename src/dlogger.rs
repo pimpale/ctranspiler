@@ -791,4 +791,18 @@ impl DiagnosticLogger {
             data: None,
         })
     }
+
+    pub fn log_cannot_apply_non_function(&mut self, range: Range, found_type: &str) {
+        self.log(Diagnostic {
+            range,
+            severity: Some(DiagnosticSeverity::ERROR),
+            code: Some(NumberOrString::Number(62)),
+            code_description: None,
+            source: self.source.clone(),
+            message: format!("cannot apply non-function `{}`", found_type),
+            related_information: None,
+            tags: None,
+            data: None,
+        })
+    }
 }

@@ -8,23 +8,24 @@ pub enum TokenKind {
     // function, type, or variable
     Identifier(String),
     // Keywords
-    Case,    // case
-    Enum,    // enum
-    Union,   // union
-    Valdef,  // val
-    Typedef, // type
-    Mut,     // mut
-    Set,     // set
-    In,      // in
-    If,      // if
-    Else,    // else
-    By,      // by
-    Fn,      // fn
-    While,   // while
-    For,     // for
-    Block,   // block
-    Prefix,  // prefix
-    Use,     // use
+    Case,     // case
+    Valdef,   // val
+    Typedef,  // type
+    Mut,      // mut
+    Set,      // set
+    In,       // in
+    If,       // if
+    Else,     // else
+    By,       // by
+    Fn,       // fn
+    While,    // while
+    For,      // for
+    Block,    // block
+    Prefix,   // prefix
+    Use,      // use
+    Enum,     // enum
+    Union,    // union
+    Nominal,  // nominal
     // Values
     Unit,                                   // void
     Lifetime(Vec<u8>),                      // 'lifetime

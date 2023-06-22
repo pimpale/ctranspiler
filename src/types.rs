@@ -185,7 +185,10 @@ pub enum TypeValue {
     Error,
     SymbolicVariable(usize),
     // a nominal type
-    Nominal(usize),
+    Nominal {
+        identifier: usize,
+        inner: Box<TypeValue>,
+    },
     // types
     Unit,
     Bool,
@@ -273,6 +276,10 @@ impl TypeValue {
                     .map(|(name, ty)| (name.clone(), ty.subst(env)))
                     .collect(),
             ),
+            TypeValue::Nominal { identifier, inner } => TypeValue::Nominal {
+                identifier: *identifier,
+                inner: Box::new(inner.subst(env)),
+            },
             TypeValue::Constructor { typarams, body } => TypeValue::Constructor {
                 typarams: typarams.clone(),
                 body: Box::new(body.subst(env)),
@@ -399,6 +406,16 @@ pub fn kindcheck_hir_type_infermode(
             }
             KindValue::Type
         }
+        hir::TypeExpr::Nominal { inner, .. } => {
+            kindcheck_hir_type_checkmode(
+                &inner,
+                &KindValue::Type,
+                dlogger,
+                type_name_table,
+                type_kind_table,
+            );
+            KindValue::Type
+        }
         hir::TypeExpr::Concretization {
             ref mut genericty,
             tyargs: mut provided_args,
@@ -480,11 +497,7 @@ pub struct Env {
 impl Env {
     fn evaluate_nominal(&self, v: TypeValue) -> TypeValue {
         match v {
-            TypeValue::Nominal(id) => self.evaluate_nominal(
-                self.type_value_table[id]
-                    .expect("nominal should be initialized")
-                    .clone(),
-            ),
+            TypeValue::Nominal { inner, .. } => self.evaluate_nominal(*inner),
             x => x,
         }
     }
@@ -543,11 +556,11 @@ fn concretize_type_expr(constructor: &TypeValue, tyargs: Vec<TypeValue>, env: &E
         TypeValue::Constructor { typarams, body } => {
             assert!(typarams.len() == tyargs.len(), "wrong number of arguments");
             for (ref typat, tyarg) in std::iter::zip(typarams, tyargs) {
-                env.bind_typaram(typat, tyarg)
+                env.bind_typaram(typat, tyarg);
             }
             let body = body.subst(env);
             for ref typat in typarams {
-                env.unbind_typaram(typat)
+                env.unbind_typaram(typat);
             }
             body
         }
@@ -568,8 +581,14 @@ pub fn typecheck_hir_type_infermode(
     match v.val {
         hir::TypeExpr::Error => TypeValue::Error,
         hir::TypeExpr::Identifier(id) => match env.type_bindings[id].last() {
+            // if it is a live variable in scope, clone the bound value
             Some(v) => v.clone(),
-            _ => TypeValue::Nominal(id),
+            // otherwise, it is a type alias
+            _ => {
+                env.type_value_table[id]
+                    // if it is None, then it is an error with the compiler (it should have been caught earlier)
+                    .expect("variable must either be in scope, or a type alias")
+            }
         },
         hir::TypeExpr::UnitTy => TypeValue::Unit,
         hir::TypeExpr::BoolTy => TypeValue::Bool,
@@ -612,6 +631,10 @@ pub fn typecheck_hir_type_infermode(
             }
             TypeValue::Union(s_fields)
         }
+        hir::TypeExpr::Nominal { identifier, inner } => TypeValue::Nominal {
+            identifier,
+            inner: Box::new(typecheck_hir_type_infermode(&inner, dlogger, env)),
+        },
         hir::TypeExpr::Fn { paramtys, returnty } => TypeValue::Fn {
             paramtys: paramtys
                 .iter()
@@ -736,7 +759,7 @@ pub fn typecheck_hir_blockstatement(
             env.val_type_table[*identifier] = Some(TypeValue::Fn {
                 paramtys: params,
                 returntype: Box::new(returnty),
-            }); 
+            });
 
             // typecheck the body now that we know what type it should be as well as the param types
             typecheck_hir_blockexpr_checkmode(body, dlogger, env, &returnty);
@@ -810,11 +833,11 @@ pub fn typecheck_hir_value_infermode(
     match &v.val {
         hir::ValExpr::Error => TypeValue::Error,
         hir::ValExpr::Unit => TypeValue::Unit,
-        hir::ValExpr::Int(_) => TypeValue::Int(Box::new(TypeValue::IntLit(64.into()))),
+        hir::ValExpr::Int(_) => TypeValue::Int(Box::new(TypeValue::IntLit((64).into()))),
         hir::ValExpr::Bool(_) => TypeValue::Bool,
-        hir::ValExpr::Float(_) => TypeValue::Float(Box::new(TypeValue::IntLit(64.into()))),
+        hir::ValExpr::Float(_) => TypeValue::Float(Box::new(TypeValue::IntLit((64).into()))),
         hir::ValExpr::String(_) => TypeValue::Slice(Box::new(TypeValue::Int(Box::new(
-            TypeValue::IntLit(8.into()),
+            TypeValue::IntLit((8).into()),
         )))),
         hir::ValExpr::Identifier(id) => env.val_type_table[*id]
             .expect("identifier not initialized with type")
@@ -934,7 +957,7 @@ pub fn typecheck_hir_value_infermode(
                 index,
                 dlogger,
                 env,
-                &TypeValue::Int(Box::new(TypeValue::IntLit(64.into()))),
+                &TypeValue::Int(Box::new(TypeValue::IntLit((64).into()))),
             );
             match rtype {
                 TypeValue::Array(x, _) => *x,
@@ -1010,7 +1033,17 @@ pub fn typecheck_hir_value_infermode(
                 }
             }
         }
-        hir::ValExpr::App { fun, args } => todo!(),
+        // apply a nongeneric function
+        hir::ValExpr::App { fun, args } => {
+            let fn_type = typecheck_hir_value_infermode(fun, dlogger, env);
+            match fn_type {
+                TypeValue::Fn {
+                    paramtys,
+                    returntype,
+                } => {}
+                _ => dlogger.log_application_of_non_function(v.range),
+            }
+        }
     }
 }
 
@@ -1024,12 +1057,14 @@ fn intro_hir_typat(
     match typat.val {
         hir::TypePatExpr::Error => {}
         hir::TypePatExpr::Identifier { id, kind } => match typarams.len() {
-            0 => env.type_value_table[id] = Some(typeval),
+            0 => {
+                env.type_value_table[id] = Some(typeval);
+            }
             _ => {
                 env.type_value_table[id] = Some(TypeValue::Constructor {
                     typarams,
                     body: Box::new(typeval),
-                })
+                });
             }
         },
     }

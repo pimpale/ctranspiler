@@ -59,6 +59,11 @@ pub enum TypeExpr {
     Struct(IndexMap<String, Augmented<TypeExpr>>),
     Enum(IndexMap<String, Augmented<TypeExpr>>),
     Union(IndexMap<String, Augmented<TypeExpr>>),
+    // Nominal
+    Nominal {
+        identifier: usize,
+        inner: Box<Augmented<TypeExpr>>,
+    },
     // generic
     Concretization {
         genericty: Box<Augmented<TypeExpr>>,
@@ -453,6 +458,9 @@ pub trait HirVisitor {
                     self.visit_type_expr(&mut item);
                 }
             }
+            TypeExpr::Nominal { inner, .. } => {
+                self.visit_type_expr(&mut inner);
+            }
             TypeExpr::Concretization { genericty, tyargs } => {
                 self.visit_type_expr(&mut genericty);
                 for tyarg in tyargs {
@@ -560,7 +568,11 @@ pub trait HirVisitor {
                     self.visit_else_expr(&mut else_branch);
                 }
             }
-            ValExpr::CaseOf { expr, first_case, rest_cases } => {
+            ValExpr::CaseOf {
+                expr,
+                first_case,
+                rest_cases,
+            } => {
                 self.visit_val_expr(&mut expr);
                 self.visit_case_expr(&mut first_case);
                 for case in rest_cases {
