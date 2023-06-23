@@ -585,14 +585,14 @@ impl DiagnosticLogger {
         })
     }
 
-    pub fn log_type_mismatch(&mut self, range: Range, expected: &str, found: &str) {
+    pub fn log_type_mismatch(&mut self, range: Range, error: &str) {
         self.log(Diagnostic {
             range,
             severity: Some(DiagnosticSeverity::ERROR),
             code: Some(NumberOrString::Number(48)),
             code_description: None,
             source: self.source.clone(),
-            message: format!("expected `{}`, found `{}`", expected, found),
+            message: format!("type error: {}", error),
             related_information: None,
             tags: None,
             data: None,
@@ -792,7 +792,7 @@ impl DiagnosticLogger {
         })
     }
 
-    pub fn log_cannot_apply_non_function(&mut self, range: Range, found_type: &str) {
+    pub fn log_application_of_non_function(&mut self, range: Range, found_type: &str) {
         self.log(Diagnostic {
             range,
             severity: Some(DiagnosticSeverity::ERROR),
@@ -800,6 +800,29 @@ impl DiagnosticLogger {
             code_description: None,
             source: self.source.clone(),
             message: format!("cannot apply non-function `{}`", found_type),
+            related_information: None,
+            tags: None,
+            data: None,
+        })
+    }
+
+    pub fn log_wrong_number_args(&mut self, range: Range, expected: usize, found: usize) {
+        let message = if expected == found {
+            format!("expected {} arguments, found {}", expected, found)
+        } else {
+            format!(
+                "expected {} arguments, found {}",
+                expected,
+                found,
+            )
+        };
+        self.log(Diagnostic {
+            range,
+            severity: Some(DiagnosticSeverity::ERROR),
+            code: Some(NumberOrString::Number(63)),
+            code_description: None,
+            source: self.source.clone(),
+            message,
             related_information: None,
             tags: None,
             data: None,
