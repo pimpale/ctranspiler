@@ -1,3 +1,7 @@
+use std::collections::HashMap;
+use std::collections::hash_map::Entry;
+use std::hash::Hash;
+
 use crate::dlogger::DiagnosticLogger;
 use crate::hir;
 use crate::hir::Augmented;
@@ -244,17 +248,17 @@ pub enum TypeValue {
     },
 }
 
-enum SubtypeError {
+enum UnificationError {
     SymbolicVariableMismatch(usize, usize),
     NominalIdMismatch(usize, usize),
-    NominalInnerMismatch(Box<SubtypeError>),
-    RefInnerMismatch(Box<SubtypeError>),
-    ArrayLengthMismatch(Box<SubtypeError>),
-    ArrayElementMismatch(Box<SubtypeError>),
-    SliceElementMismatch(Box<SubtypeError>),
-    IntWidthMismatch(Box<SubtypeError>),
-    UIntWidthMismatch(Box<SubtypeError>),
-    FloatPrecisionMismatch(Box<SubtypeError>),
+    NominalInnerMismatch(Box<UnificationError>),
+    RefInnerMismatch(Box<UnificationError>),
+    ArrayLengthMismatch(Box<UnificationError>),
+    ArrayElementMismatch(Box<UnificationError>),
+    SliceElementMismatch(Box<UnificationError>),
+    IntWidthMismatch(Box<UnificationError>),
+    UIntWidthMismatch(Box<UnificationError>),
+    FloatPrecisionMismatch(Box<UnificationError>),
     IntLitMismatch {
         expected: BigInt,
         actual: BigInt,
@@ -269,20 +273,20 @@ enum SubtypeError {
     },
     FnParamMismatch {
         index: usize,
-        error: Box<SubtypeError>,
+        error: Box<UnificationError>,
     },
     FnParamCountMismatch {
         expected: usize,
         actual: usize,
     },
-    FnReturnMismatch(Box<SubtypeError>),
+    FnReturnMismatch(Box<UnificationError>),
     StructFieldNameMismatch {
         expected: String,
         actual: String,
     },
     StructFieldTypeMismatch {
         field: String,
-        error: Box<SubtypeError>,
+        error: Box<UnificationError>,
     },
     StructFieldCountMismatch {
         expected: usize,
@@ -294,7 +298,7 @@ enum SubtypeError {
     },
     EnumVariantTypeMismatch {
         variant: String,
-        error: Box<SubtypeError>,
+        error: Box<UnificationError>,
     },
     EnumVariantCountMismatch {
         expected: usize,
@@ -306,7 +310,7 @@ enum SubtypeError {
     },
     UnionVariantTypeMismatch {
         variant: String,
-        error: Box<SubtypeError>,
+        error: Box<UnificationError>,
     },
     UnionVariantCountMismatch {
         expected: usize,
@@ -325,7 +329,7 @@ enum SubtypeError {
         expected: usize,
         actual: usize,
     },
-    ConstructorBodyMismatch(Box<SubtypeError>),
+    ConstructorBodyMismatch(Box<UnificationError>),
     GenericTyparamKindMismatch {
         index: usize,
         expected: KindValue,
@@ -335,14 +339,14 @@ enum SubtypeError {
         expected: usize,
         actual: usize,
     },
-    GenericBodyMismatch(Box<SubtypeError>),
+    GenericBodyMismatch(Box<UnificationError>),
     ConcretizationConstructorMismatch {
         expected: usize,
         actual: usize,
     },
     ConcretizationTyargMismatch {
         index: usize,
-        error: Box<SubtypeError>,
+        error: Box<UnificationError>,
     },
     ConcretizationTyargCountMismatch {
         expected: usize,
@@ -423,16 +427,12 @@ impl TypeValue {
         }
     }
 
-    fn is_subtype_of(self: &Self, other: &TypeValue) -> Result<(), SubtypeError> {
+    fn unify_with<'a>(self: &Self, other: &'a TypeValue) -> Result<HashMap<usize, &'a TypeValue>, UnificationError> {
         match (self, other) {
-            (TypeValue::Error, _) => Ok(()),
-            (_, TypeValue::Error) => Ok(()),
-            (TypeValue::SymbolicVariable(id1), TypeValue::SymbolicVariable(id2)) => {
-                if id1 == id2 {
-                    Ok(())
-                } else {
-                    Err(SubtypeError::SymbolicVariableMismatch(*id1, *id2))
-                }
+            (TypeValue::Error, _) => Ok(HashMap::new()),
+            (_, TypeValue::Error) => Ok(HashMap::new()),
+            (TypeValue::SymbolicVariable(id1), _) => {
+                Ok(HashMap::from([(id1.clone(), other)]))
             }
             (
                 TypeValue::Nominal {
@@ -445,49 +445,49 @@ impl TypeValue {
                 },
             ) => {
                 if id1 == id2 {
-                    match inner1.is_subtype_of(inner2) {
-                        Ok(()) => Ok(()),
-                        Err(err) => Err(SubtypeError::NominalInnerMismatch(Box::new(err))),
+                    match inner1.unify_with(inner2) {
+                        Ok(bindings) => Ok(bindings),
+                        Err(err) => Err(UnificationError::NominalInnerMismatch(Box::new(err))),
                     }
                 } else {
-                    Err(SubtypeError::NominalIdMismatch(*id1, *id2))
+                    Err(UnificationError::NominalIdMismatch(*id1, *id2))
                 }
             }
-            (TypeValue::Unit, TypeValue::Unit) => Ok(()),
-            (TypeValue::Bool, TypeValue::Bool) => Ok(()),
-            (TypeValue::RefConstructor, TypeValue::RefConstructor) => Ok(()),
-            (TypeValue::ArrayConstructor, TypeValue::ArrayConstructor) => Ok(()),
-            (TypeValue::SliceConstructor, TypeValue::SliceConstructor) => Ok(()),
-            (TypeValue::IntConstructor, TypeValue::IntConstructor) => Ok(()),
-            (TypeValue::UIntConstructor, TypeValue::UIntConstructor) => Ok(()),
-            (TypeValue::FloatConstructor, TypeValue::FloatConstructor) => Ok(()),
+            (TypeValue::Unit, TypeValue::Unit) => Ok(HashMap::new()),
+            (TypeValue::Bool, TypeValue::Bool) => Ok(HashMap::new()),
+            (TypeValue::RefConstructor, TypeValue::RefConstructor) => Ok(HashMap::new()),
+            (TypeValue::ArrayConstructor, TypeValue::ArrayConstructor) => Ok(HashMap::new()),
+            (TypeValue::SliceConstructor, TypeValue::SliceConstructor) => Ok(HashMap::new()),
+            (TypeValue::IntConstructor, TypeValue::IntConstructor) => Ok(HashMap::new()),
+            (TypeValue::UIntConstructor, TypeValue::UIntConstructor) => Ok(HashMap::new()),
+            (TypeValue::FloatConstructor, TypeValue::FloatConstructor) => Ok(HashMap::new()),
             (TypeValue::Ref(inner1), TypeValue::Ref(inner2)) => inner1
-                .is_subtype_of(inner2)
-                .map_err(|err| SubtypeError::RefInnerMismatch(Box::new(err))),
+                .unify_with(inner2)
+                .map_err(|err| UnificationError::RefInnerMismatch(Box::new(err))),
             (TypeValue::Array(elem1, len1), TypeValue::Array(elem2, len2)) => {
                 elem1
-                    .is_subtype_of(elem2)
-                    .map_err(|err| SubtypeError::ArrayElementMismatch(Box::new(err)))?;
-                len1.is_subtype_of(len2)
-                    .map_err(|err| SubtypeError::ArrayLengthMismatch(Box::new(err)))
+                    .unify_with(elem2)
+                    .map_err(|err| UnificationError::ArrayElementMismatch(Box::new(err)))?;
+                len1.unify_with(len2)
+                    .map_err(|err| UnificationError::ArrayLengthMismatch(Box::new(err)))
             }
             (TypeValue::Slice(elemty1), TypeValue::Slice(elemty2)) => elemty1
-                .is_subtype_of(elemty2)
-                .map_err(|err| SubtypeError::SliceElementMismatch(Box::new(err))),
+                .unify_with(elemty2)
+                .map_err(|err| UnificationError::SliceElementMismatch(Box::new(err))),
             (TypeValue::Int(width1), TypeValue::Int(width2)) => width1
-                .is_subtype_of(width2)
-                .map_err(|err| SubtypeError::IntWidthMismatch(Box::new(err))),
+                .unify_with(width2)
+                .map_err(|err| UnificationError::IntWidthMismatch(Box::new(err))),
             (TypeValue::UInt(width1), TypeValue::UInt(width2)) => width1
-                .is_subtype_of(width2)
-                .map_err(|err| SubtypeError::UIntWidthMismatch(Box::new(err))),
+                .unify_with(width2)
+                .map_err(|err| UnificationError::UIntWidthMismatch(Box::new(err))),
             (TypeValue::Float(precision1), TypeValue::Float(precision2)) => precision1
-                .is_subtype_of(precision2)
-                .map_err(|err| SubtypeError::FloatPrecisionMismatch(Box::new(err))),
+                .unify_with(precision2)
+                .map_err(|err| UnificationError::FloatPrecisionMismatch(Box::new(err))),
             (TypeValue::IntLit(int1), TypeValue::IntLit(int2)) => {
                 if int1 == int2 {
-                    Ok(())
+                    Ok(HashMap::new())
                 } else {
-                    Err(SubtypeError::IntLitMismatch {
+                    Err(UnificationError::IntLitMismatch {
                         expected: *int2,
                         actual: *int1,
                     })
@@ -495,9 +495,9 @@ impl TypeValue {
             }
             (TypeValue::BoolLit(val1), TypeValue::BoolLit(val2)) => {
                 if val1 == val2 {
-                    Ok(())
+                    Ok(HashMap::new())
                 } else {
-                    Err(SubtypeError::BoolLitMismatch {
+                    Err(UnificationError::BoolLitMismatch {
                         expected: *val2,
                         actual: *val1,
                     })
@@ -505,9 +505,9 @@ impl TypeValue {
             }
             (TypeValue::FloatLit(val1), TypeValue::FloatLit(val2)) => {
                 if val1 == val2 {
-                    Ok(())
+                    Ok(HashMap::new())
                 } else {
-                    Err(SubtypeError::FloatLitMismatch {
+                    Err(UnificationError::FloatLitMismatch {
                         expected: *val2,
                         actual: *val1,
                     })
@@ -523,43 +523,64 @@ impl TypeValue {
                     returntype: returntype2,
                 },
             ) => {
+                let bindings  = HashMap::new();
                 for (i, (paramty1, paramty2)) in paramtys1.iter().zip(paramtys2.iter()).enumerate()
                 {
-                    paramty1.is_subtype_of(paramty2).map_err(|err| {
-                        SubtypeError::FnParamMismatch {
+                    let parambindings = paramty1.unify_with(paramty2).map_err(|err| {
+                        UnificationError::FnParamMismatch {
                             index: i,
                             error: Box::new(err),
                         }
                     })?;
+                    for (id, ty) in parambindings {
+                        match bindings.entry(id) {
+                            Entry::Occupied(entry) => {
+                                let boundty = entry.get();
+                                match ty.unify_with(boundty) {
+                                    Ok(_) => {}
+                                    Err(err) => {
+                                        return Err(UnificationError::FnParamBindingMismatch {
+                                            id: *id,
+                                            expected: boundty.clone(),
+                                            actual: ty.clone(),
+                                        });
+                                    }
+                                }
+                            }
+                            Entry::Vacant(entry) => {
+                                entry.insert(ty);
+                            }
+                        }
+                    }
                 }
                 if paramtys1.len() != paramtys2.len() {
-                    return Err(SubtypeError::FnParamCountMismatch {
+                    return Err(UnificationError::FnParamCountMismatch {
                         expected: paramtys2.len(),
                         actual: paramtys1.len(),
                     });
                 }
                 returntype1
-                    .is_subtype_of(returntype2)
-                    .map_err(|err| SubtypeError::FnReturnMismatch(Box::new(err)))
+                    .unify_with(returntype2)
+                    .map_err(|err| UnificationError::FnReturnMismatch(Box::new(err)))
             }
             (Self::Struct(l0), Self::Struct(r0)) => {
                 for ((l_field_name, l_field_type), (r_field_name, r_field_type)) in
                     l0.iter().zip(r0.iter())
                 {
                     if l_field_name != r_field_name {
-                        Err(SubtypeError::StructFieldNameMismatch {
+                        Err(UnificationError::StructFieldNameMismatch {
                             expected: r_field_name.clone(),
                             actual: l_field_name.clone(),
                         })?;
                     }
-                    l_field_type.is_subtype_of(r_field_type).map_err(|err| {
-                        SubtypeError::StructFieldTypeMismatch {
+                    l_field_type.unify_with(r_field_type).map_err(|err| {
+                        UnificationError::StructFieldTypeMismatch {
                             field: r_field_name.clone(),
                             error: Box::new(err),
                         }
                     })?;
                 }
-                Err(SubtypeError::StructFieldCountMismatch {
+                Err(UnificationError::StructFieldCountMismatch {
                     expected: r0.len(),
                     actual: l0.len(),
                 })?;
@@ -570,19 +591,19 @@ impl TypeValue {
                     l0.iter().zip(r0.iter())
                 {
                     if l_variant_name != r_variant_name {
-                        Err(SubtypeError::EnumVariantNameMismatch {
+                        Err(UnificationError::EnumVariantNameMismatch {
                             expected: r_variant_name.clone(),
                             actual: l_variant_name.clone(),
                         })?;
                     }
                     l_variant_type
-                        .is_subtype_of(r_variant_type)
-                        .map_err(|err| SubtypeError::EnumVariantTypeMismatch {
+                        .unify_with(r_variant_type)
+                        .map_err(|err| UnificationError::EnumVariantTypeMismatch {
                             variant: r_variant_name.clone(),
                             error: Box::new(err),
                         })?;
                 }
-                Err(SubtypeError::EnumVariantCountMismatch {
+                Err(UnificationError::EnumVariantCountMismatch {
                     expected: r0.len(),
                     actual: l0.len(),
                 })?;
@@ -593,19 +614,19 @@ impl TypeValue {
                     l0.iter().zip(r0.iter())
                 {
                     if l_variant_name != r_variant_name {
-                        Err(SubtypeError::UnionVariantNameMismatch {
+                        Err(UnificationError::UnionVariantNameMismatch {
                             expected: r_variant_name.clone(),
                             actual: l_variant_name.clone(),
                         })?;
                     }
                     l_variant_type
-                        .is_subtype_of(r_variant_type)
-                        .map_err(|err| SubtypeError::UnionVariantTypeMismatch {
+                        .unify_with(r_variant_type)
+                        .map_err(|err| UnificationError::UnionVariantTypeMismatch {
                             variant: r_variant_name.clone(),
                             error: Box::new(err),
                         })?;
                 }
-                Err(SubtypeError::UnionVariantCountMismatch {
+                Err(UnificationError::UnionVariantCountMismatch {
                     expected: r0.len(),
                     actual: l0.len(),
                 })?;
@@ -636,13 +657,13 @@ impl TypeValue {
                             },
                         ) => {
                             if l_id != r_id {
-                                return Err(SubtypeError::ConstructorTyparamNameMismatch {
+                                return Err(UnificationError::ConstructorTyparamNameMismatch {
                                     expected: r_id.clone(),
                                     actual: l_id.clone(),
                                 });
                             }
                             if l_kind != r_kind {
-                                return Err(SubtypeError::ConstructorTyparamKindMismatch {
+                                return Err(UnificationError::ConstructorTyparamKindMismatch {
                                     index: i,
                                     expected: r_kind.clone(),
                                     actual: l_kind.clone(),
@@ -653,14 +674,14 @@ impl TypeValue {
                     }
                 }
                 if l_typarams.len() != r_typarams.len() {
-                    return Err(SubtypeError::ConstructorTyparamCountMismatch {
+                    return Err(UnificationError::ConstructorTyparamCountMismatch {
                         expected: r_typarams.len(),
                         actual: l_typarams.len(),
                     });
                 }
                 l_body
-                    .is_subtype_of(r_body)
-                    .map_err(|err| SubtypeError::ConstructorBodyMismatch(Box::new(err)))
+                    .unify_with(r_body)
+                    .map_err(|err| UnificationError::ConstructorBodyMismatch(Box::new(err)))
             }
             (
                 Self::Generic {
@@ -687,7 +708,7 @@ impl TypeValue {
                             },
                         ) => {
                             if l_kind != r_kind {
-                                return Err(SubtypeError::GenericTyparamKindMismatch {
+                                return Err(UnificationError::GenericTyparamKindMismatch {
                                     index: i,
                                     expected: r_kind.clone(),
                                     actual: l_kind.clone(),
@@ -698,14 +719,14 @@ impl TypeValue {
                     }
                 }
                 if l_typarams.len() != r_typarams.len() {
-                    return Err(SubtypeError::GenericTyparamCountMismatch {
+                    return Err(UnificationError::GenericTyparamCountMismatch {
                         expected: r_typarams.len(),
                         actual: l_typarams.len(),
                     });
                 }
                 l_body
-                    .is_subtype_of(r_body)
-                    .map_err(|err| SubtypeError::GenericBodyMismatch(Box::new(err)))
+                    .unify_with(r_body)
+                    .map_err(|err| UnificationError::GenericBodyMismatch(Box::new(err)))
             }
             (
                 Self::Concretization {
@@ -718,28 +739,28 @@ impl TypeValue {
                 },
             ) => {
                 if l_symbolic_constructor != r_symbolic_constructor {
-                    return Err(SubtypeError::ConcretizationConstructorMismatch {
+                    return Err(UnificationError::ConcretizationConstructorMismatch {
                         expected: r_symbolic_constructor.clone(),
                         actual: l_symbolic_constructor.clone(),
                     });
                 }
                 for (i, (l_tyarg, r_tyarg)) in l_tyargs.iter().zip(r_tyargs.iter()).enumerate() {
-                    l_tyarg.is_subtype_of(r_tyarg).map_err(|err| {
-                        SubtypeError::ConcretizationTyargMismatch {
+                    l_tyarg.unify_with(r_tyarg).map_err(|err| {
+                        UnificationError::ConcretizationTyargMismatch {
                             index: i,
                             error: Box::new(err),
                         }
                     })?;
                 }
                 if l_tyargs.len() != r_tyargs.len() {
-                    return Err(SubtypeError::ConcretizationTyargCountMismatch {
+                    return Err(UnificationError::ConcretizationTyargCountMismatch {
                         expected: r_tyargs.len(),
                         actual: l_tyargs.len(),
                     });
                 }
                 Ok(())
             }
-            (l, r) => Err(SubtypeError::TypeMismatch {
+            (l, r) => Err(UnificationError::TypeMismatch {
                 expected: r.clone(),
                 actual: l.clone(),
             }),
@@ -1586,7 +1607,7 @@ fn intro_and_typecheck_hir_pat_checkmode(
         },
         hir::PatExpr::Typed { ref pat, ref ty } => {
             let pat_ty = typecheck_hir_type_infermode(ty, dlogger, env);
-            if !pat_ty.is_subtype_of(expected_type) {
+            if !pat_ty.unify_with(expected_type) {
                 dlogger.log_type_mismatch(
                     ty.range,
                     &print_type_value(expected_type, env),
@@ -1772,7 +1793,7 @@ pub fn typecheck_hir_value_checkmode(
         // everything else
         _ => {
             let actual_type = typecheck_hir_value_infermode(v, dlogger, env);
-            if !actual_type.is_subtype_of(expected_type) {
+            if !actual_type.unify_with(expected_type) {
                 dlogger.log_type_mismatch(
                     v.range,
                     &print_type_value(expected_type, env),
