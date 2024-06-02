@@ -427,6 +427,7 @@ impl TypeValue {
         }
     }
 
+    // returns a hashmap of bindings between symbolic variables (represented with a usize) and the types they would take on if this binding were used
     fn unify_with<'a>(self: &Self, other: &'a TypeValue) -> Result<HashMap<usize, &'a TypeValue>, UnificationError> {
         match (self, other) {
             (TypeValue::Error, _) => Ok(HashMap::new()),

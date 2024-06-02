@@ -5,8 +5,9 @@ use lsp_types::DiagnosticSeverity;
 use lsp_types::Location;
 use lsp_types::NumberOrString;
 use lsp_types::Range;
-use lsp_types::Url;
+use lsp_types::Uri;
 use num_bigint::BigInt;
+use std::str::FromStr;
 use std::sync::mpsc::channel;
 use std::sync::mpsc::Receiver;
 use std::sync::mpsc::Sender;
@@ -35,7 +36,7 @@ pub struct DiagnosticLogger {
     source: Option<String>,
 }
 
-fn format_token(maybe_tk: Option<TokenKind>) -> String {
+fn format_token(maybe_tk: Option<&TokenKind>) -> String {
     match maybe_tk {
         Some(TokenKind::Identifier(_)) => String::from("<IDENTIFIER>"),
         Some(TokenKind::Bool(_)) => String::from("<BOOLEAN>"),
@@ -158,21 +159,22 @@ impl DiagnosticLogger {
         expected_kind: Vec<TokenKind>,
         unexpected_kind: Option<TokenKind>,
     ) {
+        let l = expected_kind.len();
         let message = match expected_kind.len() {
             0 => format!(
                 "expected {} but found unexpected {}",
                 structure,
-                format_token(unexpected_kind)
+                format_token(unexpected_kind.as_ref())
             ),
             k => {
                 let expected_str = match k {
-                    1 => format_token(Some(expected_kind[0])),
+                    1 => format_token(Some(&expected_kind[0])),
                     _ => expected_kind
                         .into_iter()
                         .enumerate()
-                        .fold(String::new(), |a, (i, x)| match i {
+                        .fold(String::new(), |a, (i, ref x)| match i {
                             0 => format!("one of {}", format_token(Some(x))),
-                            _ if i == expected_kind.len() - 1 => {
+                            _ if i == l - 1 => {
                                 format!("{} or {}", a, format_token(Some(x)))
                             }
                             _ => format!("{}, {}", a, format_token(Some(x))),
@@ -183,7 +185,7 @@ impl DiagnosticLogger {
                     "(while parsing {}) expected {} but found unexpected {}",
                     structure,
                     expected_str,
-                    format_token(unexpected_kind)
+                    format_token(unexpected_kind.as_ref())
                 )
             }
         };
@@ -221,7 +223,7 @@ impl DiagnosticLogger {
             source: self.source.clone(),
             message: format!("duplicate identifier {}", identifier),
             related_information: Some(vec![DiagnosticRelatedInformation {
-                location: Location::new(Url::parse("/").unwrap(), previous_range),
+                location: Location::new(Uri::from_str("/").unwrap(), previous_range),
                 message: format!("previous declaration of {}", identifier),
             }]),
             tags: None,
@@ -327,7 +329,7 @@ impl DiagnosticLogger {
                 got_type, expected_type
             ),
             related_information: Some(vec![DiagnosticRelatedInformation {
-                location: Location::new(Url::parse("/").unwrap(), expected_range),
+                location: Location::new(Uri::from_str("/").unwrap(), expected_range),
                 message: format!("returned type: {}", expected_type),
             }]),
             tags: None,
@@ -380,7 +382,7 @@ impl DiagnosticLogger {
             source: self.source.clone(),
             message: format!("duplicate field `{}`", name),
             related_information: Some(vec![DiagnosticRelatedInformation {
-                location: Location::new(Url::parse("/").unwrap(), previous_range),
+                location: Location::new(Uri::from_str("/").unwrap(), previous_range),
                 message: format!("previous field `{}`", name),
             }]),
             tags: None,
@@ -442,7 +444,7 @@ impl DiagnosticLogger {
             source: self.source.clone(),
             message: format!("duplicate use for `{}`", prefix),
             related_information: Some(vec![DiagnosticRelatedInformation {
-                location: Location::new(Url::parse("/").unwrap(), previous_range),
+                location: Location::new(Uri::from_str("/").unwrap(), previous_range),
                 message: format!("previous use `{}`", prefix),
             }]),
             tags: None,
