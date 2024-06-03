@@ -1073,8 +1073,8 @@ fn translate_augfilestatement(
             }
             vec![]
         }
-        ast::FileStatement::Prefix {
-            prefix:
+        ast::FileStatement::Namespace {
+            namespace:
                 ast::Identifier {
                     identifier,
                     range: identifier_range,

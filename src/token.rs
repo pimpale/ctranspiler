@@ -21,11 +21,11 @@ pub enum TokenKind {
     While,    // while
     For,      // for
     Block,    // block
-    Prefix,   // prefix
+    Namespace,// namespace
     Use,      // use
+    Struct,   // struct
     Enum,     // enum
     Union,    // union
-    Nominal,  // nominal
     // Values
     Unit,                                   // void
     Lifetime(Vec<u8>),                      // 'lifetime

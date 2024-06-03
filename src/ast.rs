@@ -303,8 +303,8 @@ pub enum FileStatement {
         returnty: Box<Augmented<TypeExpr>>,
         body: Box<Augmented<BlockExpr>>,
     },
-    Prefix {
-        prefix: Identifier,
+    Namespace {
+        namespace: Identifier,
         items: Vec<Augmented<FileStatement>>,
     },
     Use {

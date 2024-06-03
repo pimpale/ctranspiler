@@ -193,7 +193,7 @@ fn parse_postfix_op<TkIter: Iterator<Item = Token>, T>(
     let mut expr = lower_fn(tkiter, dlogger);
 
     loop {
-        if let Some(operator_fn) = decide_fn(tkiter.peek_nth(0).unwrap().kind) {
+        if let Some(operator_fn) = decide_fn(tkiter.peek_nth(0).unwrap().kind.clone()) {
             // if the token is valid, then we parse apply the function to try to transform it
             expr = operator_fn(tkiter, dlogger, expr);
         } else {
@@ -483,7 +483,7 @@ fn parse_casetargetexpr<TkIter: Iterator<Item = Token>>(
     dlogger: &mut DiagnosticLogger,
 ) -> Augmented<CaseTargetExpr> {
     let metadata = get_metadata(tkiter);
-    let Token { kind, .. } = tkiter.peek_nth(0).unwrap();
+    let Token { kind, .. } = tkiter.peek_nth(0).unwrap().clone();
     let (range, val) = match kind {
         Some(TokenKind::Unit) => {
             let Token { range, .. } = tkiter.next().unwrap();
@@ -491,11 +491,11 @@ fn parse_casetargetexpr<TkIter: Iterator<Item = Token>>(
         }
         Some(TokenKind::Bool(x)) => {
             let Token { range, .. } = tkiter.next().unwrap();
-            (range, CaseTargetExpr::Bool(*x))
+            (range, CaseTargetExpr::Bool(x))
         }
         Some(TokenKind::Int(x)) => {
             let Token { range, .. } = tkiter.next().unwrap();
-            (range, CaseTargetExpr::Int(*x))
+            (range, CaseTargetExpr::Int(x))
         }
         _ => {
             let pat = Box::new(parse_patexpr(tkiter, dlogger));
@@ -2032,7 +2032,7 @@ pub fn parse_exact_filestatement_prefix<TkIter: Iterator<Item = Token>>(
 ) -> Augmented<FileStatement> {
     let metadata = get_metadata(tkiter);
     let prefix_tk = tkiter.next().unwrap();
-    assert!(prefix_tk.kind == Some(TokenKind::Prefix));
+    assert!(prefix_tk.kind == Some(TokenKind::Namespace));
 
     let identifier = expect_identifier(tkiter, dlogger, "prefix block");
 
@@ -2049,8 +2049,8 @@ pub fn parse_exact_filestatement_prefix<TkIter: Iterator<Item = Token>>(
     Augmented {
         metadata,
         range: union_of(prefix_tk.range, range),
-        val: FileStatement::Prefix {
-            prefix: identifier.identifier.unwrap_or(String::new()),
+        val: FileStatement::Namespace {
+            namespace: identifier.identifier.unwrap_or(String::new()),
             items,
         },
     }
@@ -2080,7 +2080,7 @@ pub fn parse_filestatement<TkIter: Iterator<Item = Token>>(
     match maybe_kind {
         Some(TokenKind::Typedef) => parse_exact_filestatement_typedef(tkiter, dlogger),
         Some(TokenKind::Valdef) => parse_exact_filestatement_valdef(tkiter, dlogger),
-        Some(TokenKind::Prefix) => parse_exact_filestatement_prefix(tkiter, dlogger),
+        Some(TokenKind::Namespace) => parse_exact_filestatement_prefix(tkiter, dlogger),
         Some(TokenKind::Use) => parse_exact_filestatement_use(tkiter, dlogger),
         k => {
             // grab metadata
