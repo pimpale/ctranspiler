@@ -157,7 +157,7 @@ impl DiagnosticLogger {
         range: Range,
         structure: &str,
         expected_kind: Vec<TokenKind>,
-        unexpected_kind: Option<TokenKind>,
+        unexpected_kind: &Option<TokenKind>,
     ) {
         let l = expected_kind.len();
         let message = match expected_kind.len() {

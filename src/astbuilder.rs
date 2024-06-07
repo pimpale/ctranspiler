@@ -66,12 +66,12 @@ fn expect_token<TkIter: Iterator<Item = Token>>(
     expected_tokens: Vec<TokenKind>,
 ) -> Token {
     let tk = tkiter.next().unwrap();
-    if let Some(tkk) = tk.kind {
-        if expected_tokens.contains(&tkk) {
+    if let Some(ref tkk) = tk.kind {
+        if expected_tokens.contains(tkk) {
             return tk;
         }
     }
-    dlogger.log_unexpected_token_specific(tk.range, structure, expected_tokens, tk.kind);
+    dlogger.log_unexpected_token_specific(tk.range, structure, expected_tokens, &tk.kind);
     return tk;
 }
 
@@ -91,7 +91,7 @@ fn expect_identifier<TkIter: Iterator<Item = Token>>(
         tk.range,
         structure,
         vec![TokenKind::Identifier(String::new())],
-        tk.kind,
+        &tk.kind,
     );
     return Identifier {
         identifier: None,
@@ -236,19 +236,16 @@ fn parse_delimited_statement_seq<TkIter: Iterator<Item = Token>, T>(
 ) -> (Range, Vec<Metadata>, Vec<Augmented<T>>, bool) {
     let metadata = get_metadata(tkiter);
 
-    let Token {
-        range: lrange,
-        kind,
-    } = expect_token(tkiter, dlogger, structure, vec![start_tok]);
+    let Token { range: lrange, .. } = expect_token(tkiter, dlogger, structure, vec![start_tok]);
 
     let mut rrange = lrange;
 
     let mut statements = vec![];
 
     // test match token to see if it sep or end
-    let mut has_ending_sep = loop {
+    let has_ending_sep = loop {
         // if next token is closing delimiter, break
-        if tkiter.peek_nth(0).unwrap().kind == Some(end_tok) {
+        if tkiter.peek_nth(0).unwrap().kind.as_ref() == Some(&end_tok) {
             let Token { range, .. } = tkiter.next().unwrap();
             rrange = range;
             break false;
@@ -259,18 +256,23 @@ fn parse_delimited_statement_seq<TkIter: Iterator<Item = Token>, T>(
 
         // parse sep and potentially closing delimiter
         let Token { range, kind } = tkiter.next().unwrap();
-        if kind == Some(sep_tok) {
+        if kind.as_ref() == Some(&sep_tok) {
             // if sep, check next
-            if tkiter.peek_nth(0).unwrap().kind == Some(end_tok) {
+            if tkiter.peek_nth(0).unwrap().kind.as_ref() == Some(&end_tok) {
                 let Token { range, .. } = tkiter.next().unwrap();
                 rrange = range;
                 break true;
             }
-        } else if kind == Some(end_tok) {
+        } else if kind.as_ref() == Some(&end_tok) {
             rrange = range;
             break false;
         } else {
-            dlogger.log_unexpected_token_specific(range, structure, vec![sep_tok, end_tok], kind);
+            dlogger.log_unexpected_token_specific(
+                range,
+                structure,
+                vec![sep_tok.clone(), end_tok.clone()],
+                &kind,
+            );
         }
     };
 
@@ -304,9 +306,9 @@ fn parse_delimited_statement_seq_opt_sep<TkIter: Iterator<Item = Token>, T>(
     let mut statements = vec![];
 
     // test match token to see if it sep or end
-    let mut has_ending_sep = loop {
+    let has_ending_sep = loop {
         // if next token is closing delimiter, break
-        if tkiter.peek_nth(0).unwrap().kind == Some(end_tok) {
+        if tkiter.peek_nth(0).unwrap().kind.as_ref() == Some(&end_tok) {
             let Token { range, .. } = tkiter.next().unwrap();
             rrange = range;
             break false;
@@ -316,17 +318,17 @@ fn parse_delimited_statement_seq_opt_sep<TkIter: Iterator<Item = Token>, T>(
         statements.push(parser_fn(tkiter, dlogger));
 
         // parse sep and potentially closing delimiter
-        match tkiter.peek_nth(0).unwrap().kind {
-            k if k == Some(sep_tok) => {
+        match tkiter.peek_nth(0).unwrap().kind.as_ref() {
+            k if k == Some(&sep_tok) => {
                 tkiter.next();
                 // if sep, check next
-                if tkiter.peek_nth(0).unwrap().kind == Some(end_tok) {
+                if tkiter.peek_nth(0).unwrap().kind.as_ref() == Some(&end_tok) {
                     let Token { range, .. } = tkiter.next().unwrap();
                     rrange = range;
                     break true;
                 }
             }
-            k if kind == Some(end_tok) => {
+            k if kind.as_ref() == Some(&end_tok) => {
                 rrange = tkiter.next().unwrap().range;
                 break false;
             }
@@ -342,6 +344,8 @@ fn parse_delimited_statement_seq_opt_sep<TkIter: Iterator<Item = Token>, T>(
     )
 }
 
+
+
 fn parse_struct_item_expr<TkIter: Iterator<Item = Token>, T>(
     lower_fn: impl Fn(&mut PeekMoreIterator<TkIter>, &mut DiagnosticLogger) -> Augmented<T>,
 ) -> impl Fn(&mut PeekMoreIterator<TkIter>, &mut DiagnosticLogger) -> Augmented<StructItemExpr<T>> {
@@ -354,7 +358,7 @@ fn parse_struct_item_expr<TkIter: Iterator<Item = Token>, T>(
                 ..
             } = tkiter.peek_nth(0).unwrap()
             {
-                let _ = tkiter.next().unwrap();
+                tkiter.next();
                 let expr = Box::new(lower_fn(tkiter, dlogger));
                 return Augmented {
                     metadata,
@@ -583,7 +587,7 @@ fn parse_exact_if<TkIter: Iterator<Item = Token>>(
 
     // rightmost boundary of range
     let rrange = match else_branch {
-        Some(x) => x.range,
+        Some(ref x) => x.range,
         None => lrange,
     };
 
