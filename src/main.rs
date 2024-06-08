@@ -20,6 +20,7 @@ use dlogger::DiagnosticLog;
 use hir_construct::construct_hir;
 use tokenize::tokenize;
 
+
 fn main() {
     let mut log = DiagnosticLog::new();
     let charstream = stdin().bytes().map_while(|x| x.ok());

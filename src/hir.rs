@@ -11,8 +11,8 @@ pub struct Augmented<T> {
 
 #[derive(Clone, Debug)]
 pub enum HirPhase {
-    Raw,
     NameResolved,
+    KindChecked,
     TypeChecked,
     TempsGenerated,
     BorrowChecking,
@@ -55,19 +55,19 @@ pub enum TypeExpr {
         paramtys: Vec<Augmented<TypeExpr>>,
         returnty: Box<Augmented<TypeExpr>>,
     },
-    // struct and enumify
+    // struct and enum
     Struct(IndexMap<String, Augmented<TypeExpr>>),
     Enum(IndexMap<String, Augmented<TypeExpr>>),
     Union(IndexMap<String, Augmented<TypeExpr>>),
-    // Nominal
-    Nominal {
-        identifier: usize,
-        inner: Box<Augmented<TypeExpr>>,
-    },
     // generic
     Concretization {
         genericty: Box<Augmented<TypeExpr>>,
         tyargs: Vec<Augmented<TypeExpr>>,
+    },
+    Generic {
+        params: Vec<Augmented<TypePatExpr>>,
+        returnkind: Box<Augmented<KindExpr>>,
+        body: Box<Augmented<TypeExpr>>,
     },
 }
 
@@ -78,27 +78,6 @@ pub enum TypePatExpr {
         id: usize,
         kind: Box<Augmented<KindExpr>>,
     },
-}
-
-#[derive(Clone, Debug)]
-pub enum ValBinaryOpKind {
-    // Math
-    Add,
-    Sub,
-    Mul,
-    Div,
-    Rem,
-    // Comparison
-    Lt,
-    Leq,
-    Gt,
-    Geq,
-    // Booleans
-    And,
-    Or,
-    // Equality
-    Eq,
-    Neq,
 }
 
 #[derive(Clone, Debug)]
@@ -154,14 +133,15 @@ pub enum ValExpr {
     String(Vec<u8>),
     Ref(Box<Augmented<ValExpr>>),
     Deref(Box<Augmented<ValExpr>>),
+    // Function
+    FnDef {
+        typarams: Vec<Augmented<TypePatExpr>>,
+        params: Vec<Augmented<PatExpr>>,
+        returnty: Box<Augmented<TypeExpr>>,
+        body: Box<Augmented<ValExpr>>,
+    },
     // Constructs a new compound type
     StructLiteral(IndexMap<String, Augmented<ValExpr>>),
-    // Binary operation
-    BinaryOp {
-        op: ValBinaryOpKind,
-        left_operand: Box<Augmented<ValExpr>>,
-        right_operand: Box<Augmented<ValExpr>>,
-    },
     IfThen {
         cond: Box<Augmented<ValExpr>>,
         then_branch: Box<Augmented<BlockExpr>>,
@@ -211,21 +191,12 @@ pub struct BlockExpr {
 pub enum BlockStatement {
     NoOp,
     TypeDef {
-        typarams: Vec<Augmented<TypePatExpr>>,
         typat: Box<Augmented<TypePatExpr>>,
         value: Box<Augmented<TypeExpr>>,
     },
     ValDef {
-        typarams: Vec<Augmented<TypePatExpr>>,
         pat: Box<Augmented<PatExpr>>,
         value: Box<Augmented<ValExpr>>,
-    },
-    FnDef {
-        typarams: Vec<Augmented<TypePatExpr>>,
-        identifier: usize,
-        params: Vec<Augmented<PatExpr>>,
-        returnty: Box<Augmented<TypeExpr>>,
-        body: Box<Augmented<BlockExpr>>,
     },
     Set {
         place: Box<Augmented<ValExpr>>,
@@ -250,21 +221,12 @@ pub enum BlockStatement {
 pub enum FileStatement {
     NoOp,
     TypeDef {
-        typarams: Vec<Augmented<TypePatExpr>>,
         typat: Box<Augmented<TypePatExpr>>,
         value: Box<Augmented<TypeExpr>>,
     },
     ValDef {
-        typarams: Vec<Augmented<TypePatExpr>>,
         pat: Box<Augmented<PatExpr>>,
         value: Box<Augmented<ValExpr>>,
-    },
-    FnDef {
-        typarams: Vec<Augmented<TypePatExpr>>,
-        identifier: usize,
-        params: Vec<Augmented<PatExpr>>,
-        returnty: Box<Augmented<TypeExpr>>,
-        body: Box<Augmented<BlockExpr>>,
     },
 }
 
@@ -277,165 +239,108 @@ pub struct TranslationUnit {
 
 pub trait HirVisitor {
     fn dfs_visit_translation_unit(&mut self, unit: &mut TranslationUnit) {
-        for decl in &unit.declarations {
-            self.visit_file_statement(&mut decl);
+        for decl in &mut unit.declarations {
+            self.visit_file_statement(decl);
         }
     }
 
     fn dfs_visit_file_statement(&mut self, statement: &mut Augmented<FileStatement>) {
-        match statement.val {
+        match &mut statement.val {
             FileStatement::NoOp => {}
-            FileStatement::TypeDef {
-                typarams,
-                value,
-                typat,
-            } => {
-                for typaram in typarams {
-                    self.visit_type_pat_expr(&mut typaram);
-                }
-                self.visit_type_pat_expr(&mut typat);
-                self.visit_type_expr(&mut value);
+            FileStatement::TypeDef { value, typat } => {
+                self.visit_type_pat_expr(typat);
+                self.visit_type_expr(value);
             }
-            FileStatement::ValDef {
-                typarams,
-                pat,
-                value,
-            } => {
-                for typaram in typarams {
-                    self.visit_type_pat_expr(&mut typaram);
-                }
-                self.visit_pat_expr(&mut pat);
-                self.visit_val_expr(&mut value);
-            }
-            FileStatement::FnDef {
-                typarams,
-                params,
-                returnty,
-                body,
-                ..
-            } => {
-                for typaram in typarams {
-                    self.visit_type_pat_expr(&mut typaram);
-                }
-                for param in params {
-                    self.visit_pat_expr(&mut param);
-                }
-                self.visit_type_expr(&mut returnty);
-                self.visit_block_expr(&mut body);
+            FileStatement::ValDef { pat, value } => {
+                self.visit_pat_expr(pat);
+                self.visit_val_expr(value);
             }
         }
     }
 
     fn dfs_visit_block_expr(&mut self, block: &mut Augmented<BlockExpr>) {
-        for statement in &block.val.statements {
-            self.visit_block_statement(&mut statement);
+        for statement in &mut block.val.statements {
+            self.visit_block_statement(statement);
         }
     }
 
     fn dfs_visit_block_statement(&mut self, statement: &mut Augmented<BlockStatement>) {
-        match statement.val {
+        match &mut statement.val {
             BlockStatement::NoOp => {}
-            BlockStatement::TypeDef {
-                typarams,
-                value,
-                typat,
-            } => {
-                for typaram in typarams {
-                    self.visit_type_pat_expr(&mut typaram);
-                }
-                self.visit_type_pat_expr(&mut typat);
-                self.visit_type_expr(&mut value);
+            BlockStatement::TypeDef { value, typat } => {
+                self.visit_type_pat_expr(typat);
+                self.visit_type_expr(value);
             }
-            BlockStatement::ValDef {
-                typarams,
-                pat,
-                value,
-            } => {
-                for typaram in typarams {
-                    self.visit_type_pat_expr(&mut typaram);
-                }
-                self.visit_pat_expr(&mut pat);
-                self.visit_val_expr(&mut value);
-            }
-            BlockStatement::FnDef {
-                typarams,
-                params,
-                returnty,
-                body,
-                ..
-            } => {
-                for typaram in typarams {
-                    self.visit_type_pat_expr(&mut typaram);
-                }
-                for param in params {
-                    self.visit_pat_expr(&mut param);
-                }
-                self.visit_type_expr(&mut returnty);
-                self.visit_block_expr(&mut body);
+            BlockStatement::ValDef { pat, value } => {
+                self.visit_pat_expr(pat);
+                self.visit_val_expr(value);
             }
             BlockStatement::Set { place, value } => {
-                self.visit_val_expr(&mut place);
-                self.visit_val_expr(&mut value);
+                self.visit_val_expr(place);
+                self.visit_val_expr(value);
             }
             BlockStatement::While { cond, body } => {
-                self.visit_val_expr(&mut cond);
-                self.visit_block_expr(&mut body);
+                self.visit_val_expr(cond);
+                self.visit_block_expr(body);
             }
             BlockStatement::For {
                 pattern,
                 start,
                 end,
-                inclusive,
+                inclusive: _,
                 by,
                 body,
             } => {
-                self.visit_pat_expr(&mut pattern);
-                self.visit_val_expr(&mut start);
-                self.visit_val_expr(&mut end);
+                self.visit_pat_expr(pattern);
+                self.visit_val_expr(start);
+                self.visit_val_expr(end);
                 if let Some(by) = by {
-                    self.visit_val_expr(&mut by);
+                    self.visit_val_expr(by);
                 }
-                self.visit_block_expr(&mut body);
+                self.visit_block_expr(body);
             }
             BlockStatement::Do(expr) => {
-                self.visit_val_expr(&mut expr);
+                self.visit_val_expr(expr);
             }
         }
     }
 
     fn dfs_visit_kind_expr(&mut self, expr: &mut Augmented<KindExpr>) {
-        match expr.val {
+        match &mut expr.val {
             KindExpr::Error => {}
             KindExpr::Bool => {}
             KindExpr::Int => {}
             KindExpr::Float => {}
+            KindExpr::Type => {}
             KindExpr::Constructor {
                 paramkinds,
                 returnkind,
             } => {
                 for paramkind in paramkinds {
-                    self.visit_kind_expr(&mut paramkind);
+                    self.visit_kind_expr(paramkind);
                 }
-                self.visit_kind_expr(&mut returnkind);
+                self.visit_kind_expr(returnkind);
             }
         }
     }
 
     fn visit_type_pat_expr(&mut self, expr: &mut Augmented<TypePatExpr>) {
-        match expr.val {
+        match &mut expr.val {
             TypePatExpr::Error => {}
             TypePatExpr::Identifier { kind, .. } => {
-                self.visit_kind_expr(&mut kind);
+                self.visit_kind_expr(kind);
             }
         }
     }
 
     fn dfs_visit_type_expr(&mut self, expr: &mut Augmented<TypeExpr>) {
-        match expr.val {
+        match &mut expr.val {
             TypeExpr::Error => {}
             TypeExpr::Identifier(_) => {}
             TypeExpr::UnitTy => {}
             TypeExpr::BoolTy => {}
+            TypeExpr::RefConstructorTy => {}
+            TypeExpr::UIntConstructorTy => {}
             TypeExpr::IntConstructorTy => {}
             TypeExpr::FloatConstructorTy => {}
             TypeExpr::ArrayConstructorTy => {}
@@ -445,62 +350,70 @@ pub trait HirVisitor {
             TypeExpr::Float(_) => {}
             TypeExpr::Struct(items) => {
                 for (_, item) in items {
-                    self.visit_type_expr(&mut item);
+                    self.visit_type_expr(item);
                 }
             }
             TypeExpr::Enum(items) => {
                 for (_, item) in items {
-                    self.visit_type_expr(&mut item);
+                    self.visit_type_expr(item);
                 }
             }
             TypeExpr::Union(items) => {
                 for (_, item) in items {
-                    self.visit_type_expr(&mut item);
+                    self.visit_type_expr(item);
                 }
             }
-            TypeExpr::Nominal { inner, .. } => {
-                self.visit_type_expr(&mut inner);
-            }
             TypeExpr::Concretization { genericty, tyargs } => {
-                self.visit_type_expr(&mut genericty);
+                self.visit_type_expr(genericty);
                 for tyarg in tyargs {
-                    self.visit_type_expr(&mut tyarg);
+                    self.visit_type_expr(tyarg);
                 }
             }
             TypeExpr::Fn { paramtys, returnty } => {
                 for paramty in paramtys {
-                    self.visit_type_expr(&mut paramty);
+                    self.visit_type_expr(paramty);
                 }
-                self.visit_type_expr(&mut returnty);
+                self.visit_type_expr(returnty);
+            }
+            TypeExpr::Generic {
+                params,
+                returnkind,
+                body,
+            } => {
+                for param in params {
+                    self.visit_type_pat_expr(param);
+                }
+                self.visit_kind_expr(returnkind);
+                self.visit_type_expr(body);
             }
         }
     }
 
     fn dfs_visit_pat_expr(&mut self, expr: &mut Augmented<PatExpr>) {
-        match expr.val {
+        match &mut expr.val {
             PatExpr::Error => {}
             PatExpr::Ignore => {}
             PatExpr::Identifier { .. } => {}
             PatExpr::StructLiteral(items) => {
                 for (_, item) in items {
-                    self.visit_pat_expr(&mut item);
+                    self.visit_pat_expr(item);
                 }
             }
             PatExpr::Typed { pat, ty } => {
-                self.visit_pat_expr(&mut pat);
-                self.visit_type_expr(&mut ty);
+                self.visit_pat_expr(pat);
+                self.visit_type_expr(ty);
             }
         }
     }
 
     fn visit_case_target_expr(&mut self, expr: &mut Augmented<CaseTargetExpr>) {
-        match expr.val {
+        match &mut expr.val {
             CaseTargetExpr::Error => {}
             CaseTargetExpr::Unit => {}
             CaseTargetExpr::Bool(_) => {}
             CaseTargetExpr::Int(_) => {}
             CaseTargetExpr::PatExpr(pat) => {
-                self.visit_pat_expr(&mut pat);
+                self.visit_pat_expr(pat);
             }
         }
     }
@@ -511,27 +424,27 @@ pub trait HirVisitor {
     }
 
     fn dfs_visit_else_expr(&mut self, expr: &mut Augmented<ElseExpr>) {
-        match expr.val {
+        match &mut expr.val {
             ElseExpr::Error => {}
             ElseExpr::Elif {
                 cond,
                 then_branch,
                 else_branch,
             } => {
-                self.visit_val_expr(&mut cond);
-                self.visit_block_expr(&mut then_branch);
+                self.visit_val_expr(cond);
+                self.visit_block_expr(then_branch);
                 if let Some(else_branch) = else_branch {
-                    self.visit_else_expr(&mut else_branch);
+                    self.visit_else_expr(else_branch);
                 }
             }
             ElseExpr::Else(expr) => {
-                self.visit_block_expr(&mut expr);
+                self.visit_block_expr(expr);
             }
         }
     }
 
     fn dfs_visit_val_expr(&mut self, expr: &mut Augmented<ValExpr>) {
-        match expr.val {
+        match &mut expr.val {
             ValExpr::Error => {}
             ValExpr::Unit => {}
             ValExpr::Int(_) => {}
@@ -539,33 +452,25 @@ pub trait HirVisitor {
             ValExpr::Float(_) => {}
             ValExpr::String(_) => {}
             ValExpr::Ref(expr) => {
-                self.visit_val_expr(&mut expr);
+                self.visit_val_expr(expr);
             }
             ValExpr::Deref(expr) => {
-                self.visit_val_expr(&mut expr);
+                self.visit_val_expr(expr);
             }
             ValExpr::StructLiteral(items) => {
                 for (_, item) in items {
-                    self.visit_val_expr(&mut item);
+                    self.visit_val_expr(item);
                 }
-            }
-            ValExpr::BinaryOp {
-                op: _,
-                left_operand,
-                right_operand,
-            } => {
-                self.visit_val_expr(&mut left_operand);
-                self.visit_val_expr(&mut right_operand);
             }
             ValExpr::IfThen {
                 cond,
                 then_branch,
                 else_branch,
             } => {
-                self.visit_val_expr(&mut cond);
-                self.visit_block_expr(&mut then_branch);
+                self.visit_val_expr(cond);
+                self.visit_block_expr(then_branch);
                 if let Some(else_branch) = else_branch {
-                    self.visit_else_expr(&mut else_branch);
+                    self.visit_else_expr(else_branch);
                 }
             }
             ValExpr::CaseOf {
@@ -573,39 +478,54 @@ pub trait HirVisitor {
                 first_case,
                 rest_cases,
             } => {
-                self.visit_val_expr(&mut expr);
-                self.visit_case_expr(&mut first_case);
+                self.visit_val_expr(expr);
+                self.visit_case_expr(first_case);
                 for case in rest_cases {
-                    self.visit_case_expr(&mut case);
+                    self.visit_case_expr(case);
                 }
             }
             ValExpr::Block(expr) => {
-                self.visit_block_expr(&mut expr);
+                self.visit_block_expr(expr);
             }
             ValExpr::ArrayLiteral(items) => {
                 for item in items {
-                    self.visit_val_expr(&mut item);
+                    self.visit_val_expr(item);
                 }
             }
             ValExpr::Identifier(_) => {}
             ValExpr::ArrayAccess { root, index } => {
-                self.visit_val_expr(&mut root);
-                self.visit_val_expr(&mut index);
+                self.visit_val_expr(root);
+                self.visit_val_expr(index);
             }
             ValExpr::FieldAccess { root, field: _ } => {
-                self.visit_val_expr(&mut root);
+                self.visit_val_expr(root);
             }
             ValExpr::Concretization { generic, tyargs } => {
-                self.visit_val_expr(&mut generic);
+                self.visit_val_expr(generic);
                 for tyarg in tyargs {
-                    self.visit_type_expr(&mut tyarg);
+                    self.visit_type_expr(tyarg);
                 }
             }
             ValExpr::App { fun, args } => {
-                self.visit_val_expr(&mut fun);
+                self.visit_val_expr(fun);
                 for arg in args {
-                    self.visit_val_expr(&mut arg);
+                    self.visit_val_expr(arg);
                 }
+            }
+            ValExpr::FnDef {
+                typarams,
+                params,
+                returnty,
+                body,
+            } => {
+                for typaram in typarams {
+                    self.visit_type_pat_expr(typaram);
+                }
+                for param in params {
+                    self.visit_pat_expr(param);
+                }
+                self.visit_type_expr(returnty);
+                self.visit_val_expr(body);
             }
         }
     }

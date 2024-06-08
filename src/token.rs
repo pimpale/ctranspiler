@@ -14,18 +14,18 @@ pub enum TokenKind {
     Mut,      // mut
     Set,      // set
     In,       // in
+    Fn,       // fn
     If,       // if
     Else,     // else
     By,       // by
-    Fn,       // fn
     While,    // while
     For,      // for
-    Block,    // block
     Namespace,// namespace
     Use,      // use
     Struct,   // struct
     Enum,     // enum
     Union,    // union
+    Generic,  // generic
     // Values
     Unit,                                   // void
     Lifetime(Vec<u8>),                      // 'lifetime
@@ -72,7 +72,6 @@ pub enum TokenKind {
     GreaterEqual, // >=
     // Assignment
     Assign,         // =
-    FunctionDefine, // :=
     // Reference
     Ref,   // &
     Deref, // @

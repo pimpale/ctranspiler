@@ -29,11 +29,6 @@ pub enum StructItemExpr<T> {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
-pub struct ArgsExpr<T> {
-    pub args: Vec<Augmented<T>>,
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug)]
 pub enum KindExpr {
     Error,
     Type,
@@ -41,7 +36,7 @@ pub enum KindExpr {
     Float,
     Bool,
     // this is the kind of a generic function
-    GenericFn {
+    Generic {
         args: Vec<Augmented<KindExpr>>,
         returnkind: Box<Augmented<KindExpr>>,
     },
@@ -60,37 +55,39 @@ pub enum TypeExpr {
     Identifier(Identifier),
     // types
     UnitTy,
-    ArrayTy,
-    SliceTy,
-    IntTy,
-    UIntTy,
-    FloatTy,
     BoolTy,
+    RefConstructorTy,
+    ArrayConstructorTy,
+    SliceConstructorTy,
+    IntConstructorTy,
+    UIntConstructorTy,
+    FloatConstructorTy,
     // const literals
     Int(BigInt),
     Bool(bool),
     Float(BigRational),
-    // unary ops (syntax sugar)
+    // unary ops
     Ref(Box<Augmented<TypeExpr>>),
-    // struct and enumify
+    // concretization
+    Concretization {
+        root: Box<Augmented<TypeExpr>>,
+        tyargs: Vec<Augmented<TypeExpr>>,
+    },
+    // structs and enums
     Struct(Vec<Augmented<StructItemExpr<TypeExpr>>>),
     Enum(Vec<Augmented<StructItemExpr<TypeExpr>>>),
     Union(Vec<Augmented<StructItemExpr<TypeExpr>>>),
-    // Nominal
-    Nominal {
-        identifier: Identifier,
-        inner: Box<Augmented<TypeExpr>>
-    },
     // For grouping apps
     Group(Box<Augmented<TypeExpr>>),
-    // generic
+    // generic is the equivalent of a function on the type level
     Generic {
-        fun: Box<Augmented<TypeExpr>>,
-        args: Box<Augmented<ArgsExpr<TypeExpr>>>,
+        params: Vec<Augmented<TypePatExpr>>,
+        returnkind: Box<Augmented<KindExpr>>,
+        body: Box<Augmented<TypeExpr>>,
     },
     // type of a function
     Fn {
-        paramtys: Box<Augmented<ArgsExpr<TypeExpr>>>,
+        paramtys: Vec<Augmented<TypeExpr>>,
         returnty: Box<Augmented<TypeExpr>>,
     },
 }
@@ -187,6 +184,12 @@ pub enum ValExpr {
         value: Vec<u8>,
         block: bool,
     },
+    FnDef {
+        typarams: Vec<Augmented<TypePatExpr>>,
+        params: Vec<Augmented<PatExpr>>,
+        returnty: Box<Augmented<TypeExpr>>,
+        body: Box<Augmented<ValExpr>>,
+    },
     Ref(Box<Augmented<ValExpr>>),
     Deref(Box<Augmented<ValExpr>>),
     // Constructs a new compound type
@@ -218,12 +221,12 @@ pub enum ValExpr {
     // Concretize
     Concretize {
         root: Box<Augmented<ValExpr>>,
-        tyargs: Box<Augmented<ArgsExpr<TypeExpr>>>,
+        tyargs: Vec<Augmented<TypeExpr>>,
     },
     // Function application
     App {
         root: Box<Augmented<ValExpr>>,
-        args: Box<Augmented<ArgsExpr<ValExpr>>>,
+        args: Vec<Augmented<ValExpr>>,
     },
     // index into an array
     ArrayAccess {
@@ -247,21 +250,12 @@ pub struct BlockExpr {
 pub enum BlockStatement {
     Error,
     TypeDef {
-        typarams: Option<Box<Augmented<ArgsExpr<TypePatExpr>>>>,
         typat: Box<Augmented<TypePatExpr>>,
         value: Box<Augmented<TypeExpr>>,
     },
     ValDef {
-        typarams: Option<Box<Augmented<ArgsExpr<TypePatExpr>>>>,
         pat: Box<Augmented<PatExpr>>,
         value: Box<Augmented<ValExpr>>,
-    },
-    FnDef {
-        identifier: Identifier,
-        typarams: Option<Box<Augmented<ArgsExpr<TypePatExpr>>>>,
-        params: Box<Augmented<ArgsExpr<PatExpr>>>,
-        returnty: Box<Augmented<TypeExpr>>,
-        body: Box<Augmented<BlockExpr>>,
     },
     Use {
         prefix: Identifier,
@@ -287,28 +281,19 @@ pub enum BlockStatement {
 pub enum FileStatement {
     Error,
     TypeDef {
-        typarams: Option<Box<Augmented<ArgsExpr<TypePatExpr>>>>,
         typat: Box<Augmented<TypePatExpr>>,
         value: Box<Augmented<TypeExpr>>,
     },
     ValDef {
-        typarams: Option<Box<Augmented<ArgsExpr<TypePatExpr>>>>,
         pat: Box<Augmented<PatExpr>>,
         value: Box<Augmented<ValExpr>>,
     },
-    FnDef {
-        identifier: Identifier,
-        typarams: Option<Box<Augmented<ArgsExpr<TypePatExpr>>>>,
-        params: Box<Augmented<ArgsExpr<PatExpr>>>,
-        returnty: Box<Augmented<TypeExpr>>,
-        body: Box<Augmented<BlockExpr>>,
+    Use {
+        prefix: Identifier,
     },
     Namespace {
         namespace: Identifier,
         items: Vec<Augmented<FileStatement>>,
-    },
-    Use {
-        prefix: Identifier,
     },
 }
 

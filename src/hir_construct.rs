@@ -12,8 +12,6 @@ struct Environment {
     prefixes: Vec<String>,
     use_prefixes: Vec<IndexMap<String, Range>>,
     // the global identifier tables
-    nominal_range_table: Vec<Range>,
-    nominal_name_table: Vec<String>,
     type_range_table: Vec<Range>,
     type_name_table: Vec<String>,
     val_range_table: Vec<Range>,
@@ -87,7 +85,7 @@ impl Environment {
                 } else {
                     let id = self.type_name_table.len();
                     self.type_names_in_scope
-                        .last()
+                        .last_mut()
                         .unwrap()
                         .insert(identifier.clone(), id);
                     self.type_name_table.push(identifier.clone());
@@ -121,46 +119,11 @@ impl Environment {
                 } else {
                     let id = self.val_name_table.len();
                     self.val_names_in_scope
-                        .last()
+                        .last_mut()
                         .unwrap()
                         .insert(identifier.clone(), id);
                     self.val_name_table.push(identifier.clone());
                     self.val_range_table.push(range);
-                    Some(id)
-                }
-            }
-            None => None,
-        }
-    }
-
-    fn introduce_nominal_identifier(
-        &mut self,
-        ast::Identifier { identifier, range }: ast::Identifier,
-        should_prefix: bool,
-    ) -> Option<usize> {
-        match identifier {
-            Some(identifier) => {
-                let identifier = if should_prefix {
-                    [self.prefixes.concat(), identifier].concat()
-                } else {
-                    identifier
-                };
-
-                if let Some(id) = self
-                    .nominal_name_table
-                    .iter()
-                    .position(|x| x == &identifier)
-                {
-                    self.dlogger.log_duplicate_identifier(
-                        range,
-                        self.nominal_range_table[id],
-                        &identifier,
-                    );
-                    None
-                } else {
-                    let id = self.nominal_name_table.len();
-                    self.nominal_name_table.push(identifier.clone());
-                    self.nominal_range_table.push(range);
                     Some(id)
                 }
             }
@@ -276,6 +239,13 @@ fn translate_augstructitemexpr<T, U>(
     out_items
 }
 
+fn translate_augkindexpr(
+    k: ast::Augmented<ast::KindExpr>,
+    env: &mut Environment,
+) -> Augmented<KindExpr> {
+    tr_aug(k, env, translate_kindexpr)
+}
+
 fn translate_kindexpr(k: ast::KindExpr, env: &mut Environment) -> KindExpr {
     match k {
         ast::KindExpr::Error => hir::KindExpr::Error,
@@ -283,12 +253,12 @@ fn translate_kindexpr(k: ast::KindExpr, env: &mut Environment) -> KindExpr {
         ast::KindExpr::Int => hir::KindExpr::Int,
         ast::KindExpr::Float => hir::KindExpr::Float,
         ast::KindExpr::Bool => hir::KindExpr::Bool,
-        ast::KindExpr::GenericFn { args, returnkind } => KindExpr::Constructor {
+        ast::KindExpr::Generic { args, returnkind } => KindExpr::Constructor {
             paramkinds: args
                 .into_iter()
-                .map(|x| tr_aug(x, env, translate_kindexpr))
+                .map(|k| translate_augkindexpr(k, env))
                 .collect(),
-            returnkind: Box::new(tr_aug(*returnkind, env, translate_kindexpr)),
+            returnkind: Box::new(translate_augkindexpr(*returnkind, env)),
         },
     }
 }
@@ -350,23 +320,27 @@ fn translate_augtypeexpr(
             range,
             val: TypeExpr::BoolTy,
         },
-        ast::TypeExpr::ArrayTy => Augmented {
+        ast::TypeExpr::RefConstructorTy => Augmented {
+            range,
+            val: TypeExpr::RefConstructorTy,
+        },
+        ast::TypeExpr::ArrayConstructorTy => Augmented {
             range,
             val: TypeExpr::ArrayConstructorTy,
         },
-        ast::TypeExpr::SliceTy => Augmented {
+        ast::TypeExpr::SliceConstructorTy => Augmented {
             range,
             val: TypeExpr::SliceConstructorTy,
         },
-        ast::TypeExpr::IntTy => Augmented {
+        ast::TypeExpr::IntConstructorTy => Augmented {
             range,
             val: TypeExpr::IntConstructorTy,
         },
-        ast::TypeExpr::UIntTy => Augmented {
+        ast::TypeExpr::UIntConstructorTy => Augmented {
             range,
             val: TypeExpr::UIntConstructorTy,
         },
-        ast::TypeExpr::FloatTy => Augmented {
+        ast::TypeExpr::FloatConstructorTy => Augmented {
             range,
             val: TypeExpr::FloatConstructorTy,
         },
@@ -428,24 +402,27 @@ fn translate_augtypeexpr(
                 items,
             )),
         },
-        ast::TypeExpr::Nominal { identifier, inner } => Augmented {
+        ast::TypeExpr::Group(t) => translate_augtypeexpr(*t, env),
+        ast::TypeExpr::Generic {
+            params,
+            returnkind,
+            body,
+        } => Augmented {
             range,
-            val: match env.introduce_nominal_identifier(identifier, true) {
-                Some(id) => TypeExpr::Nominal {
-                    identifier: id,
-                    inner: Box::new(translate_augtypeexpr(*inner, env)),
-                },
-                None => TypeExpr::Error,
+            val: TypeExpr::Generic {
+                params: params
+                    .into_iter()
+                    .map(|x| translate_augtypepatexpr(x, env, false))
+                    .collect(),
+                returnkind: Box::new(translate_augkindexpr(*returnkind, env)),
+                body: Box::new(translate_augtypeexpr(*body, env)),
             },
         },
-        ast::TypeExpr::Group(t) => translate_augtypeexpr(*t, env),
-        ast::TypeExpr::Generic { fun, args } => Augmented {
+        ast::TypeExpr::Concretization { root, tyargs } => Augmented {
             range,
             val: TypeExpr::Concretization {
-                genericty: Box::new(translate_augtypeexpr(*fun, env)),
-                tyargs: args
-                    .val
-                    .args
+                genericty: Box::new(translate_augtypeexpr(*root, env)),
+                tyargs: tyargs
                     .into_iter()
                     .map(|x| translate_augtypeexpr(x, env))
                     .collect(),
@@ -455,8 +432,6 @@ fn translate_augtypeexpr(
             range,
             val: TypeExpr::Fn {
                 paramtys: paramtys
-                    .val
-                    .args
                     .into_iter()
                     .map(|x| translate_augtypeexpr(x, env))
                     .collect(),
@@ -685,11 +660,46 @@ fn translate_valexpr(v: ast::ValExpr, env: &mut Environment) -> ValExpr {
             Some(id) => ValExpr::Identifier(id),
             None => ValExpr::Error,
         },
+        ast::ValExpr::FnDef {
+            typarams,
+            params,
+            returnty,
+            body,
+        } => {
+            // introduce new type and val scope
+            env.type_names_in_scope.push(HashMap::new());
+            env.val_names_in_scope.push(HashMap::new());
+
+            // insert typarams into scope
+            let typarams = typarams
+                .into_iter()
+                .map(|x| translate_augtypepatexpr(x, env, false))
+                .collect();
+
+            // insert params into scope
+            let params = params
+                .into_iter()
+                .map(|x| translate_augpatexpr(x, env, false))
+                .collect();
+
+            let returnty = Box::new(translate_augtypeexpr(*returnty, env));
+
+            let body = Box::new(tr_aug(*body, env, translate_blockexpr));
+
+            // end type and val scope
+            env.val_names_in_scope.pop();
+            env.type_names_in_scope.pop();
+
+            ValExpr::FnDef {
+                typarams,
+                params,
+                returnty,
+                body,
+            }
+        }
         ast::ValExpr::Concretize { root, tyargs } => ValExpr::Concretization {
             generic: Box::new(tr_aug(*root, env, translate_valexpr)),
             tyargs: tyargs
-                .val
-                .args
                 .into_iter()
                 .map(|x| translate_augtypeexpr(x, env))
                 .collect(),
@@ -697,8 +707,6 @@ fn translate_valexpr(v: ast::ValExpr, env: &mut Environment) -> ValExpr {
         ast::ValExpr::App { root, args } => ValExpr::App {
             fun: Box::new(tr_aug(*root, env, translate_valexpr)),
             args: args
-                .val
-                .args
                 .into_iter()
                 .map(|x| tr_aug(x, env, translate_valexpr))
                 .collect(),
@@ -717,123 +725,23 @@ fn translate_valexpr(v: ast::ValExpr, env: &mut Environment) -> ValExpr {
 fn translate_blockstatement(bs: ast::BlockStatement, env: &mut Environment) -> BlockStatement {
     match bs {
         ast::BlockStatement::Error => BlockStatement::NoOp,
-        ast::BlockStatement::TypeDef {
-            typarams,
-            typat,
-            value,
-        } => {
-            // introduce new type scope
-            env.type_names_in_scope.push(HashMap::new());
-            // insert typarams into scope
-            let typarams = match typarams {
-                Some(typarams) => typarams
-                    .val
-                    .args
-                    .into_iter()
-                    .map(|x| translate_augtypepatexpr(x, env, false))
-                    .collect(),
-                None => vec![],
-            };
-
-            // we introduce the variables into the current scope before we check the value
-            // note this means that the declared variables are accessible from the value
-            // this is a bit weird, but it's the only way to allow recursive let bindings
-            let typat = Box::new(translate_augtypepatexpr(*typat, env, false));
-
+        ast::BlockStatement::TypeDef { typat, value } => {
+            // first parse value so that we don't accidentally introduce the name of the type before the value
             let value = Box::new(translate_augtypeexpr(*value, env));
 
-            // end type scope
-            env.type_names_in_scope.pop();
+            // now introduce name
+            let typat = Box::new(translate_augtypepatexpr(*typat, env, false));
 
-            BlockStatement::TypeDef {
-                typarams,
-                typat,
-                value,
-            }
+            BlockStatement::TypeDef { typat, value }
         }
-        ast::BlockStatement::ValDef {
-            typarams,
-            pat,
-            value,
-        } => {
-            // introduce new type scope
-            env.type_names_in_scope.push(HashMap::new());
-            // insert typarams into scope
-            let typarams = match typarams {
-                Some(typarams) => typarams
-                    .val
-                    .args
-                    .into_iter()
-                    .map(|x| translate_augtypepatexpr(x, env, false))
-                    .collect(),
-                None => vec![],
-            };
-
-            // we introduce the variables into the current scope before we check the value
-            // note this means that the declared variables are accessible from the value
-            // this is a bit weird, but it's the only way to allow recursive let bindings
-            let pat = Box::new(translate_augpatexpr(*pat, env, false));
-
+        ast::BlockStatement::ValDef { pat, value } => {
+            // first parse value so that we don't accidentally introduce the name of the val before the value
             let value = Box::new(tr_aug(*value, env, translate_valexpr));
 
-            // end type scope
-            env.type_names_in_scope.pop();
-            BlockStatement::ValDef {
-                typarams,
-                pat,
-                value,
-            }
-        }
-        ast::BlockStatement::FnDef {
-            identifier,
-            typarams,
-            params,
-            returnty,
-            body,
-        } => {
-            // introduce identifier into current scope
-            if let Some(identifier) = env.introduce_val_identifier(identifier, false) {
-                // introduce new type and val scope
-                env.type_names_in_scope.push(HashMap::new());
-                env.val_names_in_scope.push(HashMap::new());
+            // now introduce name
+            let pat = Box::new(translate_augpatexpr(*pat, env, false));
 
-                // insert typarams into scope
-                let typarams = match typarams {
-                    Some(typarams) => typarams
-                        .val
-                        .args
-                        .into_iter()
-                        .map(|x| translate_augtypepatexpr(x, env, false))
-                        .collect(),
-                    None => vec![],
-                };
-
-                // insert params into scope
-                let params = params
-                    .val
-                    .args
-                    .into_iter()
-                    .map(|x| translate_augpatexpr(x, env, false))
-                    .collect();
-
-                let returnty = Box::new(translate_augtypeexpr(*returnty, env));
-
-                let body = Box::new(tr_aug(*body, env, translate_blockexpr));
-
-                // end type and val scope
-                env.val_names_in_scope.pop();
-                env.type_names_in_scope.pop();
-
-                BlockStatement::FnDef {
-                    identifier,
-                    typarams,
-                    params,
-                    returnty,
-                    body,
-                }
-            } else {
-                BlockStatement::NoOp
-            }
+            BlockStatement::ValDef { pat, value }
         }
         ast::BlockStatement::Use {
             prefix: ast::Identifier { range, identifier },
@@ -938,122 +846,29 @@ fn translate_augfilestatement(
 ) -> Vec<Augmented<FileStatement>> {
     match val {
         ast::FileStatement::Error => vec![],
-        ast::FileStatement::TypeDef {
-            typarams,
-            typat,
-            value,
-        } => {
-            // introduce type pattern into current scope
-            let typat = Box::new(translate_augtypepatexpr(*typat, env, true));
-            // create new type scope
-            env.type_names_in_scope.push(HashMap::new());
-            // insert typarams into scope
-            let typarams = match typarams {
-                Some(typarams) => typarams
-                    .val
-                    .args
-                    .into_iter()
-                    .map(|x| translate_augtypepatexpr(x, env, false))
-                    .collect(),
-                None => vec![],
-            };
-            // parse value
+        ast::FileStatement::TypeDef { typat, value } => {
+            // first parse value so that we don't accidentally introduce the name of the type before the value
             let value = Box::new(translate_augtypeexpr(*value, env));
-            // end type scope
-            env.type_names_in_scope.pop();
-            // return
+
+            // now introduce name
+            let typat = Box::new(translate_augtypepatexpr(*typat, env, false));
+
             vec![Augmented {
-                range,
-                val: FileStatement::TypeDef {
-                    typarams,
-                    typat,
-                    value,
-                },
+                val: FileStatement::TypeDef { typat, value },
+                range: range.clone(),
             }]
         }
-        ast::FileStatement::ValDef {
-            typarams,
-            pat,
-            value,
-        } => {
-            // introduce pattern into current scope
-            let pat = Box::new(translate_augpatexpr(*pat, env, true));
-            // create new type scope
-            env.type_names_in_scope.push(HashMap::new());
-            // insert typarams into scope
-            let typarams = match typarams {
-                Some(typarams) => typarams
-                    .val
-                    .args
-                    .into_iter()
-                    .map(|x| translate_augtypepatexpr(x, env, false))
-                    .collect(),
-                None => vec![],
-            };
-            // parse value
+        ast::FileStatement::ValDef { pat, value } => {
+            // first parse value so that we don't accidentally introduce the name of the val before the value
             let value = Box::new(tr_aug(*value, env, translate_valexpr));
-            // end type scope
-            env.type_names_in_scope.pop();
-            // return
+
+            // now introduce name
+            let pat = Box::new(translate_augpatexpr(*pat, env, false));
+
             vec![Augmented {
-                range,
-                val: FileStatement::ValDef {
-                    typarams,
-                    pat,
-                    value,
-                },
+                val: FileStatement::ValDef { pat, value },
+                range: range.clone(),
             }]
-        }
-        ast::FileStatement::FnDef {
-            identifier,
-            typarams,
-            params,
-            returnty,
-            body,
-        } => {
-            // introduce pattern into current scope
-            if let Some(identifier) = env.introduce_val_identifier(identifier, true) {
-                // create new type and val scope
-                env.type_names_in_scope.push(HashMap::new());
-                env.val_names_in_scope.push(HashMap::new());
-                // insert typarams into scope
-                let typarams = match typarams {
-                    Some(typarams) => typarams
-                        .val
-                        .args
-                        .into_iter()
-                        .map(|x| translate_augtypepatexpr(x, env, false))
-                        .collect(),
-                    None => vec![],
-                };
-                // insert params into scope
-                let params = params
-                    .val
-                    .args
-                    .into_iter()
-                    .map(|x| translate_augpatexpr(x, env, false))
-                    .collect();
-                // parse return type
-                let returnty = Box::new(translate_augtypeexpr(*returnty, env));
-                // parse body
-                let body = Box::new(tr_aug(*body, env, translate_blockexpr));
-                // end type and val scope
-                env.type_names_in_scope.pop();
-                env.val_names_in_scope.pop();
-                // return
-                vec![Augmented {
-                    range,
-                    val: FileStatement::FnDef {
-                        identifier,
-                        typarams,
-                        params,
-                        returnty,
-                        body,
-                    },
-                }]
-            } else {
-                vec![]
-            }
         }
         ast::FileStatement::Use {
             prefix: ast::Identifier { identifier, range },
@@ -1111,8 +926,6 @@ pub fn construct_hir(
     Vec<Range>,
     Vec<String>,
     Vec<Range>,
-    Vec<String>,
-    Vec<Range>,
 ) {
     let mut env = Environment {
         type_names_in_scope: vec![HashMap::new()],
@@ -1120,8 +933,6 @@ pub fn construct_hir(
         prefixes: vec![],
         use_prefixes: vec![IndexMap::new()],
         dlogger,
-        nominal_name_table: vec![],
-        nominal_range_table: vec![],
         type_name_table: vec![],
         type_range_table: vec![],
         val_name_table: vec![],
@@ -1134,10 +945,8 @@ pub fn construct_hir(
                 .into_iter()
                 .flat_map(|x| translate_augfilestatement(x, &mut env))
                 .collect(),
-            phase: HirPhase::Raw,
+            phase: HirPhase::NameResolved,
         },
-        env.nominal_name_table,
-        env.nominal_range_table,
         env.type_name_table,
         env.type_range_table,
         env.val_name_table,
