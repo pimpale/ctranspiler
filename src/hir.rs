@@ -3,6 +3,7 @@ use lsp_types::Range;
 use num_bigint::BigInt;
 use num_rational::BigRational;
 
+
 #[derive(Clone, Debug)]
 pub struct Augmented<T> {
     pub range: Range,
@@ -123,6 +124,27 @@ pub enum ElseExpr {
 }
 
 #[derive(Clone, Debug)]
+pub enum ValBinaryOpKind {
+    // Math
+    Add,
+    Sub,
+    Mul,
+    Div,
+    Rem,
+    // Comparison
+    Lt,
+    Leq,
+    Gt,
+    Geq,
+    // Booleans
+    And,
+    Or,
+    // Equality
+    Eq,
+    Neq,
+}
+
+#[derive(Clone, Debug)]
 pub enum ValExpr {
     // An error when parsing
     Error,
@@ -157,6 +179,11 @@ pub enum ValExpr {
     Block(Box<Augmented<BlockExpr>>),
     // Inline array
     ArrayLiteral(Vec<Augmented<ValExpr>>),
+    BinaryOp {
+        op:ValBinaryOpKind,
+        left_operand: Box<Augmented<ValExpr>>,
+        right_operand: Box<Augmented<ValExpr>>,
+    },
     // A reference to a previously defined variable
     Identifier(usize),
     // index into an array

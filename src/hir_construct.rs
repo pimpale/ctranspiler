@@ -131,7 +131,7 @@ impl Environment {
         }
     }
 
-    fn lookup_type_identifier(&self, identifier: ast::Identifier) -> Option<usize> {
+    fn lookup_type_identifier(&mut self, identifier: ast::Identifier) -> Option<usize> {
         match &identifier.identifier {
             Some(identifier_name) => {
                 if let Some(id) = get_if_in_scope(
@@ -150,7 +150,7 @@ impl Environment {
         }
     }
 
-    fn lookup_val_identifier(&self, identifier: ast::Identifier) -> Option<usize> {
+    fn lookup_val_identifier(&mut self, identifier: ast::Identifier) -> Option<usize> {
         match &identifier.identifier {
             Some(identifier_name) => {
                 if let Some(id) = get_if_in_scope(
@@ -684,7 +684,7 @@ fn translate_valexpr(v: ast::ValExpr, env: &mut Environment) -> ValExpr {
 
             let returnty = Box::new(translate_augtypeexpr(*returnty, env));
 
-            let body = Box::new(tr_aug(*body, env, translate_blockexpr));
+            let body = Box::new(tr_aug(*body, env, translate_valexpr));
 
             // end type and val scope
             env.val_names_in_scope.pop();
@@ -899,7 +899,7 @@ fn translate_augfilestatement(
             let mut out_items = vec![];
             if let Some(identifier) = identifier {
                 // file statements in this block will have this prepended to their names
-                env.prefixes.push(identifier);
+                env.prefixes.push(identifier.clone());
                 // also create new scope for uses, and insert this into it
                 env.use_prefixes
                     .push(IndexMap::from([(identifier.clone(), identifier_range)]));
