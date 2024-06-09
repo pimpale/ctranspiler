@@ -273,19 +273,20 @@ fn translate_augtypepatexpr(
             range,
             val: hir::TypePatExpr::Error,
         },
-        ast::TypePatExpr::Identifier { identifier, kind } => Augmented {
+        ast::TypePatExpr::Typed { identifier, kind } => Augmented {
             range,
             val: match env.introduce_type_identifier(identifier, should_prefix) {
-                Some(id) => TypePatExpr::Identifier {
+                Some(id) => TypePatExpr::Typed {
                     id,
-                    kind: Box::new(match kind {
-                        Some(kind) => tr_aug(*kind, env, translate_kindexpr),
-                        None => Augmented {
-                            range,
-                            val: KindExpr::Type,
-                        },
-                    }),
+                    kind: Box::new(tr_aug(*kind, env, translate_kindexpr)),
                 },
+                None => TypePatExpr::Error,
+            },
+        },
+        ast::TypePatExpr::Identifier(identifier) => Augmented {
+            range,
+            val: match env.introduce_type_identifier(identifier, should_prefix) {
+                Some(id) => TypePatExpr::Identifier(id),
                 None => TypePatExpr::Error,
             },
         },

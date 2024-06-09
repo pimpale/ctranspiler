@@ -81,7 +81,7 @@ pub enum TypeExpr {
     Group(Box<Augmented<TypeExpr>>),
     // generic is the equivalent of a function on the type level
     Generic {
-        params: Vec<Augmented<TypePatExpr>>,
+        params: Vec<Augmented<TypeParamExpr>>,
         returnkind: Box<Augmented<KindExpr>>,
         body: Box<Augmented<TypeExpr>>,
     },
@@ -95,9 +95,19 @@ pub enum TypeExpr {
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub enum TypePatExpr {
     Error,
-    Identifier {
+    Identifier(Identifier),
+    Typed {
         identifier: Identifier,
-        kind: Option<Box<Augmented<KindExpr>>>,
+        kind: Box<Augmented<KindExpr>>,
+    },
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub enum TypeParamExpr {
+    Error,
+    Typed {
+        identifier: Identifier,
+        kind: Box<Augmented<KindExpr>>,
     },
 }
 
@@ -146,7 +156,23 @@ pub enum PatExpr {
         mutable: bool,
         identifier: Identifier,
     },
-    StructLiteral(Vec<Augmented<StructItemExpr<PatExpr>>>),
+    StructLiteral {
+        ty: Box<Augmented<TypeExpr>>,
+        items: Vec<Augmented<StructItemExpr<PatExpr>>>,
+    },
+    Typed {
+        pat: Box<Augmented<PatExpr>>,
+        ty: Box<Augmented<TypeExpr>>,
+    },
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, AsRefStr)]
+pub enum ParamExpr {
+    Error,
+    StructLiteral {
+        ty: Box<Augmented<TypeExpr>>,
+        items: Vec<Augmented<StructItemExpr<PatExpr>>>,
+    },
     Typed {
         pat: Box<Augmented<PatExpr>>,
         ty: Box<Augmented<TypeExpr>>,
@@ -185,15 +211,18 @@ pub enum ValExpr {
         block: bool,
     },
     FnDef {
-        typarams: Vec<Augmented<TypePatExpr>>,
-        params: Vec<Augmented<PatExpr>>,
+        typarams: Vec<Augmented<TypeParamExpr>>,
+        params: Vec<Augmented<ParamExpr>>,
         returnty: Box<Augmented<TypeExpr>>,
         body: Box<Augmented<ValExpr>>,
     },
     Ref(Box<Augmented<ValExpr>>),
     Deref(Box<Augmented<ValExpr>>),
     // Constructs a new compound type
-    StructLiteral(Vec<Augmented<StructItemExpr<ValExpr>>>),
+    StructLiteral {
+        ty: Box<Augmented<TypeExpr>>,
+        items: Vec<Augmented<StructItemExpr<ValExpr>>>,
+    },
     // Binary operation
     BinaryOp {
         op: ValBinaryOpKind,

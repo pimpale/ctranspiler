@@ -3,7 +3,6 @@ use lsp_types::Range;
 use num_bigint::BigInt;
 use num_rational::BigRational;
 
-
 #[derive(Clone, Debug)]
 pub struct Augmented<T> {
     pub range: Range,
@@ -66,16 +65,26 @@ pub enum TypeExpr {
         tyargs: Vec<Augmented<TypeExpr>>,
     },
     Generic {
-        params: Vec<Augmented<TypePatExpr>>,
+        params: Vec<Augmented<TypeParamExpr>>,
         returnkind: Box<Augmented<KindExpr>>,
         body: Box<Augmented<TypeExpr>>,
     },
 }
 
 #[derive(Clone, Debug)]
+pub enum TypeParamExpr {
+    Error,
+    Typed {
+        id: usize,
+        kind: Box<Augmented<KindExpr>>,
+    },
+}
+
+#[derive(Clone, Debug)]
 pub enum TypePatExpr {
     Error,
-    Identifier {
+    Identifier(usize),
+    Typed {
         id: usize,
         kind: Box<Augmented<KindExpr>>,
     },
@@ -104,7 +113,19 @@ pub enum PatExpr {
         mutable: bool,
         id: usize,
     },
-    StructLiteral(IndexMap<String, Augmented<PatExpr>>),
+    StructLiteral {
+        ty: Box<Augmented<TypeExpr>>,
+        fields: IndexMap<String, Augmented<PatExpr>>,
+    },
+    Typed {
+        pat: Box<Augmented<PatExpr>>,
+        ty: Box<Augmented<TypeExpr>>,
+    },
+}
+
+#[derive(Clone, Debug)]
+pub enum ParamExpr {
+    Error,
     Typed {
         pat: Box<Augmented<PatExpr>>,
         ty: Box<Augmented<TypeExpr>>,
@@ -157,8 +178,8 @@ pub enum ValExpr {
     Deref(Box<Augmented<ValExpr>>),
     // Function
     FnDef {
-        typarams: Vec<Augmented<TypePatExpr>>,
-        params: Vec<Augmented<PatExpr>>,
+        typarams: Vec<Augmented<TypeParamExpr>>,
+        params: Vec<Augmented<ParamExpr>>,
         returnty: Box<Augmented<TypeExpr>>,
         body: Box<Augmented<ValExpr>>,
     },
@@ -180,7 +201,7 @@ pub enum ValExpr {
     // Inline array
     ArrayLiteral(Vec<Augmented<ValExpr>>),
     BinaryOp {
-        op:ValBinaryOpKind,
+        op: ValBinaryOpKind,
         left_operand: Box<Augmented<ValExpr>>,
         right_operand: Box<Augmented<ValExpr>>,
     },
@@ -354,7 +375,17 @@ pub trait HirVisitor {
     fn visit_type_pat_expr(&mut self, expr: &mut Augmented<TypePatExpr>) {
         match &mut expr.val {
             TypePatExpr::Error => {}
-            TypePatExpr::Identifier { kind, .. } => {
+            TypePatExpr::Identifier(_) => {}
+            TypePatExpr::Typed { kind, .. } => {
+                self.visit_kind_expr(kind);
+            }
+        }
+    }
+
+    fn visit_type_param_expr(&mut self, expr: &mut Augmented<TypeParamExpr>) {
+        match &mut expr.val {
+            TypeParamExpr::Error => {}
+            TypeParamExpr::Typed { kind, .. } => {
                 self.visit_kind_expr(kind);
             }
         }
@@ -408,7 +439,7 @@ pub trait HirVisitor {
                 body,
             } => {
                 for param in params {
-                    self.visit_type_pat_expr(param);
+                    self.visit_type_param_expr(param);
                 }
                 self.visit_kind_expr(returnkind);
                 self.visit_type_expr(body);
@@ -421,8 +452,9 @@ pub trait HirVisitor {
             PatExpr::Error => {}
             PatExpr::Ignore => {}
             PatExpr::Identifier { .. } => {}
-            PatExpr::StructLiteral(items) => {
-                for (_, item) in items {
+            PatExpr::StructLiteral { ty, fields } => {
+                self.visit_type_expr(ty);
+                for (_, item) in fields {
                     self.visit_pat_expr(item);
                 }
             }
@@ -489,6 +521,14 @@ pub trait HirVisitor {
                     self.visit_val_expr(item);
                 }
             }
+            ValExpr::BinaryOp {
+                op: _,
+                left_operand,
+                right_operand,
+            } => {
+                self.visit_val_expr(left_operand);
+                self.visit_val_expr(right_operand);
+            }
             ValExpr::IfThen {
                 cond,
                 then_branch,
@@ -546,10 +586,10 @@ pub trait HirVisitor {
                 body,
             } => {
                 for typaram in typarams {
-                    self.visit_type_pat_expr(typaram);
+                    self.visit_type_param_expr(typaram);
                 }
                 for param in params {
-                    self.visit_pat_expr(param);
+                    self.visit_param_expr(param);
                 }
                 self.visit_type_expr(returnty);
                 self.visit_val_expr(body);

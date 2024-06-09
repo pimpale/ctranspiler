@@ -384,7 +384,9 @@ fn parse_exact_valexpr_struct_literal<TkIter: Iterator<Item = Token>>(
 ) -> Augmented<ValExpr> {
     let metadata = get_metadata(tkiter);
 
-    let (range, statements, _) = parse_delimited_statement_seq(
+    let Token { range: lrange, .. } = exact_token(tkiter, TokenKind::Struct);
+
+    let (_, items, _) = parse_delimited_statement_seq(
         tkiter,
         dlogger,
         "struct literal",
@@ -394,10 +396,12 @@ fn parse_exact_valexpr_struct_literal<TkIter: Iterator<Item = Token>>(
         TokenKind::Comma,
     );
 
+    let ty = Box::new(parse_typeexpr(tkiter, dlogger));
+
     Augmented {
-        range,
+        range: union_of(lrange, ty.range),
         metadata,
-        val: ValExpr::StructLiteral(statements),
+        val: ValExpr::StructLiteral { ty, items },
     }
 }
 
@@ -728,7 +732,8 @@ fn decide_valexpr_term<TkIter: Iterator<Item = Token>>(
         TokenKind::Int(_) => Some(parse_exact_valexpr_int::<TkIter>),
         TokenKind::Float(_) => Some(parse_exact_valexpr_rational::<TkIter>),
         TokenKind::String { .. } => Some(parse_exact_valexpr_string::<TkIter>),
-        TokenKind::BraceLeft => Some(parse_exact_valexpr_struct_literal::<TkIter>),
+        TokenKind::Struct => Some(parse_exact_valexpr_struct_literal::<TkIter>),
+        TokenKind::BraceLeft => Some(parse_exact_valexpr_block::<TkIter>),
         TokenKind::ParenLeft => Some(parse_exact_valexpr_group::<TkIter>),
         TokenKind::Case => Some(parse_exact_valexpr_case::<TkIter>),
         TokenKind::If => Some(parse_exact_valexpr_if::<TkIter>),
@@ -1864,19 +1869,13 @@ fn parse_typepatexpr<TkIter: Iterator<Item = Token>>(
                     Augmented {
                         range,
                         metadata,
-                        val: TypePatExpr::Identifier {
-                            identifier,
-                            kind: Some(kind),
-                        },
+                        val: TypePatExpr::Typed { identifier, kind },
                     }
                 }
                 _ => Augmented {
                     range,
                     metadata,
-                    val: TypePatExpr::Identifier {
-                        identifier,
-                        kind: None,
-                    },
+                    val: TypePatExpr::Identifier(identifier),
                 },
             }
         }

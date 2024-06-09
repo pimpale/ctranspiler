@@ -1,10 +1,10 @@
-use std::collections::HashMap;
 use std::collections::hash_map::Entry;
+use std::collections::HashMap;
 use std::hash::Hash;
 
 use crate::dlogger::DiagnosticLogger;
-use crate::hir;
 use crate::hir::Augmented;
+use crate::{hir, hir_kindcheck};
 use lsp_types::Range;
 use num_bigint::BigInt;
 use num_rational::BigRational;
@@ -17,7 +17,7 @@ pub enum KindValue {
     Float,
     Bool,
     Type,
-    Constructor {
+    Generic {
         paramkinds: Vec<KindValue>,
         returnkind: Box<KindValue>,
     },
@@ -31,7 +31,7 @@ impl std::fmt::Display for KindValue {
             KindValue::Int => write!(f, "Int"),
             KindValue::Float => write!(f, "Float"),
             KindValue::Bool => write!(f, "Bool"),
-            KindValue::Constructor {
+            KindValue::Generic {
                 paramkinds,
                 returnkind,
             } => {
@@ -50,13 +50,6 @@ pub fn print_type_value(ty: &TypeValue, env: &Env) -> String {
         TypeValue::Error => "Error".to_string(),
         TypeValue::SymbolicVariable(id) => {
             format!("SymbolicVariable({})", env.type_name_table[*id])
-        }
-        TypeValue::Nominal { identifier, inner } => {
-            format!(
-                "Nominal({}, {})",
-                env.nominal_name_table[*identifier],
-                print_type_value(inner, env)
-            )
         }
         TypeValue::Unit => "Unit".to_string(),
         TypeValue::Bool => "Bool".to_string(),
@@ -115,15 +108,6 @@ pub fn print_type_value(ty: &TypeValue, env: &Env) -> String {
                 .collect::<Vec<String>>()
                 .join(", ")
         ),
-        TypeValue::Constructor { typarams, body } => format!(
-            "Constructor {{ typarams: [{}], body: {} }}",
-            typarams
-                .iter()
-                .map(|typaram| print_typaram(typaram, env))
-                .collect::<Vec<String>>()
-                .join(", "),
-            print_type_value(body, env)
-        ),
         TypeValue::Generic { typarams, body } => format!(
             "Generic {{ typarams: [{}], body: {} }}",
             typarams
@@ -148,20 +132,21 @@ pub fn print_type_value(ty: &TypeValue, env: &Env) -> String {
     }
 }
 
-fn print_typaram(typaram: &TypeParam, env: &Env) -> String {
-    match typaram {
-        TypeParam::Error => "Error".to_string(),
-        TypeParam::SymbolicVariable { ref id, ref kind } => {
-            format!("Identifier {{ id: {}, kind: {} }}", id, kind)
+fn print_typaram(typaram: &Augmented<hir::TypeParamExpr>, env: &Env) -> String {
+    match &typaram.val {
+        hir::TypeParamExpr::Error => "Error".to_string(),
+        hir::TypeParamExpr::Typed { ref id, ref kind } => {
+            format!(
+                "Identifier {{ id: {}, kind: {} }}",
+                id,
+                evaluate_hir_kind(kind)
+            )
         }
     }
 }
 
-pub fn evaluate_hir_kind(
-    kind: &Augmented<hir::KindExpr>,
-    dlogger: &mut DiagnosticLogger,
-) -> KindValue {
-    match kind.val {
+pub fn evaluate_hir_kind(kind: &Augmented<hir::KindExpr>) -> KindValue {
+    match &kind.val {
         hir::KindExpr::Error => KindValue::Error,
         hir::KindExpr::Type => KindValue::Type,
         hir::KindExpr::Int => KindValue::Int,
@@ -173,20 +158,14 @@ pub fn evaluate_hir_kind(
         } => {
             let mut paramkinds_out = vec![];
             for arg in paramkinds.iter() {
-                paramkinds_out.push(evaluate_hir_kind(arg, dlogger));
+                paramkinds_out.push(evaluate_hir_kind(arg));
             }
-            KindValue::Constructor {
+            KindValue::Generic {
                 paramkinds: paramkinds_out,
-                returnkind: Box::new(evaluate_hir_kind(&returnkind, dlogger)),
+                returnkind: Box::new(evaluate_hir_kind(&returnkind)),
             }
         }
     }
-}
-
-#[derive(Clone, Debug)]
-pub enum TypeParam {
-    Error,
-    SymbolicVariable { id: usize, kind: KindValue },
 }
 
 #[derive(Clone, Debug)]
@@ -194,11 +173,6 @@ pub enum TypeValue {
     // An error when parsing
     Error,
     SymbolicVariable(usize),
-    // a nominal type
-    Nominal {
-        identifier: usize,
-        inner: Box<TypeValue>,
-    },
     // types
     Unit,
     Bool,
@@ -229,16 +203,10 @@ pub enum TypeValue {
     Struct(Vec<(String, TypeValue)>),
     Enum(Vec<(String, TypeValue)>),
     Union(Vec<(String, TypeValue)>),
-    // type of a type constructor. Must be instantiated at every use point.
-    // type -> type
-    Constructor {
-        typarams: Vec<TypeParam>,
-        body: Box<TypeValue>,
-    },
     // type of a generic value. Instantiated at every use point
-    // type -> value
+    // type -> type
     Generic {
-        typarams: Vec<TypeParam>,
+        typarams: Vec<Augmented<hir::TypeParamExpr>>,
         body: Box<TypeValue>,
     },
     // where the type constructor is symbolic
@@ -359,64 +327,59 @@ enum UnificationError {
 }
 
 impl TypeValue {
-    fn subst(self: &Self, env: &Env) -> TypeValue {
+    fn subst(self: &Self, bindings: &HashMap<usize, TypeValue>) -> TypeValue {
         match self {
-            TypeValue::SymbolicVariable(id) => match env.type_bindings[*id].last() {
+            TypeValue::SymbolicVariable(id) => match bindings.get(id) {
                 Some(ty) => ty.clone(),
                 None => TypeValue::SymbolicVariable(*id),
             },
-            TypeValue::Ref(v) => TypeValue::Ref(Box::new(v.subst(env))),
+            TypeValue::Ref(v) => TypeValue::Ref(Box::new(v.subst(bindings))),
             TypeValue::Array(v, s) => {
-                TypeValue::Array(Box::new(v.subst(env)), Box::new(s.subst(env)))
+                TypeValue::Array(Box::new(v.subst(bindings)), Box::new(s.subst(bindings)))
             }
-            TypeValue::Slice(v) => TypeValue::Slice(Box::new(v.subst(env))),
-            TypeValue::Int(v) => TypeValue::Int(Box::new(v.subst(env))),
-            TypeValue::UInt(v) => TypeValue::UInt(Box::new(v.subst(env))),
-            TypeValue::Float(v) => TypeValue::Float(Box::new(v.subst(env))),
+            TypeValue::Slice(v) => TypeValue::Slice(Box::new(v.subst(bindings))),
+            TypeValue::Int(v) => TypeValue::Int(Box::new(v.subst(bindings))),
+            TypeValue::UInt(v) => TypeValue::UInt(Box::new(v.subst(bindings))),
+            TypeValue::Float(v) => TypeValue::Float(Box::new(v.subst(bindings))),
             TypeValue::Fn {
                 paramtys,
                 returntype,
             } => TypeValue::Fn {
-                paramtys: paramtys.iter().map(|ty| ty.subst(env)).collect(),
-                returntype: Box::new(returntype.subst(env)),
+                paramtys: paramtys.iter().map(|ty| ty.subst(bindings)).collect(),
+                returntype: Box::new(returntype.subst(bindings)),
             },
             TypeValue::Struct(fields) => TypeValue::Struct(
                 fields
                     .iter()
-                    .map(|(name, ty)| (name.clone(), ty.subst(env)))
+                    .map(|(name, ty)| (name.clone(), ty.subst(bindings)))
                     .collect(),
             ),
             TypeValue::Enum(fields) => TypeValue::Enum(
                 fields
                     .iter()
-                    .map(|(name, ty)| (name.clone(), ty.subst(env)))
+                    .map(|(name, ty)| (name.clone(), ty.subst(bindings)))
                     .collect(),
             ),
             TypeValue::Union(fields) => TypeValue::Union(
                 fields
                     .iter()
-                    .map(|(name, ty)| (name.clone(), ty.subst(env)))
+                    .map(|(name, ty)| (name.clone(), ty.subst(bindings)))
                     .collect(),
             ),
-            TypeValue::Nominal { identifier, inner } => TypeValue::Nominal {
-                identifier: *identifier,
-                inner: Box::new(inner.subst(env)),
-            },
-            TypeValue::Constructor { typarams, body } => TypeValue::Constructor {
-                typarams: typarams.clone(),
-                body: Box::new(body.subst(env)),
-            },
             TypeValue::Generic { typarams, body } => TypeValue::Generic {
                 typarams: typarams.clone(),
-                body: Box::new(body.subst(env)),
+                body: Box::new(body.subst(bindings)),
             },
             TypeValue::Concretization {
                 symbolic_constructor,
                 tyargs,
             } => {
-                let tyargs = tyargs.iter().map(|ty| ty.subst(env)).collect::<Vec<_>>();
-                match env.type_bindings[*symbolic_constructor].last() {
-                    Some(constructor) => concretize_type_expr(constructor, tyargs, env),
+                // substitute in the arguments
+                let tyargs = tyargs.iter().map(|ty| ty.subst(bindings)).collect::<Vec<_>>();
+                match bindings.get(symbolic_constructor) {
+                    // if we replaced the constructor, then we can evaluate
+                    Some(constructor) => concretize_type_expr(constructor, tyargs),
+                    // otherwise we just keep the concretization
                     None => TypeValue::Concretization {
                         symbolic_constructor: *symbolic_constructor,
                         tyargs,
@@ -428,32 +391,14 @@ impl TypeValue {
     }
 
     // returns a hashmap of bindings between symbolic variables (represented with a usize) and the types they would take on if this binding were used
-    fn unify_with<'a>(self: &Self, other: &'a TypeValue) -> Result<HashMap<usize, &'a TypeValue>, UnificationError> {
+    fn unify_with<'a>(
+        self: &Self,
+        other: &'a TypeValue,
+    ) -> Result<HashMap<usize, &'a TypeValue>, UnificationError> {
         match (self, other) {
             (TypeValue::Error, _) => Ok(HashMap::new()),
             (_, TypeValue::Error) => Ok(HashMap::new()),
-            (TypeValue::SymbolicVariable(id1), _) => {
-                Ok(HashMap::from([(id1.clone(), other)]))
-            }
-            (
-                TypeValue::Nominal {
-                    identifier: id1,
-                    inner: inner1,
-                },
-                TypeValue::Nominal {
-                    identifier: id2,
-                    inner: inner2,
-                },
-            ) => {
-                if id1 == id2 {
-                    match inner1.unify_with(inner2) {
-                        Ok(bindings) => Ok(bindings),
-                        Err(err) => Err(UnificationError::NominalInnerMismatch(Box::new(err))),
-                    }
-                } else {
-                    Err(UnificationError::NominalIdMismatch(*id1, *id2))
-                }
-            }
+            (TypeValue::SymbolicVariable(id1), _) => Ok(HashMap::from([(id1.clone(), other)])),
             (TypeValue::Unit, TypeValue::Unit) => Ok(HashMap::new()),
             (TypeValue::Bool, TypeValue::Bool) => Ok(HashMap::new()),
             (TypeValue::RefConstructor, TypeValue::RefConstructor) => Ok(HashMap::new()),
@@ -524,7 +469,7 @@ impl TypeValue {
                     returntype: returntype2,
                 },
             ) => {
-                let bindings  = HashMap::new();
+                let bindings = HashMap::new();
                 for (i, (paramty1, paramty2)) in paramtys1.iter().zip(paramtys2.iter()).enumerate()
                 {
                     let parambindings = paramty1.unify_with(paramty2).map_err(|err| {
@@ -541,7 +486,7 @@ impl TypeValue {
                                     Ok(_) => {}
                                     Err(err) => {
                                         return Err(UnificationError::FnParamBindingMismatch {
-                                            id: *id,
+                                            id,
                                             expected: boundty.clone(),
                                             actual: ty.clone(),
                                         });
@@ -597,12 +542,12 @@ impl TypeValue {
                             actual: l_variant_name.clone(),
                         })?;
                     }
-                    l_variant_type
-                        .unify_with(r_variant_type)
-                        .map_err(|err| UnificationError::EnumVariantTypeMismatch {
+                    l_variant_type.unify_with(r_variant_type).map_err(|err| {
+                        UnificationError::EnumVariantTypeMismatch {
                             variant: r_variant_name.clone(),
                             error: Box::new(err),
-                        })?;
+                        }
+                    })?;
                 }
                 Err(UnificationError::EnumVariantCountMismatch {
                     expected: r0.len(),
@@ -620,69 +565,18 @@ impl TypeValue {
                             actual: l_variant_name.clone(),
                         })?;
                     }
-                    l_variant_type
-                        .unify_with(r_variant_type)
-                        .map_err(|err| UnificationError::UnionVariantTypeMismatch {
+                    l_variant_type.unify_with(r_variant_type).map_err(|err| {
+                        UnificationError::UnionVariantTypeMismatch {
                             variant: r_variant_name.clone(),
                             error: Box::new(err),
-                        })?;
+                        }
+                    })?;
                 }
                 Err(UnificationError::UnionVariantCountMismatch {
                     expected: r0.len(),
                     actual: l0.len(),
                 })?;
                 Ok(())
-            }
-            (
-                Self::Constructor {
-                    typarams: l_typarams,
-                    body: l_body,
-                },
-                Self::Constructor {
-                    typarams: r_typarams,
-                    body: r_body,
-                },
-            ) => {
-                for (i, (l_typaram, r_typaram)) in
-                    l_typarams.iter().zip(r_typarams.iter()).enumerate()
-                {
-                    match (l_typaram, r_typaram) {
-                        (
-                            TypeParam::SymbolicVariable {
-                                id: l_id,
-                                kind: l_kind,
-                            },
-                            TypeParam::SymbolicVariable {
-                                id: r_id,
-                                kind: r_kind,
-                            },
-                        ) => {
-                            if l_id != r_id {
-                                return Err(UnificationError::ConstructorTyparamNameMismatch {
-                                    expected: r_id.clone(),
-                                    actual: l_id.clone(),
-                                });
-                            }
-                            if l_kind != r_kind {
-                                return Err(UnificationError::ConstructorTyparamKindMismatch {
-                                    index: i,
-                                    expected: r_kind.clone(),
-                                    actual: l_kind.clone(),
-                                });
-                            }
-                        }
-                        _ => (),
-                    }
-                }
-                if l_typarams.len() != r_typarams.len() {
-                    return Err(UnificationError::ConstructorTyparamCountMismatch {
-                        expected: r_typarams.len(),
-                        actual: l_typarams.len(),
-                    });
-                }
-                l_body
-                    .unify_with(r_body)
-                    .map_err(|err| UnificationError::ConstructorBodyMismatch(Box::new(err)))
             }
             (
                 Self::Generic {
@@ -771,52 +665,51 @@ impl TypeValue {
 
 // in infermode, we don't already know what kind the given expression has to be, so we infer it.
 // if we reach a concretize node, then we can do kindchecking_checkmode, because we know what the type arguments have to be
-// if we encounter an error, we log it, and modify the hir to be an error.
+// if we encounter an error, we log it
 // NOTE: we assume that all identifiers have already been resolved.
-pub fn kindcheck_hir_type_infermode(
-    v: &Augmented<hir::TypeExpr>,
+pub fn kindcheck_hir_type_infermode_and_patch(
+    v: &mut Augmented<hir::TypeExpr>,
     dlogger: &mut DiagnosticLogger,
-    type_name_table: &mut Vec<String>,
-    type_kind_table: &mut Vec<Option<KindValue>>,
+    type_name_table: &Vec<String>,
+    type_kind_table: &Vec<Option<KindValue>>,
 ) -> KindValue {
-    match v.val {
+    match &mut v.val {
         hir::TypeExpr::Error => KindValue::Error,
-        hir::TypeExpr::Identifier(id) => type_kind_table[id].expect("kind not initialized yet"),
+        hir::TypeExpr::Identifier(id) => type_kind_table[*id]
+            .clone()
+            .expect("kind not initialized yet"),
         hir::TypeExpr::UnitTy => KindValue::Type,
         hir::TypeExpr::BoolTy => KindValue::Type,
-        hir::TypeExpr::RefConstructorTy => KindValue::Constructor {
+        hir::TypeExpr::RefConstructorTy => KindValue::Generic {
             paramkinds: vec![KindValue::Type],
             returnkind: Box::new(KindValue::Type),
         },
-        hir::TypeExpr::ArrayConstructorTy => KindValue::Constructor {
+        hir::TypeExpr::ArrayConstructorTy => KindValue::Generic {
             paramkinds: vec![KindValue::Type, KindValue::Int],
             returnkind: Box::new(KindValue::Type),
         },
-        hir::TypeExpr::SliceConstructorTy => KindValue::Constructor {
+        hir::TypeExpr::SliceConstructorTy => KindValue::Generic {
             paramkinds: vec![KindValue::Type],
             returnkind: Box::new(KindValue::Type),
         },
-        hir::TypeExpr::IntConstructorTy => KindValue::Constructor {
+        hir::TypeExpr::IntConstructorTy => KindValue::Generic {
             paramkinds: vec![KindValue::Int],
             returnkind: Box::new(KindValue::Type),
         },
-        hir::TypeExpr::UIntConstructorTy => KindValue::Constructor {
+        hir::TypeExpr::UIntConstructorTy => KindValue::Generic {
             paramkinds: vec![KindValue::Int],
             returnkind: Box::new(KindValue::Type),
         },
-        hir::TypeExpr::FloatConstructorTy => KindValue::Constructor {
+        hir::TypeExpr::FloatConstructorTy => KindValue::Generic {
             paramkinds: vec![KindValue::Int],
             returnkind: Box::new(KindValue::Type),
         },
         hir::TypeExpr::Int(_) => KindValue::Int,
         hir::TypeExpr::Bool(_) => KindValue::Bool,
         hir::TypeExpr::Float(_) => KindValue::Float,
-        hir::TypeExpr::Fn {
-            paramtys,
-            ref mut returnty,
-        } => {
-            for ref mut arg in paramtys {
-                kindcheck_hir_type_checkmode(
+        hir::TypeExpr::Fn { paramtys, returnty } => {
+            for arg in paramtys {
+                kindcheck_hir_type_checkmode_and_patch(
                     arg,
                     &KindValue::Type,
                     dlogger,
@@ -824,7 +717,7 @@ pub fn kindcheck_hir_type_infermode(
                     type_kind_table,
                 );
             }
-            kindcheck_hir_type_checkmode(
+            kindcheck_hir_type_checkmode_and_patch(
                 returnty,
                 &KindValue::Type,
                 dlogger,
@@ -833,9 +726,9 @@ pub fn kindcheck_hir_type_infermode(
             );
             KindValue::Type
         }
-        hir::TypeExpr::Struct(ref fields) => {
-            for (_, ref mut expr) in fields {
-                kindcheck_hir_type_checkmode(
+        hir::TypeExpr::Struct(fields) => {
+            for (_, expr) in fields {
+                kindcheck_hir_type_checkmode_and_patch(
                     expr,
                     &KindValue::Type,
                     dlogger,
@@ -845,9 +738,9 @@ pub fn kindcheck_hir_type_infermode(
             }
             KindValue::Type
         }
-        hir::TypeExpr::Enum(ref fields) => {
-            for (_, ref mut expr) in fields {
-                kindcheck_hir_type_checkmode(
+        hir::TypeExpr::Enum(fields) => {
+            for (_, expr) in fields {
+                kindcheck_hir_type_checkmode_and_patch(
                     expr,
                     &KindValue::Type,
                     dlogger,
@@ -857,9 +750,9 @@ pub fn kindcheck_hir_type_infermode(
             }
             KindValue::Type
         }
-        hir::TypeExpr::Union(ref fields) => {
-            for (_, ref mut expr) in fields {
-                kindcheck_hir_type_checkmode(
+        hir::TypeExpr::Union(fields) => {
+            for (_, expr) in fields {
+                kindcheck_hir_type_checkmode_and_patch(
                     expr,
                     &KindValue::Type,
                     dlogger,
@@ -869,24 +762,18 @@ pub fn kindcheck_hir_type_infermode(
             }
             KindValue::Type
         }
-        hir::TypeExpr::Nominal { inner, .. } => {
-            kindcheck_hir_type_checkmode(
-                &inner,
-                &KindValue::Type,
+        hir::TypeExpr::Concretization {
+            genericty,
+            tyargs: provided_args,
+        } => {
+            let kind_of_generic = kindcheck_hir_type_infermode_and_patch(
+                genericty,
                 dlogger,
                 type_name_table,
                 type_kind_table,
             );
-            KindValue::Type
-        }
-        hir::TypeExpr::Concretization {
-            ref mut genericty,
-            tyargs: mut provided_args,
-        } => {
-            let kind_of_generic =
-                kindcheck_hir_type_infermode(genericty, dlogger, type_name_table, type_kind_table);
             match kind_of_generic {
-                KindValue::Constructor {
+                KindValue::Generic {
                     paramkinds: expected_kinds,
                     returnkind,
                 } => {
@@ -896,13 +783,12 @@ pub fn kindcheck_hir_type_infermode(
                             expected_kinds.len(),
                             provided_args.len(),
                         );
-                        v.val = hir::TypeExpr::Error;
                         KindValue::Error
                     } else {
                         for (ref argkind, ref mut tyarg) in
                             std::iter::zip(expected_kinds, provided_args)
                         {
-                            kindcheck_hir_type_checkmode(
+                            kindcheck_hir_type_checkmode_and_patch(
                                 tyarg,
                                 argkind,
                                 dlogger,
@@ -915,28 +801,61 @@ pub fn kindcheck_hir_type_infermode(
                 }
                 _ => {
                     dlogger.log_cannot_be_concretized(v.range);
+                    v.val = hir::TypeExpr::Error;
                     KindValue::Error
                 }
+            }
+        }
+        hir::TypeExpr::Generic {
+            params,
+            returnkind,
+            body,
+        } => {
+            let paramkinds = params
+                .iter()
+                .map(|param| match &param.val {
+                    hir::TypeParamExpr::Typed { kind, .. } => evaluate_hir_kind(kind),
+                    hir::TypeParamExpr::Error => KindValue::Error,
+                })
+                .collect();
+
+            let returnkind = Box::new(evaluate_hir_kind(&returnkind));
+
+            kindcheck_hir_type_checkmode_and_patch(
+                body,
+                &returnkind,
+                dlogger,
+                type_name_table,
+                type_kind_table,
+            );
+
+            KindValue::Generic {
+                paramkinds,
+                returnkind,
             }
         }
     }
 }
 
 // we use this function to verify if a type is well-kinded
-// if not, then an error is reported, and we modify the hir to eliminate the error
+// if not, then an error is reported
 // NOTE: we assume that all identifiers have already been resolved.
-pub fn kindcheck_hir_type_checkmode(
-    v: &Augmented<hir::TypeExpr>,
+pub fn kindcheck_hir_type_checkmode_and_patch(
+    v: &mut Augmented<hir::TypeExpr>,
     expected_kind: &KindValue,
     dlogger: &mut DiagnosticLogger,
-    type_name_table: &mut Vec<String>,
-    type_kind_table: &mut Vec<Option<KindValue>>,
+    type_name_table: &Vec<String>,
+    type_kind_table: &Vec<Option<KindValue>>,
 ) {
-    match v.val {
+    match &mut v.val {
         hir::TypeExpr::Error => {}
         k => {
-            let kind_of_k =
-                kindcheck_hir_type_infermode(v, dlogger, type_name_table, type_kind_table);
+            let kind_of_k = kindcheck_hir_type_infermode_and_patch(
+                v,
+                dlogger,
+                type_name_table,
+                type_kind_table,
+            );
             if &kind_of_k != expected_kind {
                 dlogger.log_kind_mismatch(
                     v.range,
@@ -950,44 +869,13 @@ pub fn kindcheck_hir_type_checkmode(
 }
 
 pub struct Env {
-    pub nominal_name_table: Vec<String>,
-    pub nominal_range_table: Vec<Range>,
     pub type_name_table: Vec<String>,
     pub type_value_table: Vec<Option<TypeValue>>,
-    pub type_bindings: Vec<Vec<TypeValue>>,
     pub val_name_table: Vec<String>,
     pub val_type_table: Vec<Option<TypeValue>>,
 }
 
-impl Env {
-    fn evaluate_nominal(&self, v: TypeValue) -> TypeValue {
-        match v {
-            TypeValue::Nominal { inner, .. } => self.evaluate_nominal(*inner),
-            x => x,
-        }
-    }
-
-    // introduces the variables bound by type pattern to this scope
-    fn bind_typaram(&mut self, typaram: &TypeParam, tyval: TypeValue) {
-        match typaram {
-            TypeParam::Error => {}
-            TypeParam::SymbolicVariable { id, .. } => {
-                self.type_bindings[*id].push(tyval);
-            }
-        }
-    }
-    // removes the variables bound by type pattern from this scope
-    fn unbind_typaram(&mut self, typaram: &TypeParam) {
-        match typaram {
-            TypeParam::Error => {}
-            TypeParam::SymbolicVariable { id, .. } => {
-                self.type_bindings[*id].pop().unwrap();
-            }
-        }
-    }
-}
-
-fn concretize_type_expr(constructor: &TypeValue, tyargs: Vec<TypeValue>, env: &Env) -> TypeValue {
+fn concretize_type_expr(constructor: &TypeValue, tyargs: Vec<TypeValue>) -> TypeValue {
     match constructor {
         TypeValue::Error => TypeValue::Error,
         TypeValue::SymbolicVariable(id) => TypeValue::Concretization {
@@ -1018,19 +906,24 @@ fn concretize_type_expr(constructor: &TypeValue, tyargs: Vec<TypeValue>, env: &E
             assert!(tyargs.len() == 1, "wrong number of arguments");
             TypeValue::Float(Box::new(tyargs[0]))
         }
-        TypeValue::Constructor { typarams, body } => {
-            assert!(typarams.len() == tyargs.len(), "wrong number of arguments");
-            for (ref typat, tyarg) in std::iter::zip(typarams, tyargs) {
-                env.bind_typaram(typat, tyarg);
+        TypeValue::Generic { typarams, body } => {
+            assert!(
+                typarams.len() == tyargs.len(),
+                "wrong number of arguments; should be kindchecked"
+            );
+            let bindings = HashMap::new();
+            for (typat, tyarg) in std::iter::zip(typarams, tyargs) {
+                match &typat.val {
+                    hir::TypeParamExpr::Typed { id, kind: _ } => {
+                        bindings.insert(*id, tyarg);
+                    }
+                    hir::TypeParamExpr::Error => {}
+                }
             }
-            let body = body.subst(env);
-            for ref typat in typarams {
-                env.unbind_typaram(typat);
-            }
-            body
+            body.subst(bindings)
         }
         _ => {
-            unreachable!("concretization of a non-generic");
+            unreachable!("concretization of a non-generic; should have been kindchecked");
         }
     }
 }
@@ -1043,18 +936,9 @@ pub fn typecheck_hir_type_infermode(
     dlogger: &mut DiagnosticLogger,
     env: &mut Env,
 ) -> TypeValue {
-    match v.val {
+    match &v.val {
         hir::TypeExpr::Error => TypeValue::Error,
-        hir::TypeExpr::Identifier(id) => match env.type_bindings[id].last() {
-            // if it is a live variable in scope, clone the bound value
-            Some(v) => v.clone(),
-            // otherwise, it is a type alias
-            _ => {
-                env.type_value_table[id]
-                    // if it is None, then it is an error with the compiler (it should have been caught earlier)
-                    .expect("variable must either be in scope, or a type alias")
-            }
-        },
+        hir::TypeExpr::Identifier(id) => TypeValue::SymbolicVariable(*id),
         hir::TypeExpr::UnitTy => TypeValue::Unit,
         hir::TypeExpr::BoolTy => TypeValue::Bool,
         hir::TypeExpr::RefConstructorTy => TypeValue::RefConstructor,
@@ -1063,14 +947,14 @@ pub fn typecheck_hir_type_infermode(
         hir::TypeExpr::IntConstructorTy => TypeValue::IntConstructor,
         hir::TypeExpr::UIntConstructorTy => TypeValue::UIntConstructor,
         hir::TypeExpr::FloatConstructorTy => TypeValue::FloatConstructor,
-        hir::TypeExpr::Int(x) => TypeValue::IntLit(x),
-        hir::TypeExpr::Bool(x) => TypeValue::BoolLit(x),
-        hir::TypeExpr::Float(x) => TypeValue::FloatLit(x),
+        hir::TypeExpr::Int(x) => TypeValue::IntLit(x.clone()),
+        hir::TypeExpr::Bool(x) => TypeValue::BoolLit(x.clone()),
+        hir::TypeExpr::Float(x) => TypeValue::FloatLit(x.clone()),
         hir::TypeExpr::Struct(fields) => {
             let mut s_fields = vec![];
             for (identifier, expr) in fields {
                 s_fields.push((
-                    identifier,
+                    identifier.clone(),
                     typecheck_hir_type_infermode(&expr, dlogger, env),
                 ));
             }
@@ -1080,7 +964,7 @@ pub fn typecheck_hir_type_infermode(
             let mut s_fields = vec![];
             for (identifier, expr) in fields {
                 s_fields.push((
-                    identifier,
+                    identifier.clone(),
                     typecheck_hir_type_infermode(&expr, dlogger, env),
                 ));
             }
@@ -1090,16 +974,12 @@ pub fn typecheck_hir_type_infermode(
             let mut s_fields = vec![];
             for (identifier, expr) in fields {
                 s_fields.push((
-                    identifier,
+                    identifier.clone(),
                     typecheck_hir_type_infermode(&expr, dlogger, env),
                 ));
             }
             TypeValue::Union(s_fields)
         }
-        hir::TypeExpr::Nominal { identifier, inner } => TypeValue::Nominal {
-            identifier,
-            inner: Box::new(typecheck_hir_type_infermode(&inner, dlogger, env)),
-        },
         hir::TypeExpr::Fn { paramtys, returnty } => TypeValue::Fn {
             paramtys: paramtys
                 .iter()
@@ -1107,16 +987,27 @@ pub fn typecheck_hir_type_infermode(
                 .collect(),
             returntype: Box::new(typecheck_hir_type_infermode(&returnty, dlogger, env)),
         },
+        hir::TypeExpr::Generic {
+            params,
+            returnkind: _,
+            body,
+        } => {
+            let body = Box::new(typecheck_hir_type_infermode(body, dlogger, env));
+            TypeValue::Generic {
+                typarams: params.clone(),
+                body,
+            }
+        }
         // substitute the generic arguments into the body
         hir::TypeExpr::Concretization { genericty, tyargs } => {
-            // first we evaluate the type of the generic function (peeking past identifiers)
-            let generic_val =
-                env.evaluate_nominal(typecheck_hir_type_infermode(&genericty, dlogger, env));
+            // first we evaluate the type of the generic function
+            let generic_val = typecheck_hir_type_infermode(&genericty, dlogger, env);
             let tyargs = tyargs
                 .iter()
                 .map(|x| typecheck_hir_type_infermode(x, dlogger, env))
                 .collect::<Vec<_>>();
-            concretize_type_expr(&generic_val, tyargs, env)
+            // attempt to concretize the type (will only work if there are no symbolic variables in the type)
+            concretize_type_expr(&generic_val, tyargs)
         }
     }
 }
@@ -1146,30 +1037,15 @@ pub fn typecheck_hir_elseexpr_checkmode(
     }
 }
 
-fn hir_typat_to_param(
-    v: &Augmented<hir::TypePatExpr>,
-    dlogger: &mut DiagnosticLogger,
-    _env: &mut Env,
-) -> TypeParam {
-    match v.val {
-        hir::TypePatExpr::Error => TypeParam::Error,
-        hir::TypePatExpr::Identifier { id, ref kind } => TypeParam::SymbolicVariable {
-            id,
-            kind: evaluate_hir_kind(kind, dlogger),
-        },
-    }
-}
-
 pub fn typecheck_hir_blockstatement(
     v: &Augmented<hir::BlockStatement>,
     dlogger: &mut DiagnosticLogger,
-    env: &mut Env,
+    env: &Env,
 ) {
     match v.val {
         hir::BlockStatement::NoOp => {}
         // should already be typechecked
         hir::BlockStatement::TypeDef {
-            ref typarams,
             ref typat,
             ref value,
         } => {
@@ -1183,11 +1059,7 @@ pub fn typecheck_hir_blockstatement(
                 .collect::<Vec<_>>();
             intro_hir_typat(typat, dlogger, env, tyval, typarams);
         }
-        hir::BlockStatement::ValDef {
-            ref typarams,
-            ref pat,
-            ref value,
-        } => {
+        hir::BlockStatement::ValDef { ref pat, ref value } => {
             for typat in typarams {
                 intro_hir_typat_symbolic(typat, dlogger, env);
             }
@@ -1197,37 +1069,6 @@ pub fn typecheck_hir_blockstatement(
                 .map(|x| hir_typat_to_param(x, dlogger, env))
                 .collect::<Vec<_>>();
             intro_and_typecheck_hir_pat_checkmode(pat, dlogger, env, &valty, &typarams);
-        }
-        hir::BlockStatement::FnDef {
-            ref typarams,
-            ref identifier,
-            ref params,
-            ref returnty,
-            ref body,
-        } => {
-            for typat in typarams {
-                intro_hir_typat_symbolic(typat, dlogger, env);
-            }
-            let typarams = typarams
-                .iter()
-                .map(|x| hir_typat_to_param(x, dlogger, env))
-                .collect::<Vec<_>>();
-            // get param types and intro them
-            let params = params
-                .iter()
-                .map(|x| intro_and_typecheck_hir_pat_infermode(x, dlogger, env, &typarams))
-                .collect::<Vec<_>>();
-            // get returntype
-            let returnty = typecheck_hir_type_infermode(returnty, dlogger, env);
-
-            // intro the function
-            env.val_type_table[*identifier] = Some(TypeValue::Fn {
-                paramtys: params,
-                returntype: Box::new(returnty),
-            });
-
-            // typecheck the body now that we know what type it should be as well as the param types
-            typecheck_hir_blockexpr_checkmode(body, dlogger, env, &returnty);
         }
         hir::BlockStatement::Set {
             ref place,
@@ -1264,7 +1105,7 @@ pub fn typecheck_hir_blockstatement(
 pub fn typecheck_hir_blockexpr_checkmode(
     v: &Augmented<hir::BlockExpr>,
     dlogger: &mut DiagnosticLogger,
-    env: &mut Env,
+    env: &Env,
     expected_type: &TypeValue,
 ) {
     for s in v.val.statements.iter() {
@@ -1278,7 +1119,7 @@ pub fn typecheck_hir_blockexpr_checkmode(
 pub fn typecheck_hir_blockexpr_infermode(
     v: &Augmented<hir::BlockExpr>,
     dlogger: &mut DiagnosticLogger,
-    env: &mut Env,
+    env: &Env,
 ) -> TypeValue {
     for s in v.val.statements.iter() {
         typecheck_hir_blockstatement(s, dlogger, env);
@@ -1293,7 +1134,7 @@ pub fn typecheck_hir_blockexpr_infermode(
 pub fn typecheck_hir_value_infermode(
     v: &Augmented<hir::ValExpr>,
     dlogger: &mut DiagnosticLogger,
-    env: &mut Env,
+    env: &Env,
 ) -> TypeValue {
     match &v.val {
         hir::ValExpr::Error => TypeValue::Error,
