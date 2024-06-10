@@ -1,4 +1,4 @@
-use std::collections::{HashMap, VecDeque};
+use std::collections::HashMap;
 
 use indexmap::IndexMap;
 use lsp_types::Range;
@@ -502,11 +502,14 @@ fn translate_casetargetexpr(c: ast::CaseTargetExpr, env: &mut Environment) -> Ca
     }
 }
 
-fn translate_caseexpr(c: ast::CaseExpr, env: &mut Environment) -> CaseExpr {
-    CaseExpr {
-        target: Box::new(tr_aug(*c.target, env, translate_casetargetexpr)),
-        body: Box::new(translate_augvalexpr(*c.body, env)),
-    }
+fn translate_caseexpr(
+    c: ast::CaseExpr,
+    env: &mut Environment,
+) -> (Augmented<CaseTargetExpr>, Augmented<ValExpr>) {
+    (
+        tr_aug(*c.target, env, translate_casetargetexpr),
+        translate_augvalexpr(*c.body, env),
+    )
 }
 
 fn translate_elseexpr(e: ast::ElseExpr, env: &mut Environment) -> ValExpr {
@@ -664,23 +667,14 @@ fn translate_augvalexpr(
             },
         },
         ast::ValExpr::CaseOf { expr, cases } => {
-            let mut cases = cases
+            let expr = Box::new(translate_augvalexpr(*expr, env));
+            let cases = cases
                 .into_iter()
-                .map(|x| tr_aug(x, env, translate_caseexpr))
-                .collect::<VecDeque<_>>();
+                .map(|x| translate_caseexpr(x.val, env))
+                .collect();
             Augmented {
                 range,
-                val: match cases.pop_front() {
-                    None => {
-                        env.dlogger.log_empty_caseof(expr.range);
-                        ValExpr::Error
-                    }
-                    Some(first_case) => ValExpr::CaseOf {
-                        expr: Box::new(translate_augvalexpr(*expr, env)),
-                        first_case,
-                        rest_cases: cases.into(),
-                    },
-                },
+                val: ValExpr::CaseOf { expr, cases },
             }
         }
         ast::ValExpr::Block(b) => Augmented {

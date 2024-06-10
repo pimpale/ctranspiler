@@ -69,113 +69,113 @@ impl KindValue {
     }
 }
 
-// pub fn print_type_value(ty: &TypeValue, env: &Env) -> String {
-//     match ty {
-//         TypeValue::Error => "Error".to_string(),
-//         TypeValue::SymbolicVariable(id) => {
-//             format!("SymbolicVariable({})", env.type_name_table[*id])
-//         }
-//         TypeValue::Unit => "Unit".to_string(),
-//         TypeValue::Bool => "Bool".to_string(),
-//         TypeValue::RefConstructor => "RefConstructor".to_string(),
-//         TypeValue::ArrayConstructor => "ArrayConstructor".to_string(),
-//         TypeValue::SliceConstructor => "SliceConstructor".to_string(),
-//         TypeValue::IntConstructor => "IntConstructor".to_string(),
-//         TypeValue::UIntConstructor => "UIntConstructor".to_string(),
-//         TypeValue::FloatConstructor => "FloatConstructor".to_string(),
-//         TypeValue::Ref(ty) => format!("Ref({})", print_type_value(ty, env)),
-//         TypeValue::Array(ty, size) => format!(
-//             "Array({}, {})",
-//             print_type_value(ty, env),
-//             print_type_value(size, env)
-//         ),
-//         TypeValue::Slice(ty) => format!("Slice({})", print_type_value(ty, env)),
-//         TypeValue::Int(ty) => format!("Int({})", print_type_value(ty, env)),
-//         TypeValue::UInt(ty) => format!("UInt({})", print_type_value(ty, env)),
-//         TypeValue::Float(ty) => format!("Float({})", print_type_value(ty, env)),
-//         TypeValue::IntLit(n) => format!("IntLit({})", n),
-//         TypeValue::BoolLit(b) => format!("BoolLit({})", b),
-//         TypeValue::FloatLit(n) => format!("FloatLit({})", n),
-//         TypeValue::Fn {
-//             paramtys,
-//             returntype,
-//         } => format!(
-//             "Fn {{ paramtys: [{}], returntype: {} }}",
-//             paramtys
-//                 .iter()
-//                 .map(|ty| print_type_value(ty, env))
-//                 .collect::<Vec<String>>()
-//                 .join(", "),
-//             print_type_value(returntype, env)
-//         ),
-//         TypeValue::Struct(fields) => format!(
-//             "Struct {{ fields: [{}] }}",
-//             fields
-//                 .iter()
-//                 .map(|(name, ty)| format!("{}: {}", name, print_type_value(ty, env)))
-//                 .collect::<Vec<String>>()
-//                 .join(", ")
-//         ),
-//         TypeValue::Enum(fields) => format!(
-//             "Enum {{ fields: [{}] }}",
-//             fields
-//                 .iter()
-//                 .map(|(name, ty)| format!("{}: {}", name, print_type_value(ty, env)))
-//                 .collect::<Vec<String>>()
-//                 .join(", ")
-//         ),
-//         TypeValue::Union(fields) => format!(
-//             "Union {{ fields: [{}] }}",
-//             fields
-//                 .iter()
-//                 .map(|(name, ty)| format!("{}: {}", name, print_type_value(ty, env)))
-//                 .collect::<Vec<String>>()
-//                 .join(", ")
-//         ),
-//         TypeValue::Generic { typarams, body } => format!(
-//             "Generic {{ typarams: [{}], body: {} }}",
-//             typarams
-//                 .iter()
-//                 .map(|typaram| print_typaram(typaram))
-//                 .collect::<Vec<String>>()
-//                 .join(", "),
-//             print_type_value(body, env)
-//         ),
-//         TypeValue::Concretization {
-//             symbolic_constructor,
-//             tyargs,
-//         } => format!(
-//             "Concretization {{ symbolic_constructor: {}, tyargs: [{}] }}",
-//             env.type_name_table[*symbolic_constructor],
-//             tyargs
-//                 .iter()
-//                 .map(|ty| print_type_value(ty, env))
-//                 .collect::<Vec<String>>()
-//                 .join(", ")
-//         ),
-//     }
-// }
+pub fn print_type_value(ty: &TypeValue, env: &Env) -> String {
+    match ty {
+        TypeValue::Unknown => "Unknown".to_string(),
+        TypeValue::SymbolicVariable(id) => {
+            format!("SymbolicVariable({})", env.type_name_table[*id])
+        }
+        TypeValue::Unit => "Unit".to_string(),
+        TypeValue::Bool => "Bool".to_string(),
+        TypeValue::RefConstructor => "RefConstructor".to_string(),
+        TypeValue::ArrayConstructor => "ArrayConstructor".to_string(),
+        TypeValue::SliceConstructor => "SliceConstructor".to_string(),
+        TypeValue::IntConstructor => "IntConstructor".to_string(),
+        TypeValue::UIntConstructor => "UIntConstructor".to_string(),
+        TypeValue::FloatConstructor => "FloatConstructor".to_string(),
+        TypeValue::Ref(ty) => format!("Ref({})", print_type_value(ty, env)),
+        TypeValue::Array(ty, size) => format!(
+            "Array({}, {})",
+            print_type_value(ty, env),
+            print_type_value(size, env)
+        ),
+        TypeValue::Slice(ty) => format!("Slice({})", print_type_value(ty, env)),
+        TypeValue::Int(ty) => format!("Int({})", print_type_value(ty, env)),
+        TypeValue::UInt(ty) => format!("UInt({})", print_type_value(ty, env)),
+        TypeValue::Float(ty) => format!("Float({})", print_type_value(ty, env)),
+        TypeValue::IntLit(n) => format!("IntLit({})", n),
+        TypeValue::BoolLit(b) => format!("BoolLit({})", b),
+        TypeValue::FloatLit(n) => format!("FloatLit({})", n),
+        TypeValue::Fn {
+            paramtys,
+            returntype,
+        } => format!(
+            "Fn {{ paramtys: [{}], returntype: {} }}",
+            paramtys
+                .iter()
+                .map(|ty| print_type_value(ty, env))
+                .collect::<Vec<String>>()
+                .join(", "),
+            print_type_value(returntype, env)
+        ),
+        TypeValue::Struct(fields) => format!(
+            "Struct {{ fields: [{}] }}",
+            fields
+                .iter()
+                .map(|(name, ty)| format!("{}: {}", name, print_type_value(ty, env)))
+                .collect::<Vec<String>>()
+                .join(", ")
+        ),
+        TypeValue::Enum(fields) => format!(
+            "Enum {{ fields: [{}] }}",
+            fields
+                .iter()
+                .map(|(name, ty)| format!("{}: {}", name, print_type_value(ty, env)))
+                .collect::<Vec<String>>()
+                .join(", ")
+        ),
+        TypeValue::Union(fields) => format!(
+            "Union {{ fields: [{}] }}",
+            fields
+                .iter()
+                .map(|(name, ty)| format!("{}: {}", name, print_type_value(ty, env)))
+                .collect::<Vec<String>>()
+                .join(", ")
+        ),
+        TypeValue::Generic { typarams, body } => format!(
+            "Generic {{ typarams: [{}], body: {} }}",
+            typarams
+                .iter()
+                .map(|typaram| print_typaram(typaram))
+                .collect::<Vec<String>>()
+                .join(", "),
+            print_type_value(body, env)
+        ),
+        TypeValue::Concretization {
+            symbolic_constructor,
+            tyargs,
+        } => format!(
+            "Concretization {{ symbolic_constructor: {}, tyargs: [{}] }}",
+            env.type_name_table[*symbolic_constructor],
+            tyargs
+                .iter()
+                .map(|ty| print_type_value(ty, env))
+                .collect::<Vec<String>>()
+                .join(", ")
+        ),
+    }
+}
 
-// fn print_typaram(typaram: &Augmented<hir::TypePatExpr>) -> String {
-//     match &typaram.val {
-//         hir::TypePatExpr::Error => "Error".to_string(),
-//         hir::TypePatExpr::Identifier(id) => {
-//             format!("Identifier({})", id,)
-//         }
-//         hir::TypePatExpr::Typed { ref id, ref kind } => {
-//             format!(
-//                 "Typed {{ id: {}, kind: {} }}",
-//                 id,
-//                 typecheck::evaluate_hir_kind(kind)
-//             )
-//         }
-//     }
-// }
+fn print_typaram(typaram: &Augmented<hir::TypePatExpr>) -> String {
+    match &typaram.val {
+        hir::TypePatExpr::Error => "Error".to_string(),
+        hir::TypePatExpr::Identifier(id) => {
+            format!("Identifier({})", id,)
+        }
+        hir::TypePatExpr::Typed { ref id, ref kind } => {
+            format!(
+                "Typed {{ id: {}, kind: {} }}",
+                id,
+                typecheck::evaluate_hir_kind(kind)
+            )
+        }
+    }
+}
 
 #[derive(Clone, Debug)]
 pub enum TypeValue {
     // An error when parsing
-    Error,
+    Unknown,
     SymbolicVariable(usize),
     // types
     Unit,
@@ -219,7 +219,7 @@ pub enum TypeValue {
         tyargs: Vec<TypeValue>,
     },
 }
-/*
+
 enum UnificationError {
     SymbolicVariableMismatch(usize, usize),
     NominalIdMismatch(usize, usize),
@@ -403,8 +403,8 @@ impl TypeValue {
         other: &'a TypeValue,
     ) -> Result<HashMap<usize, &'a TypeValue>, UnificationError> {
         match (self, other) {
-            (TypeValue::Error, _) => Ok(HashMap::new()),
-            (_, TypeValue::Error) => Ok(HashMap::new()),
+            (TypeValue::Unknown, _) => Ok(HashMap::new()),
+            (_, TypeValue::Unknown) => Ok(HashMap::new()),
             (TypeValue::SymbolicVariable(id1), _) => Ok(HashMap::from([(id1.clone(), other)])),
             (TypeValue::Unit, TypeValue::Unit) => Ok(HashMap::new()),
             (TypeValue::Bool, TypeValue::Bool) => Ok(HashMap::new()),
@@ -672,7 +672,7 @@ impl TypeValue {
 
 fn concretize_type_expr(constructor: &TypeValue, mut tyargs: Vec<TypeValue>) -> TypeValue {
     match constructor {
-        TypeValue::Error => TypeValue::Error,
+        TypeValue::Unknown => TypeValue::Unknown,
         TypeValue::SymbolicVariable(id) => TypeValue::Concretization {
             symbolic_constructor: *id,
             tyargs,
@@ -743,7 +743,7 @@ pub fn typecheck_hir_type_infermode(
     type_value_table: &Vec<Option<TypeValue>>,
 ) -> TypeValue {
     match &v.val {
-        hir::TypeExpr::Error => TypeValue::Error,
+        hir::TypeExpr::Error => TypeValue::Unknown,
         hir::TypeExpr::Identifier(id) => TypeValue::SymbolicVariable(*id),
         hir::TypeExpr::UnitTy => TypeValue::Unit,
         hir::TypeExpr::BoolTy => TypeValue::Bool,
@@ -969,7 +969,7 @@ pub fn typecheck_hir_value_infermode(
     env: &Env,
 ) -> TypeValue {
     match &v.val {
-        hir::ValExpr::Error => TypeValue::Error,
+        hir::ValExpr::Error => TypeValue::Unknown,
         hir::ValExpr::Unit => TypeValue::Unit,
         hir::ValExpr::Int(_) => TypeValue::Int(Box::new(TypeValue::IntLit((64).into()))),
         hir::ValExpr::Bool(_) => TypeValue::Bool,
@@ -989,7 +989,7 @@ pub fn typecheck_hir_value_infermode(
                 TypeValue::Ref(x) => *x,
                 _ => {
                     dlogger.log_deref_of_non_reference(v.range);
-                    TypeValue::Error
+                    TypeValue::Unknown
                 }
             }
         }
@@ -1023,7 +1023,7 @@ pub fn typecheck_hir_value_infermode(
                     }
                     _ => {
                         dlogger.log_math_on_non_numeric(v.range);
-                        TypeValue::Error
+                        TypeValue::Unknown
                     }
                 }
             }
@@ -1101,7 +1101,7 @@ pub fn typecheck_hir_value_infermode(
                 TypeValue::Array(x, _) => *x,
                 _ => {
                     dlogger.log_array_access_of_non_array(root.range);
-                    TypeValue::Error
+                    TypeValue::Unknown
                 }
             }
         }
@@ -1115,18 +1115,18 @@ pub fn typecheck_hir_value_infermode(
                         }
                     }
                     dlogger.log_field_access_of_nonexistent_field(root.range, field);
-                    TypeValue::Error
+                    TypeValue::Unknown
                 }
                 _ => {
                     dlogger.log_field_access_of_non_struct(root.range);
-                    TypeValue::Error
+                    TypeValue::Unknown
                 }
             }
         }
         hir::ValExpr::ArrayLiteral(ref elems) => match elems.as_slice() {
             [] => {
                 dlogger.log_cannot_infer_array_type(v.range);
-                TypeValue::Error
+                TypeValue::Unknown
             }
             [first, others @ ..] => {
                 let first_type = typecheck_hir_value_infermode(first, dlogger, env);
@@ -1153,7 +1153,7 @@ pub fn typecheck_hir_value_infermode(
                 } => {
                     if tyargs.len() != typarams.len() {
                         dlogger.log_wrong_number_type_args(v.range, typarams.len(), tyargs.len());
-                        TypeValue::Error
+                        TypeValue::Unknown
                     } else {
                         for (tyval, typat) in std::iter::zip(tyargs, typarams) {
                             env.bind_typaram(typat, tyval);
@@ -1167,7 +1167,7 @@ pub fn typecheck_hir_value_infermode(
                 }
                 _ => {
                     dlogger.log_concretization_of_non_generic(v.range);
-                    TypeValue::Error
+                    TypeValue::Unknown
                 }
             }
         }
@@ -1191,7 +1191,7 @@ pub fn typecheck_hir_value_infermode(
                 _ => {
                     dlogger
                         .log_application_of_non_function(v.range, &print_type_value(&fn_type, env));
-                    TypeValue::Error
+                    TypeValue::Unknown
                 }
             }
         }
@@ -1306,9 +1306,9 @@ fn intro_hir_pat_errors(
         hir::ValPatExpr::Ignore => {}
         hir::ValPatExpr::Identifier { mutable, id } => {
             env.val_type_table[id] = match typarams.len() {
-                0 => Some(TypeValue::Error),
+                0 => Some(TypeValue::Unknown),
                 _ => Some(TypeValue::Generic {
-                    body: Box::new(TypeValue::Error),
+                    body: Box::new(TypeValue::Unknown),
                     typarams: typarams.clone(),
                 }),
             };
@@ -1331,20 +1331,20 @@ fn intro_and_typecheck_hir_pat_infermode(
     typarams: &Vec<TypeParam>,
 ) -> TypeValue {
     match pat.val {
-        hir::ValPatExpr::Error => TypeValue::Error,
+        hir::ValPatExpr::Error => TypeValue::Unknown,
         hir::ValPatExpr::Ignore => {
             dlogger.log_cannot_infer_pattern_type(pat.range);
-            TypeValue::Error
+            TypeValue::Unknown
         }
         hir::ValPatExpr::Identifier { .. } => {
             dlogger.log_cannot_infer_pattern_type(pat.range);
             intro_hir_pat_errors(pat, dlogger, env, typarams);
-            TypeValue::Error
+            TypeValue::Unknown
         }
         hir::ValPatExpr::StructLiteral(_) => {
             dlogger.log_cannot_infer_pattern_type(pat.range);
             intro_hir_pat_errors(pat, dlogger, env, typarams);
-            TypeValue::Error
+            TypeValue::Unknown
         }
         hir::ValPatExpr::Typed { ref pat, ref ty } => {
             let pat_ty = typecheck_hir_type_infermode(ty, dlogger, env);
@@ -1477,4 +1477,4 @@ pub fn typecheck_hir_value_checkmode(
         }
     }
 }
- */
+ 
