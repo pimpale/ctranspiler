@@ -11,6 +11,7 @@ mod token;
 mod tokenize;
 mod types;
 mod utils;
+mod typecheck;
 
 use std::io::stdin;
 use std::io::Read;
@@ -30,8 +31,6 @@ fn main() {
     // create and lower hir
     let (
         hir,
-        nominal_name_table,
-        nominal_range_table,
         type_name_table,
         type_range_table,
         val_name_table,
@@ -52,8 +51,6 @@ fn main() {
     // typecheck
     let val_kind_table = hir_typecheck::do_typecheck(
         &mut hir,
-        &nominal_range_table,
-        &nominal_name_table,
         &type_range_table,
         &type_name_table,
         &type_kind_table,

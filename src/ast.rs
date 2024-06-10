@@ -54,7 +54,6 @@ pub enum TypeExpr {
     Error,
     Identifier(Identifier),
     // types
-    UnitTy,
     BoolTy,
     RefConstructorTy,
     ArrayConstructorTy,
@@ -81,8 +80,8 @@ pub enum TypeExpr {
     Group(Box<Augmented<TypeExpr>>),
     // generic is the equivalent of a function on the type level
     Generic {
-        params: Vec<Augmented<TypeParamExpr>>,
-        returnkind: Box<Augmented<KindExpr>>,
+        params: Vec<Augmented<TypePatExpr>>,
+        returnkind: Option<Box<Augmented<KindExpr>>>,
         body: Box<Augmented<TypeExpr>>,
     },
     // type of a function
@@ -96,15 +95,6 @@ pub enum TypeExpr {
 pub enum TypePatExpr {
     Error,
     Identifier(Identifier),
-    Typed {
-        identifier: Identifier,
-        kind: Box<Augmented<KindExpr>>,
-    },
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug)]
-pub enum TypeParamExpr {
-    Error,
     Typed {
         identifier: Identifier,
         kind: Box<Augmented<KindExpr>>,
@@ -136,10 +126,9 @@ pub enum ValBinaryOpKind {
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub enum CaseTargetExpr {
     Error,
-    Unit,
     Bool(bool),
     Int(BigInt),
-    PatExpr(Box<Augmented<PatExpr>>),
+    PatExpr(Box<Augmented<ValPatExpr>>),
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -149,32 +138,24 @@ pub struct CaseExpr {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, AsRefStr)]
-pub enum PatExpr {
+pub enum ValPatExpr {
     Error,
     Ignore,
     Identifier {
         mutable: bool,
         identifier: Identifier,
     },
-    StructLiteral {
-        ty: Box<Augmented<TypeExpr>>,
-        items: Vec<Augmented<StructItemExpr<PatExpr>>>,
-    },
-    Typed {
-        pat: Box<Augmented<PatExpr>>,
-        ty: Box<Augmented<TypeExpr>>,
-    },
-}
+    // destructure anonymous struct
+    StructLiteral(Vec<Augmented<StructItemExpr<ValPatExpr>>>),
 
-#[derive(Serialize, Deserialize, Clone, Debug, AsRefStr)]
-pub enum ParamExpr {
-    Error,
-    StructLiteral {
+    // destructure nominal type
+    New {
         ty: Box<Augmented<TypeExpr>>,
-        items: Vec<Augmented<StructItemExpr<PatExpr>>>,
+        pat: Box<Augmented<ValPatExpr>>,
     },
+    // assert pattern has some type
     Typed {
-        pat: Box<Augmented<PatExpr>>,
+        pat: Box<Augmented<ValPatExpr>>,
         ty: Box<Augmented<TypeExpr>>,
     },
 }
@@ -202,7 +183,6 @@ pub enum ElseExpr {
 pub enum ValExpr {
     // An error when parsing
     Error,
-    Unit,
     Int(BigInt),
     Bool(bool),
     Float(BigRational),
@@ -211,17 +191,19 @@ pub enum ValExpr {
         block: bool,
     },
     FnDef {
-        typarams: Vec<Augmented<TypeParamExpr>>,
-        params: Vec<Augmented<ParamExpr>>,
-        returnty: Box<Augmented<TypeExpr>>,
+        typarams: Vec<Augmented<TypePatExpr>>,
+        params: Vec<Augmented<ValPatExpr>>,
+        returnty: Option<Box<Augmented<TypeExpr>>>,
         body: Box<Augmented<ValExpr>>,
     },
     Ref(Box<Augmented<ValExpr>>),
     Deref(Box<Augmented<ValExpr>>),
-    // Constructs a new compound type
-    StructLiteral {
+    // Constructs a new anonymous struct type
+    StructLiteral(Vec<Augmented<StructItemExpr<ValExpr>>>),
+    // Creates a new instance of a nominal type
+    New {
         ty: Box<Augmented<TypeExpr>>,
-        items: Vec<Augmented<StructItemExpr<ValExpr>>>,
+        val: Box<Augmented<ValExpr>>,
     },
     // Binary operation
     BinaryOp {
@@ -283,7 +265,7 @@ pub enum BlockStatement {
         value: Box<Augmented<TypeExpr>>,
     },
     ValDef {
-        pat: Box<Augmented<PatExpr>>,
+        pat: Box<Augmented<ValPatExpr>>,
         value: Box<Augmented<ValExpr>>,
     },
     Use {
@@ -298,7 +280,7 @@ pub enum BlockStatement {
         body: Box<Augmented<BlockExpr>>,
     },
     For {
-        pattern: Box<Augmented<PatExpr>>,
+        pattern: Box<Augmented<ValPatExpr>>,
         range: Box<Augmented<RangeExpr>>,
         by: Option<Box<Augmented<ValExpr>>>,
         body: Box<Augmented<BlockExpr>>,
@@ -314,7 +296,7 @@ pub enum FileStatement {
         value: Box<Augmented<TypeExpr>>,
     },
     ValDef {
-        pat: Box<Augmented<PatExpr>>,
+        pat: Box<Augmented<ValPatExpr>>,
         value: Box<Augmented<ValExpr>>,
     },
     Use {

@@ -415,7 +415,7 @@ fn translate_augtypeexpr(
                     .into_iter()
                     .map(|x| translate_augtypepatexpr(x, env, false))
                     .collect(),
-                returnkind: Box::new(translate_augkindexpr(*returnkind, env)),
+                returnkind: returnkind.map(|rk| Box::new(translate_augkindexpr(*rk, env))),
                 body: Box::new(translate_augtypeexpr(*body, env)),
             },
         },
@@ -443,46 +443,53 @@ fn translate_augtypeexpr(
 }
 
 fn translate_augpatexpr(
-    ast::Augmented { range, val, .. }: ast::Augmented<ast::PatExpr>,
+    ast::Augmented { range, val, .. }: ast::Augmented<ast::ValPatExpr>,
     env: &mut Environment,
     should_prefix: bool,
-) -> Augmented<PatExpr> {
+) -> Augmented<ValPatExpr> {
     match val {
-        ast::PatExpr::Error => Augmented {
+        ast::ValPatExpr::Error => Augmented {
             range,
-            val: PatExpr::Error,
+            val: ValPatExpr::Error,
         },
-        ast::PatExpr::Ignore => Augmented {
+        ast::ValPatExpr::Ignore => Augmented {
             range,
-            val: PatExpr::Ignore,
+            val: ValPatExpr::Ignore,
         },
-        ast::PatExpr::Identifier {
+        ast::ValPatExpr::Identifier {
             identifier,
             mutable,
         } => Augmented {
             range,
             val: match env.introduce_val_identifier(identifier, should_prefix) {
-                Some(id) => PatExpr::Identifier { id, mutable },
-                None => PatExpr::Error,
+                Some(id) => ValPatExpr::Identifier { id, mutable },
+                None => ValPatExpr::Error,
             },
         },
-        ast::PatExpr::StructLiteral(items) => Augmented {
+        ast::ValPatExpr::StructLiteral(items) => Augmented {
             range,
-            val: PatExpr::StructLiteral(translate_augstructitemexpr(
+            val: ValPatExpr::StructLiteral(translate_augstructitemexpr(
                 |x, env| translate_augpatexpr(x, env, should_prefix),
                 |id, env| match env.introduce_val_identifier(id, should_prefix) {
-                    Some(id) => PatExpr::Identifier { mutable: false, id },
-                    None => PatExpr::Error,
+                    Some(id) => ValPatExpr::Identifier { mutable: false, id },
+                    None => ValPatExpr::Error,
                 },
                 env,
                 items,
             )),
         },
-        ast::PatExpr::Typed { pat, ty } => Augmented {
+        ast::ValPatExpr::Typed { pat, ty } => Augmented {
             range,
-            val: PatExpr::Typed {
+            val: ValPatExpr::Typed {
                 pat: Box::new(translate_augpatexpr(*pat, env, should_prefix)),
                 ty: Box::new(translate_augtypeexpr(*ty, env)),
+            },
+        },
+        ast::ValPatExpr::New { ty, pat } => Augmented {
+            range,
+            val: ValPatExpr::New {
+                ty: Box::new(translate_augtypeexpr(*ty, env)),
+                pat: Box::new(translate_augpatexpr(*pat, env, should_prefix)),
             },
         },
     }
@@ -491,7 +498,6 @@ fn translate_augpatexpr(
 fn translate_casetargetexpr(c: ast::CaseTargetExpr, env: &mut Environment) -> CaseTargetExpr {
     match c {
         ast::CaseTargetExpr::Error => CaseTargetExpr::Error,
-        ast::CaseTargetExpr::Unit => CaseTargetExpr::Unit,
         ast::CaseTargetExpr::Bool(b) => CaseTargetExpr::Bool(b),
         ast::CaseTargetExpr::Int(i) => CaseTargetExpr::Int(i),
         ast::CaseTargetExpr::PatExpr(pat) => {
@@ -507,17 +513,15 @@ fn translate_caseexpr(c: ast::CaseExpr, env: &mut Environment) -> CaseExpr {
     }
 }
 
-fn translate_elseexpr(e: ast::ElseExpr, env: &mut Environment) -> ElseExpr {
+fn translate_elseexpr(e: ast::ElseExpr, env: &mut Environment) -> ValExpr {
     match e {
-        ast::ElseExpr::Error => ElseExpr::Error,
-        ast::ElseExpr::Else(body) => {
-            ElseExpr::Else(Box::new(tr_aug(*body, env, translate_blockexpr)))
-        }
+        ast::ElseExpr::Error => ValExpr::Error,
+        ast::ElseExpr::Else(body) => tr_aug(*body, env, translate_blockexpr),
         ast::ElseExpr::Elif {
             cond,
             then_branch,
             else_branch,
-        } => ElseExpr::Elif {
+        } => ValExpr::IfThen {
             cond: Box::new(tr_aug(*cond, env, translate_valexpr)),
             then_branch: Box::new(tr_aug(*then_branch, env, translate_blockexpr)),
             else_branch: else_branch.map(|e| Box::new(tr_aug(*e, env, translate_elseexpr))),
@@ -683,7 +687,7 @@ fn translate_valexpr(v: ast::ValExpr, env: &mut Environment) -> ValExpr {
                 .map(|x| translate_augpatexpr(x, env, false))
                 .collect();
 
-            let returnty = Box::new(translate_augtypeexpr(*returnty, env));
+            let returnty = returnty.map(|rt| Box::new(translate_augtypeexpr(*rt, env)));
 
             let body = Box::new(tr_aug(*body, env, translate_valexpr));
 
@@ -803,7 +807,7 @@ fn translate_blockstatement(bs: ast::BlockStatement, env: &mut Environment) -> B
     }
 }
 
-fn translate_blockexpr(b: ast::BlockExpr, env: &mut Environment) -> BlockExpr {
+fn translate_blockexpr(b: ast::BlockExpr, env: &mut Environment) -> ValExpr {
     // introduce new scope
     env.type_names_in_scope.push(HashMap::new());
     env.val_names_in_scope.push(HashMap::new());
@@ -823,18 +827,18 @@ fn translate_blockexpr(b: ast::BlockExpr, env: &mut Environment) -> BlockExpr {
         Some(Augmented {
             range,
             val: BlockStatement::Do(v),
-        }) if !b.trailing_semicolon => BlockExpr {
+        }) if !b.trailing_semicolon => ValExpr::BlockExpr {
             statements,
             last_expression: Some(*v),
         },
         Some(s) => {
             statements.push(s);
-            BlockExpr {
+            ValExpr::BlockExpr {
                 statements,
                 last_expression: None,
             }
         }
-        None => BlockExpr {
+        None => ValExpr::BlockExpr {
             statements,
             last_expression: None,
         },

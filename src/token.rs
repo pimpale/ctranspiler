@@ -22,12 +22,13 @@ pub enum TokenKind {
     For,      // for
     Namespace,// namespace
     Use,      // use
+    New,      // new
     Struct,   // struct
     Enum,     // enum
     Union,    // union
+    Block,    // block
     Generic,  // generic
     // Values
-    Unit,                                   // void
     Lifetime(Vec<u8>),                      // 'lifetime
     Inf,                                    // inf
     Nan,                                    // nan
@@ -36,7 +37,6 @@ pub enum TokenKind {
     Int(BigInt),                            // 7
     Float(BigRational),                     // 0.7
     // Types
-    UnitTy,  // Void
     NeverTy, // !
     ArrayTy, // Array
     SliceTy, // Slice
@@ -45,10 +45,10 @@ pub enum TokenKind {
     FloatTy, // Float
     BoolTy,  // Bool
     // Kinds
-    TypeKind,  // Type
-    BoolKind,  // Bool
-    IntKind,   // Int
-    FloatKind, // Float
+    TypeKind,  // TYPE
+    BoolKind,  // BOOL
+    IntKind,   // INT
+    FloatKind, // FLOAT
     // Math Operators
     Plus,  // +
     Minus, // -
@@ -75,6 +75,8 @@ pub enum TokenKind {
     // Reference
     Ref,   // &
     Deref, // @
+    // Splat
+    Splat, // **
     // Arrows
     Pipe,  // |
     Defun, // ->

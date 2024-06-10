@@ -236,7 +236,7 @@ fn parse_delimited_statement_seq<TkIter: Iterator<Item = Token>, T>(
 ) -> (Range, Vec<Augmented<T>>, bool) {
     let Token { range: lrange, .. } = expect_token(tkiter, dlogger, structure, vec![start_tok]);
 
-    let mut rrange = lrange;
+    let rrange;
 
     let mut statements = vec![];
 
@@ -292,7 +292,7 @@ fn parse_delimited_statement_seq_opt_sep<TkIter: Iterator<Item = Token>, T>(
         kind,
     } = expect_token(tkiter, dlogger, structure, vec![start_tok]);
 
-    let mut rrange = lrange;
+    let rrange;
 
     let mut statements = vec![];
 
@@ -319,7 +319,7 @@ fn parse_delimited_statement_seq_opt_sep<TkIter: Iterator<Item = Token>, T>(
                     break true;
                 }
             }
-            k if kind.as_ref() == Some(&end_tok) => {
+            _k if kind.as_ref() == Some(&end_tok) => {
                 rrange = tkiter.next().unwrap().range;
                 break false;
             }
@@ -378,15 +378,31 @@ fn parse_struct_item_expr<TkIter: Iterator<Item = Token>, T>(
     }
 }
 
+fn parse_exact_valexpr_new_literal<TkIter: Iterator<Item = Token>>(
+    tkiter: &mut PeekMoreIterator<TkIter>,
+    dlogger: &mut DiagnosticLogger,
+) -> Augmented<ValExpr> {
+    let metadata = get_metadata(tkiter);
+
+    let new_tk = exact_token(tkiter, TokenKind::New);
+
+    let ty = Box::new(parse_typeexpr(tkiter, dlogger));
+
+    let val = Box::new(parse_valexpr_term(tkiter, dlogger));
+
+    Augmented {
+        range: union_of(new_tk.range, val.range),
+        metadata,
+        val: ValExpr::New { ty, val },
+    }
+}
 fn parse_exact_valexpr_struct_literal<TkIter: Iterator<Item = Token>>(
     tkiter: &mut PeekMoreIterator<TkIter>,
     dlogger: &mut DiagnosticLogger,
 ) -> Augmented<ValExpr> {
     let metadata = get_metadata(tkiter);
 
-    let Token { range: lrange, .. } = exact_token(tkiter, TokenKind::Struct);
-
-    let (_, items, _) = parse_delimited_statement_seq(
+    let (range, items, _) = parse_delimited_statement_seq(
         tkiter,
         dlogger,
         "struct literal",
@@ -396,12 +412,10 @@ fn parse_exact_valexpr_struct_literal<TkIter: Iterator<Item = Token>>(
         TokenKind::Comma,
     );
 
-    let ty = Box::new(parse_typeexpr(tkiter, dlogger));
-
     Augmented {
-        range: union_of(lrange, ty.range),
+        range,
         metadata,
-        val: ValExpr::StructLiteral { ty, items },
+        val: ValExpr::StructLiteral(items),
     }
 }
 
@@ -455,11 +469,12 @@ fn parse_exact_valexpr_block<TkIter: Iterator<Item = Token>>(
     tkiter: &mut PeekMoreIterator<TkIter>,
     dlogger: &mut DiagnosticLogger,
 ) -> Augmented<ValExpr> {
+    let metadata = get_metadata(tkiter);
+    let block_tk = exact_token(tkiter, TokenKind::BraceLeft);
     let block = Box::new(parse_blockexpr(tkiter, dlogger));
-
     Augmented {
-        range: block.range,
-        metadata: vec![],
+        range: union_of(block_tk.range, block.range),
+        metadata,
         val: ValExpr::Block(block),
     }
 }
@@ -485,10 +500,6 @@ fn parse_casetargetexpr<TkIter: Iterator<Item = Token>>(
     let metadata = get_metadata(tkiter);
     let Token { kind, .. } = tkiter.peek_nth(0).unwrap().clone();
     let (range, val) = match kind {
-        Some(TokenKind::Unit) => {
-            let Token { range, .. } = tkiter.next().unwrap();
-            (range, CaseTargetExpr::Unit)
-        }
         Some(TokenKind::Bool(x)) => {
             let Token { range, .. } = tkiter.next().unwrap();
             (range, CaseTargetExpr::Bool(x))
@@ -594,10 +605,7 @@ fn parse_exact_elseexpr<TkIter: Iterator<Item = Token>>(
     dlogger: &mut DiagnosticLogger,
 ) -> Augmented<ElseExpr> {
     let metadata = get_metadata(tkiter);
-    let Token {
-        range: lrange,
-        kind,
-    } = exact_token(tkiter, TokenKind::Else);
+    let Token { range: lrange, .. } = exact_token(tkiter, TokenKind::Else);
 
     match tkiter.peek_nth(0).unwrap().kind {
         Some(TokenKind::If) => {
@@ -732,9 +740,10 @@ fn decide_valexpr_term<TkIter: Iterator<Item = Token>>(
         TokenKind::Int(_) => Some(parse_exact_valexpr_int::<TkIter>),
         TokenKind::Float(_) => Some(parse_exact_valexpr_rational::<TkIter>),
         TokenKind::String { .. } => Some(parse_exact_valexpr_string::<TkIter>),
-        TokenKind::Struct => Some(parse_exact_valexpr_struct_literal::<TkIter>),
-        TokenKind::BraceLeft => Some(parse_exact_valexpr_block::<TkIter>),
+        TokenKind::New => Some(parse_exact_valexpr_new_literal::<TkIter>),
+        TokenKind::BraceLeft => Some(parse_exact_valexpr_struct_literal::<TkIter>),
         TokenKind::ParenLeft => Some(parse_exact_valexpr_group::<TkIter>),
+        TokenKind::Block => Some(parse_exact_valexpr_block::<TkIter>),
         TokenKind::Case => Some(parse_exact_valexpr_case::<TkIter>),
         TokenKind::If => Some(parse_exact_valexpr_if::<TkIter>),
         TokenKind::Identifier(_) => Some(parse_exact_valexpr_identifier::<TkIter>),
@@ -872,7 +881,7 @@ fn parse_valexpr_postfix_operators<TkIter: Iterator<Item = Token>>(
         })),
         Some(TokenKind::Ref) => Some(Box::new(
             |tkiter: &mut PeekMoreIterator<TkIter>,
-             dlogger: &mut DiagnosticLogger,
+             _dlogger: &mut DiagnosticLogger,
              prefix: Augmented<ValExpr>| {
                 let tk = tkiter.next().unwrap();
                 Augmented {
@@ -884,7 +893,7 @@ fn parse_valexpr_postfix_operators<TkIter: Iterator<Item = Token>>(
         )),
         Some(TokenKind::Deref) => Some(Box::new(
             |tkiter: &mut PeekMoreIterator<TkIter>,
-             dlogger: &mut DiagnosticLogger,
+             _dlogger: &mut DiagnosticLogger,
              prefix: Augmented<ValExpr>| {
                 let tk = tkiter.next().unwrap();
                 Augmented {
@@ -992,7 +1001,7 @@ fn parse_valexpr<TkIter: Iterator<Item = Token>>(
 fn parse_patexpr_term<TkIter: Iterator<Item = Token>>(
     tkiter: &mut PeekMoreIterator<TkIter>,
     dlogger: &mut DiagnosticLogger,
-) -> Augmented<PatExpr> {
+) -> Augmented<ValPatExpr> {
     let metadata = get_metadata(tkiter);
     match tkiter.peek_nth(0).unwrap().kind.as_ref() {
         Some(TokenKind::Ignore) => {
@@ -1000,7 +1009,7 @@ fn parse_patexpr_term<TkIter: Iterator<Item = Token>>(
             Augmented {
                 range: tk.range,
                 metadata,
-                val: PatExpr::Ignore,
+                val: ValPatExpr::Ignore,
             }
         }
         Some(TokenKind::Mut) => {
@@ -1010,7 +1019,7 @@ fn parse_patexpr_term<TkIter: Iterator<Item = Token>>(
             Augmented {
                 range: union_of(mut_tk.range, identifier.range),
                 metadata,
-                val: PatExpr::Identifier {
+                val: ValPatExpr::Identifier {
                     identifier,
                     mutable: true,
                 },
@@ -1022,7 +1031,7 @@ fn parse_patexpr_term<TkIter: Iterator<Item = Token>>(
             Augmented {
                 range: tk.range,
                 metadata,
-                val: PatExpr::Identifier {
+                val: ValPatExpr::Identifier {
                     identifier: Identifier {
                         identifier: Some(identifier),
                         range: tk.range,
@@ -1044,7 +1053,7 @@ fn parse_patexpr_term<TkIter: Iterator<Item = Token>>(
             Augmented {
                 range,
                 metadata,
-                val: PatExpr::StructLiteral(statements),
+                val: ValPatExpr::StructLiteral(statements),
             }
         }
         _ => {
@@ -1062,7 +1071,7 @@ fn parse_patexpr_term<TkIter: Iterator<Item = Token>>(
             Augmented {
                 range: tk.range,
                 metadata,
-                val: PatExpr::Error,
+                val: ValPatExpr::Error,
             }
         }
     }
@@ -1071,17 +1080,17 @@ fn parse_patexpr_term<TkIter: Iterator<Item = Token>>(
 fn parse_patexpr<TkIter: Iterator<Item = Token>>(
     tkiter: &mut PeekMoreIterator<TkIter>,
     dlogger: &mut DiagnosticLogger,
-) -> Augmented<PatExpr> {
+) -> Augmented<ValPatExpr> {
     parse_postfix_op(tkiter, dlogger, parse_patexpr_term, |t| match t {
         Some(TokenKind::Constrain) => Some(Box::new(
             |tkiter: &mut PeekMoreIterator<TkIter>,
              dlogger: &mut DiagnosticLogger,
-             prefix: Augmented<PatExpr>| {
+             prefix: Augmented<ValPatExpr>| {
                 let ty = Box::new(parse_typeexpr(tkiter, dlogger));
                 Augmented {
                     metadata: vec![],
                     range: union_of(prefix.range, ty.range),
-                    val: PatExpr::Typed {
+                    val: ValPatExpr::Typed {
                         pat: Box::new(prefix),
                         ty,
                     },
@@ -1135,7 +1144,7 @@ fn parse_exact_valdef<TkIter: Iterator<Item = Token>>(
 ) -> (
     Range,
     Vec<Metadata>,
-    Box<Augmented<PatExpr>>,
+    Box<Augmented<ValPatExpr>>,
     Box<Augmented<ValExpr>>,
 ) {
     let metadata = get_metadata(tkiter);
@@ -1475,20 +1484,6 @@ fn parse_exact_typeexpr_int<TkIter: Iterator<Item = Token>>(
     }
 }
 
-// parses an exact unit or panics
-fn parse_exact_typeexpr_unitty<TkIter: Iterator<Item = Token>>(
-    tkiter: &mut PeekMoreIterator<TkIter>,
-    _dlogger: &mut DiagnosticLogger,
-) -> Augmented<TypeExpr> {
-    let metadata = get_metadata(tkiter);
-    let tk = exact_token(tkiter, TokenKind::Unit);
-    Augmented {
-        metadata,
-        range: tk.range,
-        val: TypeExpr::UnitTy,
-    }
-}
-
 // parses an exact bool or panics
 fn parse_exact_typeexpr_boolty<TkIter: Iterator<Item = Token>>(
     tkiter: &mut PeekMoreIterator<TkIter>,
@@ -1548,7 +1543,7 @@ fn parse_exact_typeexpr_floatty<TkIter: Iterator<Item = Token>>(
 // parses an exact array or panics
 fn parse_exact_typeexpr_arrayty<TkIter: Iterator<Item = Token>>(
     tkiter: &mut PeekMoreIterator<TkIter>,
-    dlogger: &mut DiagnosticLogger,
+    _dlogger: &mut DiagnosticLogger,
 ) -> Augmented<TypeExpr> {
     let metadata = get_metadata(tkiter);
     let tk = exact_token(tkiter, TokenKind::ArrayTy);
@@ -1562,7 +1557,7 @@ fn parse_exact_typeexpr_arrayty<TkIter: Iterator<Item = Token>>(
 // parses an exact slice or panics
 fn parse_exact_typeexpr_slicety<TkIter: Iterator<Item = Token>>(
     tkiter: &mut PeekMoreIterator<TkIter>,
-    dlogger: &mut DiagnosticLogger,
+    _dlogger: &mut DiagnosticLogger,
 ) -> Augmented<TypeExpr> {
     let metadata = get_metadata(tkiter);
     let tk = exact_token(tkiter, TokenKind::SliceTy);
@@ -1598,7 +1593,6 @@ fn parse_exact_typeexpr_struct<TkIter: Iterator<Item = Token>>(
     dlogger: &mut DiagnosticLogger,
 ) -> Augmented<TypeExpr> {
     let metadata = get_metadata(tkiter);
-    let struct_tk = exact_token(tkiter, TokenKind::Struct);
 
     let (range, statements, _) = parse_delimited_statement_seq(
         tkiter,
@@ -1611,7 +1605,7 @@ fn parse_exact_typeexpr_struct<TkIter: Iterator<Item = Token>>(
     );
 
     Augmented {
-        range: union_of(struct_tk.range, range),
+        range,
         metadata,
         val: TypeExpr::Struct(statements),
     }
@@ -1692,13 +1686,20 @@ fn parse_exact_typeexpr_generic<TkIter: Iterator<Item = Token>>(
     let metadata = get_metadata(tkiter);
     let generic_tk = exact_token(tkiter, TokenKind::Generic);
     let (params, _) = parse_tyargs_expr(tkiter, dlogger, parse_typepatexpr);
+
+    let returnkind = if tkiter.peek_nth(0).unwrap().kind == Some(TokenKind::Constrain) {
+        tkiter.next();
+        Some(Box::new(parse_kind_expr(tkiter, dlogger)))
+    } else {
+        None
+    };
+
     expect_token(
         tkiter,
         dlogger,
         "type function definition",
         vec![TokenKind::Defun],
     );
-    let returnkind = Box::new(parse_kind_expr(tkiter, dlogger));
     let body = Box::new(parse_typeexpr(tkiter, dlogger));
     Augmented {
         metadata,
@@ -1722,7 +1723,6 @@ pub fn parse_typeexpr_term<TkIter: Iterator<Item = Token>>(
 
     match maybe_kind {
         Some(TokenKind::Identifier(_)) => parse_exact_typeexpr_identifier(tkiter, dlogger),
-        Some(TokenKind::Unit) => parse_exact_typeexpr_unitty(tkiter, dlogger),
         Some(TokenKind::BoolTy) => parse_exact_typeexpr_boolty(tkiter, dlogger),
         Some(TokenKind::IntTy) => parse_exact_typeexpr_intty(tkiter, dlogger),
         Some(TokenKind::UIntTy) => parse_exact_typeexpr_uintty(tkiter, dlogger),
@@ -1732,7 +1732,7 @@ pub fn parse_typeexpr_term<TkIter: Iterator<Item = Token>>(
         Some(TokenKind::Bool(_)) => parse_exact_typeexpr_bool(tkiter, dlogger),
         Some(TokenKind::Int(_)) => parse_exact_typeexpr_int(tkiter, dlogger),
         Some(TokenKind::Float(_)) => parse_exact_typeexpr_float(tkiter, dlogger),
-        Some(TokenKind::Struct) => parse_exact_typeexpr_struct(tkiter, dlogger),
+        Some(TokenKind::BraceLeft) => parse_exact_typeexpr_struct(tkiter, dlogger),
         Some(TokenKind::Enum) => parse_exact_typeexpr_enum(tkiter, dlogger),
         Some(TokenKind::Union) => parse_exact_typeexpr_union(tkiter, dlogger),
         Some(TokenKind::ParenLeft) => parse_exact_typeexpr_group(tkiter, dlogger),
@@ -2008,7 +2008,7 @@ pub fn parse_translationunit<TkIter: Iterator<Item = Token>>(
         statements.push(parse_filestatement(tkiter, dlogger));
 
         // parse sep (if it exists)
-        let Token { range, kind } = tkiter.next().unwrap();
+        tkiter.next().unwrap();
         if tkiter.peek_nth(0).unwrap().kind.as_ref() == Some(&sep_tok) {
             tkiter.next();
         }

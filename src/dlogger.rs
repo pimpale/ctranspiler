@@ -339,12 +339,12 @@ impl DiagnosticLogger {
 
     pub fn log_wrong_number_type_args(
         &mut self,
-        concretization_range: Range,
+        range: Range,
         fn_args: usize,
         provided_args: usize,
     ) {
         self.log(Diagnostic {
-            range: concretization_range,
+            range,
             severity: Some(DiagnosticSeverity::ERROR),
             code: Some(NumberOrString::Number(31)),
             code_description: None,
@@ -825,6 +825,23 @@ impl DiagnosticLogger {
             code_description: None,
             source: self.source.clone(),
             message,
+            related_information: None,
+            tags: None,
+            data: None,
+        })
+    }
+
+    pub fn log_unexpected_generic(&mut self, range: Range, expected_kind: &str) {
+        self.log(Diagnostic {
+            range,
+            severity: Some(DiagnosticSeverity::ERROR),
+            code: Some(NumberOrString::Number(64)),
+            code_description: None,
+            source: self.source.clone(),
+            message: format!(
+                "expected kind {}, but found a generic",
+                expected_kind
+            ),
             related_information: None,
             tags: None,
             data: None,

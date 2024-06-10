@@ -12,7 +12,7 @@ use num_traits::Signed;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum KindValue {
-    Error,
+    Unknown,
     Int,
     Float,
     Bool,
@@ -26,7 +26,7 @@ pub enum KindValue {
 impl std::fmt::Display for KindValue {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
-            KindValue::Error => write!(f, "Error"),
+            KindValue::Unknown => write!(f, "Unknown"),
             KindValue::Type => write!(f, "Type"),
             KindValue::Int => write!(f, "Int"),
             KindValue::Float => write!(f, "Float"),
@@ -132,38 +132,14 @@ pub fn print_type_value(ty: &TypeValue, env: &Env) -> String {
     }
 }
 
-fn print_typaram(typaram: &Augmented<hir::TypeParamExpr>, env: &Env) -> String {
+fn print_typaram(typaram: &Augmented<hir::TypePatExpr>, env: &Env) -> String {
     match &typaram.val {
-        hir::TypeParamExpr::Error => "Error".to_string(),
-        hir::TypeParamExpr::Typed { ref id, ref kind } => {
-            format!(
-                "Identifier {{ id: {}, kind: {} }}",
-                id,
-                evaluate_hir_kind(kind)
-            )
+        hir::TypePatExpr::Error => "Error".to_string(),
+        hir::TypePatExpr::Identifier(id) => {
+            format!("Identifier({})", id,)
         }
-    }
-}
-
-pub fn evaluate_hir_kind(kind: &Augmented<hir::KindExpr>) -> KindValue {
-    match &kind.val {
-        hir::KindExpr::Error => KindValue::Error,
-        hir::KindExpr::Type => KindValue::Type,
-        hir::KindExpr::Int => KindValue::Int,
-        hir::KindExpr::Float => KindValue::Float,
-        hir::KindExpr::Bool => KindValue::Bool,
-        hir::KindExpr::Constructor {
-            paramkinds,
-            returnkind,
-        } => {
-            let mut paramkinds_out = vec![];
-            for arg in paramkinds.iter() {
-                paramkinds_out.push(evaluate_hir_kind(arg));
-            }
-            KindValue::Generic {
-                paramkinds: paramkinds_out,
-                returnkind: Box::new(evaluate_hir_kind(&returnkind)),
-            }
+        hir::TypePatExpr::Typed { ref id, ref kind } => {
+            format!("Typed {{ id: {}, kind: {} }}", id, hir_kindcheck::evaluate_hir_kind(kind))
         }
     }
 }
@@ -375,7 +351,10 @@ impl TypeValue {
                 tyargs,
             } => {
                 // substitute in the arguments
-                let tyargs = tyargs.iter().map(|ty| ty.subst(bindings)).collect::<Vec<_>>();
+                let tyargs = tyargs
+                    .iter()
+                    .map(|ty| ty.subst(bindings))
+                    .collect::<Vec<_>>();
                 match bindings.get(symbolic_constructor) {
                     // if we replaced the constructor, then we can evaluate
                     Some(constructor) => concretize_type_expr(constructor, tyargs),
@@ -663,219 +642,7 @@ impl TypeValue {
     }
 }
 
-// in infermode, we don't already know what kind the given expression has to be, so we infer it.
-// if we reach a concretize node, then we can do kindchecking_checkmode, because we know what the type arguments have to be
-// if we encounter an error, we log it
-// NOTE: we assume that all identifiers have already been resolved.
-pub fn kindcheck_hir_type_infermode_and_patch(
-    v: &mut Augmented<hir::TypeExpr>,
-    dlogger: &mut DiagnosticLogger,
-    type_name_table: &Vec<String>,
-    type_kind_table: &Vec<Option<KindValue>>,
-) -> KindValue {
-    match &mut v.val {
-        hir::TypeExpr::Error => KindValue::Error,
-        hir::TypeExpr::Identifier(id) => type_kind_table[*id]
-            .clone()
-            .expect("kind not initialized yet"),
-        hir::TypeExpr::UnitTy => KindValue::Type,
-        hir::TypeExpr::BoolTy => KindValue::Type,
-        hir::TypeExpr::RefConstructorTy => KindValue::Generic {
-            paramkinds: vec![KindValue::Type],
-            returnkind: Box::new(KindValue::Type),
-        },
-        hir::TypeExpr::ArrayConstructorTy => KindValue::Generic {
-            paramkinds: vec![KindValue::Type, KindValue::Int],
-            returnkind: Box::new(KindValue::Type),
-        },
-        hir::TypeExpr::SliceConstructorTy => KindValue::Generic {
-            paramkinds: vec![KindValue::Type],
-            returnkind: Box::new(KindValue::Type),
-        },
-        hir::TypeExpr::IntConstructorTy => KindValue::Generic {
-            paramkinds: vec![KindValue::Int],
-            returnkind: Box::new(KindValue::Type),
-        },
-        hir::TypeExpr::UIntConstructorTy => KindValue::Generic {
-            paramkinds: vec![KindValue::Int],
-            returnkind: Box::new(KindValue::Type),
-        },
-        hir::TypeExpr::FloatConstructorTy => KindValue::Generic {
-            paramkinds: vec![KindValue::Int],
-            returnkind: Box::new(KindValue::Type),
-        },
-        hir::TypeExpr::Int(_) => KindValue::Int,
-        hir::TypeExpr::Bool(_) => KindValue::Bool,
-        hir::TypeExpr::Float(_) => KindValue::Float,
-        hir::TypeExpr::Fn { paramtys, returnty } => {
-            for arg in paramtys {
-                kindcheck_hir_type_checkmode_and_patch(
-                    arg,
-                    &KindValue::Type,
-                    dlogger,
-                    type_name_table,
-                    type_kind_table,
-                );
-            }
-            kindcheck_hir_type_checkmode_and_patch(
-                returnty,
-                &KindValue::Type,
-                dlogger,
-                type_name_table,
-                type_kind_table,
-            );
-            KindValue::Type
-        }
-        hir::TypeExpr::Struct(fields) => {
-            for (_, expr) in fields {
-                kindcheck_hir_type_checkmode_and_patch(
-                    expr,
-                    &KindValue::Type,
-                    dlogger,
-                    type_name_table,
-                    type_kind_table,
-                );
-            }
-            KindValue::Type
-        }
-        hir::TypeExpr::Enum(fields) => {
-            for (_, expr) in fields {
-                kindcheck_hir_type_checkmode_and_patch(
-                    expr,
-                    &KindValue::Type,
-                    dlogger,
-                    type_name_table,
-                    type_kind_table,
-                );
-            }
-            KindValue::Type
-        }
-        hir::TypeExpr::Union(fields) => {
-            for (_, expr) in fields {
-                kindcheck_hir_type_checkmode_and_patch(
-                    expr,
-                    &KindValue::Type,
-                    dlogger,
-                    type_name_table,
-                    type_kind_table,
-                );
-            }
-            KindValue::Type
-        }
-        hir::TypeExpr::Concretization {
-            genericty,
-            tyargs: provided_args,
-        } => {
-            let kind_of_generic = kindcheck_hir_type_infermode_and_patch(
-                genericty,
-                dlogger,
-                type_name_table,
-                type_kind_table,
-            );
-            match kind_of_generic {
-                KindValue::Generic {
-                    paramkinds: expected_kinds,
-                    returnkind,
-                } => {
-                    if expected_kinds.len() != provided_args.len() {
-                        dlogger.log_wrong_number_type_args(
-                            v.range,
-                            expected_kinds.len(),
-                            provided_args.len(),
-                        );
-                        KindValue::Error
-                    } else {
-                        for (ref argkind, ref mut tyarg) in
-                            std::iter::zip(expected_kinds, provided_args)
-                        {
-                            kindcheck_hir_type_checkmode_and_patch(
-                                tyarg,
-                                argkind,
-                                dlogger,
-                                type_name_table,
-                                type_kind_table,
-                            );
-                        }
-                        *returnkind
-                    }
-                }
-                _ => {
-                    dlogger.log_cannot_be_concretized(v.range);
-                    v.val = hir::TypeExpr::Error;
-                    KindValue::Error
-                }
-            }
-        }
-        hir::TypeExpr::Generic {
-            params,
-            returnkind,
-            body,
-        } => {
-            let paramkinds = params
-                .iter()
-                .map(|param| match &param.val {
-                    hir::TypeParamExpr::Typed { kind, .. } => evaluate_hir_kind(kind),
-                    hir::TypeParamExpr::Error => KindValue::Error,
-                })
-                .collect();
-
-            let returnkind = Box::new(evaluate_hir_kind(&returnkind));
-
-            kindcheck_hir_type_checkmode_and_patch(
-                body,
-                &returnkind,
-                dlogger,
-                type_name_table,
-                type_kind_table,
-            );
-
-            KindValue::Generic {
-                paramkinds,
-                returnkind,
-            }
-        }
-    }
-}
-
-// we use this function to verify if a type is well-kinded
-// if not, then an error is reported
-// NOTE: we assume that all identifiers have already been resolved.
-pub fn kindcheck_hir_type_checkmode_and_patch(
-    v: &mut Augmented<hir::TypeExpr>,
-    expected_kind: &KindValue,
-    dlogger: &mut DiagnosticLogger,
-    type_name_table: &Vec<String>,
-    type_kind_table: &Vec<Option<KindValue>>,
-) {
-    match &mut v.val {
-        hir::TypeExpr::Error => {}
-        k => {
-            let kind_of_k = kindcheck_hir_type_infermode_and_patch(
-                v,
-                dlogger,
-                type_name_table,
-                type_kind_table,
-            );
-            if &kind_of_k != expected_kind {
-                dlogger.log_kind_mismatch(
-                    v.range,
-                    &format!("{}", expected_kind),
-                    &format!("{}", kind_of_k),
-                );
-                v.val = hir::TypeExpr::Error;
-            }
-        }
-    }
-}
-
-pub struct Env {
-    pub type_name_table: Vec<String>,
-    pub type_value_table: Vec<Option<TypeValue>>,
-    pub val_name_table: Vec<String>,
-    pub val_type_table: Vec<Option<TypeValue>>,
-}
-
-fn concretize_type_expr(constructor: &TypeValue, tyargs: Vec<TypeValue>) -> TypeValue {
+fn concretize_type_expr(constructor: &TypeValue, mut tyargs: Vec<TypeValue>) -> TypeValue {
     match constructor {
         TypeValue::Error => TypeValue::Error,
         TypeValue::SymbolicVariable(id) => TypeValue::Concretization {
@@ -884,43 +651,53 @@ fn concretize_type_expr(constructor: &TypeValue, tyargs: Vec<TypeValue>) -> Type
         },
         TypeValue::RefConstructor => {
             assert!(tyargs.len() == 1, "wrong number of arguments");
-            TypeValue::Ref(Box::new(tyargs[0]))
+            let arg0 = tyargs.remove(0);
+            TypeValue::Ref(Box::new(arg0))
         }
         TypeValue::ArrayConstructor => {
             assert!(tyargs.len() == 2, "wrong number of arguments");
-            TypeValue::Array(Box::new(tyargs[0]), Box::new(tyargs[1]))
+            let arg1 = tyargs.remove(1);
+            let arg0 = tyargs.remove(0);
+            TypeValue::Array(Box::new(arg0), Box::new(arg1))
         }
         TypeValue::SliceConstructor => {
             assert!(tyargs.len() == 1, "wrong number of arguments");
-            TypeValue::Ref(Box::new(tyargs[0]))
+            let arg0 = tyargs.remove(0);
+            TypeValue::Ref(Box::new(arg0))
         }
         TypeValue::IntConstructor => {
             assert!(tyargs.len() == 1, "wrong number of arguments");
-            TypeValue::Int(Box::new(tyargs[0]))
+            let arg0 = tyargs.remove(0);
+            TypeValue::Int(Box::new(arg0))
         }
         TypeValue::UIntConstructor => {
             assert!(tyargs.len() == 1, "wrong number of arguments");
-            TypeValue::UInt(Box::new(tyargs[0]))
+            let arg0 = tyargs.remove(0);
+            TypeValue::UInt(Box::new(arg0))
         }
         TypeValue::FloatConstructor => {
             assert!(tyargs.len() == 1, "wrong number of arguments");
-            TypeValue::Float(Box::new(tyargs[0]))
+            let arg0 = tyargs.remove(0);
+            TypeValue::Float(Box::new(arg0))
         }
         TypeValue::Generic { typarams, body } => {
             assert!(
                 typarams.len() == tyargs.len(),
                 "wrong number of arguments; should be kindchecked"
             );
-            let bindings = HashMap::new();
+            let mut bindings = HashMap::new();
             for (typat, tyarg) in std::iter::zip(typarams, tyargs) {
                 match &typat.val {
-                    hir::TypeParamExpr::Typed { id, kind: _ } => {
+                    hir::TypePatExpr::Typed { id, .. } => {
                         bindings.insert(*id, tyarg);
                     }
-                    hir::TypeParamExpr::Error => {}
+                    hir::TypePatExpr::Identifier(id) => {
+                        bindings.insert(*id, tyarg);
+                    }
+                    hir::TypePatExpr::Error => {}
                 }
             }
-            body.subst(bindings)
+            body.subst(&bindings)
         }
         _ => {
             unreachable!("concretization of a non-generic; should have been kindchecked");
@@ -934,7 +711,8 @@ fn concretize_type_expr(constructor: &TypeValue, tyargs: Vec<TypeValue>) -> Type
 pub fn typecheck_hir_type_infermode(
     v: &Augmented<hir::TypeExpr>,
     dlogger: &mut DiagnosticLogger,
-    env: &mut Env,
+    type_name_table: &Vec<String>,
+    type_value_table: &Vec<Option<TypeValue>>,
 ) -> TypeValue {
     match &v.val {
         hir::TypeExpr::Error => TypeValue::Error,
@@ -955,7 +733,7 @@ pub fn typecheck_hir_type_infermode(
             for (identifier, expr) in fields {
                 s_fields.push((
                     identifier.clone(),
-                    typecheck_hir_type_infermode(&expr, dlogger, env),
+                    typecheck_hir_type_infermode(&expr, dlogger, type_name_table, type_value_table),
                 ));
             }
             TypeValue::Struct(s_fields)
@@ -965,7 +743,7 @@ pub fn typecheck_hir_type_infermode(
             for (identifier, expr) in fields {
                 s_fields.push((
                     identifier.clone(),
-                    typecheck_hir_type_infermode(&expr, dlogger, env),
+                    typecheck_hir_type_infermode(&expr, dlogger, type_name_table, type_value_table),
                 ));
             }
             TypeValue::Enum(s_fields)
@@ -975,7 +753,7 @@ pub fn typecheck_hir_type_infermode(
             for (identifier, expr) in fields {
                 s_fields.push((
                     identifier.clone(),
-                    typecheck_hir_type_infermode(&expr, dlogger, env),
+                    typecheck_hir_type_infermode(&expr, dlogger, type_name_table, type_value_table),
                 ));
             }
             TypeValue::Union(s_fields)
@@ -983,16 +761,28 @@ pub fn typecheck_hir_type_infermode(
         hir::TypeExpr::Fn { paramtys, returnty } => TypeValue::Fn {
             paramtys: paramtys
                 .iter()
-                .map(|x| typecheck_hir_type_infermode(x, dlogger, env))
+                .map(|x| {
+                    typecheck_hir_type_infermode(x, dlogger, type_name_table, type_value_table)
+                })
                 .collect(),
-            returntype: Box::new(typecheck_hir_type_infermode(&returnty, dlogger, env)),
+            returntype: Box::new(typecheck_hir_type_infermode(
+                &returnty,
+                dlogger,
+                type_name_table,
+                type_value_table,
+            )),
         },
         hir::TypeExpr::Generic {
             params,
             returnkind: _,
             body,
         } => {
-            let body = Box::new(typecheck_hir_type_infermode(body, dlogger, env));
+            let body = Box::new(typecheck_hir_type_infermode(
+                body,
+                dlogger,
+                type_name_table,
+                type_value_table,
+            ));
             TypeValue::Generic {
                 typarams: params.clone(),
                 body,
@@ -1001,10 +791,17 @@ pub fn typecheck_hir_type_infermode(
         // substitute the generic arguments into the body
         hir::TypeExpr::Concretization { genericty, tyargs } => {
             // first we evaluate the type of the generic function
-            let generic_val = typecheck_hir_type_infermode(&genericty, dlogger, env);
+            let generic_val = typecheck_hir_type_infermode(
+                &genericty,
+                dlogger,
+                type_name_table,
+                type_value_table,
+            );
             let tyargs = tyargs
                 .iter()
-                .map(|x| typecheck_hir_type_infermode(x, dlogger, env))
+                .map(|x| {
+                    typecheck_hir_type_infermode(x, dlogger, type_name_table, type_value_table)
+                })
                 .collect::<Vec<_>>();
             // attempt to concretize the type (will only work if there are no symbolic variables in the type)
             concretize_type_expr(&generic_val, tyargs)
@@ -1012,10 +809,17 @@ pub fn typecheck_hir_type_infermode(
     }
 }
 
-pub fn typecheck_hir_elseexpr_checkmode(
+pub struct Env {
+    pub type_name_table: Vec<String>,
+    pub type_value_table: Vec<Option<TypeValue>>,
+    pub val_name_table: Vec<String>,
+    pub val_type_table: Vec<Option<TypeValue>>,
+}
+
+// checks and patches the
+pub fn typecheck_hir_elseexpr_checkmode_and_patch(
     v: &Augmented<hir::ElseExpr>,
     dlogger: &mut DiagnosticLogger,
-    env: &mut Env,
     expected_type: &TypeValue,
 ) {
     match v.val {
@@ -1403,16 +1207,16 @@ fn intro_hir_typat_symbolic(
 }
 
 fn intro_and_typecheck_hir_pat_checkmode(
-    pat: &Augmented<hir::PatExpr>,
+    pat: &Augmented<hir::ValPatExpr>,
     dlogger: &mut DiagnosticLogger,
     env: &mut Env,
     expected_type: &TypeValue,
     typarams: &Vec<TypeParam>,
 ) {
     match pat.val {
-        hir::PatExpr::Error => {}
-        hir::PatExpr::Ignore => {}
-        hir::PatExpr::Identifier { mutable, id } => {
+        hir::ValPatExpr::Error => {}
+        hir::ValPatExpr::Ignore => {}
+        hir::ValPatExpr::Identifier { mutable, id } => {
             env.val_type_table[id] = match typarams.len() {
                 0 => Some(expected_type.clone()),
                 _ => Some(TypeValue::Generic {
@@ -1421,7 +1225,7 @@ fn intro_and_typecheck_hir_pat_checkmode(
                 }),
             };
         }
-        hir::PatExpr::StructLiteral(got_fields) => match expected_type {
+        hir::ValPatExpr::StructLiteral(got_fields) => match expected_type {
             TypeValue::Struct(expected_fields) => {
                 for (ref field_name, ref field_pat) in got_fields {
                     let field_type = expected_fields
@@ -1447,7 +1251,7 @@ fn intro_and_typecheck_hir_pat_checkmode(
                 dlogger.log_struct_pattern_on_non_struct(pat.range);
             }
         },
-        hir::PatExpr::Typed { ref pat, ref ty } => {
+        hir::ValPatExpr::Typed { ref pat, ref ty } => {
             let pat_ty = typecheck_hir_type_infermode(ty, dlogger, env);
             if !pat_ty.unify_with(expected_type) {
                 dlogger.log_type_mismatch(
@@ -1464,15 +1268,15 @@ fn intro_and_typecheck_hir_pat_checkmode(
 // this function recursively introduces all variables in a pattern into the environment, with the error type.
 // we do this to ensure that following pieces of code can assume that all variables are in the environment.
 fn intro_hir_pat_errors(
-    pat: &Augmented<hir::PatExpr>,
+    pat: &Augmented<hir::ValPatExpr>,
     dlogger: &mut DiagnosticLogger,
     env: &mut Env,
     typarams: &Vec<TypeParam>,
 ) {
     match pat.val {
-        hir::PatExpr::Error => {}
-        hir::PatExpr::Ignore => {}
-        hir::PatExpr::Identifier { mutable, id } => {
+        hir::ValPatExpr::Error => {}
+        hir::ValPatExpr::Ignore => {}
+        hir::ValPatExpr::Identifier { mutable, id } => {
             env.val_type_table[id] = match typarams.len() {
                 0 => Some(TypeValue::Error),
                 _ => Some(TypeValue::Generic {
@@ -1481,40 +1285,40 @@ fn intro_hir_pat_errors(
                 }),
             };
         }
-        hir::PatExpr::StructLiteral(got_fields) => {
+        hir::ValPatExpr::StructLiteral(got_fields) => {
             for (_, ref field_pat) in got_fields {
                 intro_hir_pat_errors(field_pat, dlogger, env, typarams);
             }
         }
-        hir::PatExpr::Typed { ref pat, ref ty } => {
+        hir::ValPatExpr::Typed { ref pat, ref ty } => {
             intro_hir_pat_errors(pat, dlogger, env, typarams);
         }
     }
 }
 
 fn intro_and_typecheck_hir_pat_infermode(
-    pat: &Augmented<hir::PatExpr>,
+    pat: &Augmented<hir::ValPatExpr>,
     dlogger: &mut DiagnosticLogger,
     env: &mut Env,
     typarams: &Vec<TypeParam>,
 ) -> TypeValue {
     match pat.val {
-        hir::PatExpr::Error => TypeValue::Error,
-        hir::PatExpr::Ignore => {
+        hir::ValPatExpr::Error => TypeValue::Error,
+        hir::ValPatExpr::Ignore => {
             dlogger.log_cannot_infer_pattern_type(pat.range);
             TypeValue::Error
         }
-        hir::PatExpr::Identifier { .. } => {
-            dlogger.log_cannot_infer_pattern_type(pat.range);
-            intro_hir_pat_errors(pat, dlogger, env, typarams);
-            TypeValue::Error
-        }
-        hir::PatExpr::StructLiteral(_) => {
+        hir::ValPatExpr::Identifier { .. } => {
             dlogger.log_cannot_infer_pattern_type(pat.range);
             intro_hir_pat_errors(pat, dlogger, env, typarams);
             TypeValue::Error
         }
-        hir::PatExpr::Typed { ref pat, ref ty } => {
+        hir::ValPatExpr::StructLiteral(_) => {
+            dlogger.log_cannot_infer_pattern_type(pat.range);
+            intro_hir_pat_errors(pat, dlogger, env, typarams);
+            TypeValue::Error
+        }
+        hir::ValPatExpr::Typed { ref pat, ref ty } => {
             let pat_ty = typecheck_hir_type_infermode(ty, dlogger, env);
             intro_and_typecheck_hir_pat_checkmode(pat, dlogger, env, &pat_ty, typarams);
             pat_ty
