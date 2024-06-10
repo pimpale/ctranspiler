@@ -191,7 +191,7 @@ pub enum ValExpr {
         block: bool,
     },
     FnDef {
-        typarams: Vec<Augmented<TypePatExpr>>,
+        typarams: Option<Vec<Augmented<TypePatExpr>>>,
         params: Vec<Augmented<ValPatExpr>>,
         returnty: Option<Box<Augmented<TypeExpr>>>,
         body: Box<Augmented<ValExpr>>,

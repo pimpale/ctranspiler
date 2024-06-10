@@ -4,7 +4,7 @@ use std::hash::Hash;
 
 use crate::dlogger::DiagnosticLogger;
 use crate::hir::Augmented;
-use crate::{hir, hir_kindcheck};
+use crate::{hir, hir_kindcheck, typecheck};
 use lsp_types::Range;
 use num_bigint::BigInt;
 use num_rational::BigRational;
@@ -45,104 +45,108 @@ impl std::fmt::Display for KindValue {
     }
 }
 
-pub fn print_type_value(ty: &TypeValue, env: &Env) -> String {
-    match ty {
-        TypeValue::Error => "Error".to_string(),
-        TypeValue::SymbolicVariable(id) => {
-            format!("SymbolicVariable({})", env.type_name_table[*id])
-        }
-        TypeValue::Unit => "Unit".to_string(),
-        TypeValue::Bool => "Bool".to_string(),
-        TypeValue::RefConstructor => "RefConstructor".to_string(),
-        TypeValue::ArrayConstructor => "ArrayConstructor".to_string(),
-        TypeValue::SliceConstructor => "SliceConstructor".to_string(),
-        TypeValue::IntConstructor => "IntConstructor".to_string(),
-        TypeValue::UIntConstructor => "UIntConstructor".to_string(),
-        TypeValue::FloatConstructor => "FloatConstructor".to_string(),
-        TypeValue::Ref(ty) => format!("Ref({})", print_type_value(ty, env)),
-        TypeValue::Array(ty, size) => format!(
-            "Array({}, {})",
-            print_type_value(ty, env),
-            print_type_value(size, env)
-        ),
-        TypeValue::Slice(ty) => format!("Slice({})", print_type_value(ty, env)),
-        TypeValue::Int(ty) => format!("Int({})", print_type_value(ty, env)),
-        TypeValue::UInt(ty) => format!("UInt({})", print_type_value(ty, env)),
-        TypeValue::Float(ty) => format!("Float({})", print_type_value(ty, env)),
-        TypeValue::IntLit(n) => format!("IntLit({})", n),
-        TypeValue::BoolLit(b) => format!("BoolLit({})", b),
-        TypeValue::FloatLit(n) => format!("FloatLit({})", n),
-        TypeValue::Fn {
-            paramtys,
-            returntype,
-        } => format!(
-            "Fn {{ paramtys: [{}], returntype: {} }}",
-            paramtys
-                .iter()
-                .map(|ty| print_type_value(ty, env))
-                .collect::<Vec<String>>()
-                .join(", "),
-            print_type_value(returntype, env)
-        ),
-        TypeValue::Struct(fields) => format!(
-            "Struct {{ fields: [{}] }}",
-            fields
-                .iter()
-                .map(|(name, ty)| format!("{}: {}", name, print_type_value(ty, env)))
-                .collect::<Vec<String>>()
-                .join(", ")
-        ),
-        TypeValue::Enum(fields) => format!(
-            "Enum {{ fields: [{}] }}",
-            fields
-                .iter()
-                .map(|(name, ty)| format!("{}: {}", name, print_type_value(ty, env)))
-                .collect::<Vec<String>>()
-                .join(", ")
-        ),
-        TypeValue::Union(fields) => format!(
-            "Union {{ fields: [{}] }}",
-            fields
-                .iter()
-                .map(|(name, ty)| format!("{}: {}", name, print_type_value(ty, env)))
-                .collect::<Vec<String>>()
-                .join(", ")
-        ),
-        TypeValue::Generic { typarams, body } => format!(
-            "Generic {{ typarams: [{}], body: {} }}",
-            typarams
-                .iter()
-                .map(|typaram| print_typaram(typaram, env))
-                .collect::<Vec<String>>()
-                .join(", "),
-            print_type_value(body, env)
-        ),
-        TypeValue::Concretization {
-            symbolic_constructor,
-            tyargs,
-        } => format!(
-            "Concretization {{ symbolic_constructor: {}, tyargs: [{}] }}",
-            env.type_name_table[*symbolic_constructor],
-            tyargs
-                .iter()
-                .map(|ty| print_type_value(ty, env))
-                .collect::<Vec<String>>()
-                .join(", ")
-        ),
-    }
-}
+// pub fn print_type_value(ty: &TypeValue, env: &Env) -> String {
+//     match ty {
+//         TypeValue::Error => "Error".to_string(),
+//         TypeValue::SymbolicVariable(id) => {
+//             format!("SymbolicVariable({})", env.type_name_table[*id])
+//         }
+//         TypeValue::Unit => "Unit".to_string(),
+//         TypeValue::Bool => "Bool".to_string(),
+//         TypeValue::RefConstructor => "RefConstructor".to_string(),
+//         TypeValue::ArrayConstructor => "ArrayConstructor".to_string(),
+//         TypeValue::SliceConstructor => "SliceConstructor".to_string(),
+//         TypeValue::IntConstructor => "IntConstructor".to_string(),
+//         TypeValue::UIntConstructor => "UIntConstructor".to_string(),
+//         TypeValue::FloatConstructor => "FloatConstructor".to_string(),
+//         TypeValue::Ref(ty) => format!("Ref({})", print_type_value(ty, env)),
+//         TypeValue::Array(ty, size) => format!(
+//             "Array({}, {})",
+//             print_type_value(ty, env),
+//             print_type_value(size, env)
+//         ),
+//         TypeValue::Slice(ty) => format!("Slice({})", print_type_value(ty, env)),
+//         TypeValue::Int(ty) => format!("Int({})", print_type_value(ty, env)),
+//         TypeValue::UInt(ty) => format!("UInt({})", print_type_value(ty, env)),
+//         TypeValue::Float(ty) => format!("Float({})", print_type_value(ty, env)),
+//         TypeValue::IntLit(n) => format!("IntLit({})", n),
+//         TypeValue::BoolLit(b) => format!("BoolLit({})", b),
+//         TypeValue::FloatLit(n) => format!("FloatLit({})", n),
+//         TypeValue::Fn {
+//             paramtys,
+//             returntype,
+//         } => format!(
+//             "Fn {{ paramtys: [{}], returntype: {} }}",
+//             paramtys
+//                 .iter()
+//                 .map(|ty| print_type_value(ty, env))
+//                 .collect::<Vec<String>>()
+//                 .join(", "),
+//             print_type_value(returntype, env)
+//         ),
+//         TypeValue::Struct(fields) => format!(
+//             "Struct {{ fields: [{}] }}",
+//             fields
+//                 .iter()
+//                 .map(|(name, ty)| format!("{}: {}", name, print_type_value(ty, env)))
+//                 .collect::<Vec<String>>()
+//                 .join(", ")
+//         ),
+//         TypeValue::Enum(fields) => format!(
+//             "Enum {{ fields: [{}] }}",
+//             fields
+//                 .iter()
+//                 .map(|(name, ty)| format!("{}: {}", name, print_type_value(ty, env)))
+//                 .collect::<Vec<String>>()
+//                 .join(", ")
+//         ),
+//         TypeValue::Union(fields) => format!(
+//             "Union {{ fields: [{}] }}",
+//             fields
+//                 .iter()
+//                 .map(|(name, ty)| format!("{}: {}", name, print_type_value(ty, env)))
+//                 .collect::<Vec<String>>()
+//                 .join(", ")
+//         ),
+//         TypeValue::Generic { typarams, body } => format!(
+//             "Generic {{ typarams: [{}], body: {} }}",
+//             typarams
+//                 .iter()
+//                 .map(|typaram| print_typaram(typaram))
+//                 .collect::<Vec<String>>()
+//                 .join(", "),
+//             print_type_value(body, env)
+//         ),
+//         TypeValue::Concretization {
+//             symbolic_constructor,
+//             tyargs,
+//         } => format!(
+//             "Concretization {{ symbolic_constructor: {}, tyargs: [{}] }}",
+//             env.type_name_table[*symbolic_constructor],
+//             tyargs
+//                 .iter()
+//                 .map(|ty| print_type_value(ty, env))
+//                 .collect::<Vec<String>>()
+//                 .join(", ")
+//         ),
+//     }
+// }
 
-fn print_typaram(typaram: &Augmented<hir::TypePatExpr>, env: &Env) -> String {
-    match &typaram.val {
-        hir::TypePatExpr::Error => "Error".to_string(),
-        hir::TypePatExpr::Identifier(id) => {
-            format!("Identifier({})", id,)
-        }
-        hir::TypePatExpr::Typed { ref id, ref kind } => {
-            format!("Typed {{ id: {}, kind: {} }}", id, hir_kindcheck::evaluate_hir_kind(kind))
-        }
-    }
-}
+// fn print_typaram(typaram: &Augmented<hir::TypePatExpr>) -> String {
+//     match &typaram.val {
+//         hir::TypePatExpr::Error => "Error".to_string(),
+//         hir::TypePatExpr::Identifier(id) => {
+//             format!("Identifier({})", id,)
+//         }
+//         hir::TypePatExpr::Typed { ref id, ref kind } => {
+//             format!(
+//                 "Typed {{ id: {}, kind: {} }}",
+//                 id,
+//                 typecheck::evaluate_hir_kind(kind)
+//             )
+//         }
+//     }
+// }
 
 #[derive(Clone, Debug)]
 pub enum TypeValue {
@@ -182,7 +186,7 @@ pub enum TypeValue {
     // type of a generic value. Instantiated at every use point
     // type -> type
     Generic {
-        typarams: Vec<Augmented<hir::TypeParamExpr>>,
+        typarams: Vec<Augmented<hir::TypePatExpr>>,
         body: Box<TypeValue>,
     },
     // where the type constructor is symbolic
@@ -191,7 +195,7 @@ pub enum TypeValue {
         tyargs: Vec<TypeValue>,
     },
 }
-
+/*
 enum UnificationError {
     SymbolicVariableMismatch(usize, usize),
     NominalIdMismatch(usize, usize),
@@ -1449,3 +1453,4 @@ pub fn typecheck_hir_value_checkmode(
         }
     }
 }
+ */

@@ -280,6 +280,54 @@ pub fn kindcheck_type_expr_and_patch(
     }
 }
 
+pub fn kindcheck_val_pat_and_patch(
+    v: &mut Augmented<hir::ValPatExpr>,
+    expected_kind: &KindValue,
+    dlogger: &mut DiagnosticLogger,
+    checker: &TypeChecker,
+) -> KindValue {
+    match &mut v.val {
+        hir::ValPatExpr::Error => KindValue::Unknown,
+        hir::ValPatExpr::Ignore => {
+            // if expected kind is unknown, we throw an error
+            if expected_kind == &KindValue::Unknown {
+                dlogger.log_cannot_infer_pattern_kind(v.range);
+                v.val = hir::ValPatExpr::Error;
+                KindValue::Error
+            } else {
+                expected_kind.clone()
+            }
+        }
+        hir::ValPatExpr::Identifier { id, .. } => {
+            // if expected kind is unknown, we throw an error
+            if expected_kind == &KindValue::Unknown {
+                dlogger.log_cannot_infer_pattern_kind(v.range);
+                v.val = hir::ValPatExpr::Error;
+                KindValue::Error
+            } else {
+                // otherwise we assign the expected kind to the identifier
+                checker.val_kind_table[*id] = Some(expected_kind.clone());
+                expected_kind.clone()
+            }
+        }
+        hir::ValPatExpr::StructLiteral(fields) => {
+            for (_, expr) in fields {
+                kindcheck_val_pat_and_patch(expr, &KindValue::Type, dlogger, checker);
+            }
+            expect_kind(v, dlogger, expected_kind, KindValue::Type)
+        }
+        hir::ValPatExpr::New { pat, ty } => {
+            kindcheck_type_expr_and_patch(ty, &KindValue::Type, dlogger, checker);
+            kindcheck_val_pat_and_patch(pat, &KindValue::Type, dlogger, checker);
+            expect_kind(v, dlogger, expected_kind, KindValue::Type)
+        }
+        hir::ValPatExpr::Typed { pat, ty } => {
+            let kind = kindcheck_type_expr_and_patch(ty, expected_kind, dlogger, checker);
+            kindcheck_val_pat_and_patch(pat, &kind, dlogger, checker)
+        }
+    }
+}
+
 pub fn kindcheck_val_expr_and_patch(
     v: &mut Augmented<hir::ValExpr>,
     expected_kind: &KindValue,

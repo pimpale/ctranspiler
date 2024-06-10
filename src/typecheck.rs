@@ -1,7 +1,8 @@
 use lsp_types::Range;
 
 use crate::{
-    dlogger::DiagnosticLogger, hir::{self, Augmented}, types::{KindValue, TypeValue}
+    hir::{self, Augmented},
+    types::{KindValue, TypeValue},
 };
 
 // finds kinds of all type variables in the HIR
@@ -20,10 +21,9 @@ pub struct TypeChecker<'t> {
     pub val_type_table: Vec<Option<TypeValue>>,
 }
 
-
 pub fn evaluate_hir_kind(kind: &Augmented<hir::KindExpr>) -> KindValue {
     match &kind.val {
-        hir::KindExpr::Error => KindValue::Error,
+        hir::KindExpr::Error => KindValue::Unknown,
         hir::KindExpr::Type => KindValue::Type,
         hir::KindExpr::Int => KindValue::Int,
         hir::KindExpr::Float => KindValue::Float,

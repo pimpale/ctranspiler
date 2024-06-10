@@ -40,22 +40,22 @@ fn main() {
         log.get_logger(Some(String::from("acnc-hir (construct)"))),
     );
 
-    // kindcheck
-    let type_kind_table = hir_kindcheck::do_kindcheck(
-        &mut hir,
-        &type_range_table,
-        &type_name_table,
-        log.get_logger(Some(String::from("acnc-hir (kindcheck)"))),
-    );
+    // // kindcheck
+    // let type_kind_table = hir_kindcheck::do_kindcheck(
+    //     &mut hir,
+    //     &type_range_table,
+    //     &type_name_table,
+    //     log.get_logger(Some(String::from("acnc-hir (kindcheck)"))),
+    // );
 
-    // typecheck
-    let val_kind_table = hir_typecheck::do_typecheck(
-        &mut hir,
-        &type_range_table,
-        &type_name_table,
-        &type_kind_table,
-        &val_range_table,
-        &val_name_table,
-        log.get_logger(Some(String::from("acnc-hir (typecheck)"))),
-    );
+    // // typecheck
+    // let val_kind_table = hir_typecheck::do_typecheck(
+    //     &mut hir,
+    //     &type_range_table,
+    //     &type_name_table,
+    //     &type_kind_table,
+    //     &val_range_table,
+    //     &val_name_table,
+    //     log.get_logger(Some(String::from("acnc-hir (typecheck)"))),
+    // );
 }
