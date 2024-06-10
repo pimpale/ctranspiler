@@ -847,4 +847,46 @@ impl DiagnosticLogger {
             data: None,
         })
     }
+
+    pub fn log_cannot_infer_type_var_kind(&mut self, range: Range) {
+        self.log(Diagnostic {
+            range,
+            severity: Some(DiagnosticSeverity::ERROR),
+            code: Some(NumberOrString::Number(65)),
+            code_description: None,
+            source: self.source.clone(),
+            message: format!("cannot infer type variable kind"),
+            related_information: None,
+            tags: None,
+            data: None,
+        })
+    }
+
+    pub fn log_cannot_infer_val_kind(&mut self, range: Range) {
+        self.log(Diagnostic {
+            range,
+            severity: Some(DiagnosticSeverity::ERROR),
+            code: Some(NumberOrString::Number(66)),
+            code_description: None,
+            source: self.source.clone(),
+            message: format!("cannot infer value variable kind"),
+            related_information: None,
+            tags: None,
+            data: None,
+        })
+    }
+
+    pub fn log_cannot_infer_valpat_kind(&mut self, range: Range) {
+        self.log(Diagnostic {
+            range,
+            severity: Some(DiagnosticSeverity::ERROR),
+            code: Some(NumberOrString::Number(67)),
+            code_description: None,
+            source: self.source.clone(),
+            message: format!("cannot infer value pattern kind"),
+            related_information: None,
+            tags: None,
+            data: None,
+        })
+    }
 }

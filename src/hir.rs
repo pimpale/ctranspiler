@@ -32,6 +32,12 @@ pub enum KindExpr {
     },
 }
 
+impl std::default::Default for KindExpr {
+    fn default() -> Self {
+        KindExpr::Error
+    }
+}
+
 #[derive(Clone, Debug)]
 pub enum TypeExpr {
     // An error when parsing
@@ -70,6 +76,12 @@ pub enum TypeExpr {
     },
 }
 
+impl std::default::Default for TypeExpr {
+    fn default() -> Self {
+        TypeExpr::Error
+    }
+}
+
 #[derive(Clone, Debug)]
 pub enum TypePatExpr {
     Error,
@@ -80,6 +92,12 @@ pub enum TypePatExpr {
     },
 }
 
+impl std::default::Default for TypePatExpr {
+    fn default() -> Self {
+        TypePatExpr::Error
+    }
+}
+
 #[derive(Clone, Debug)]
 pub enum CaseTargetExpr {
     Error,
@@ -88,10 +106,10 @@ pub enum CaseTargetExpr {
     PatExpr(Box<Augmented<ValPatExpr>>),
 }
 
-#[derive(Clone, Debug)]
-pub struct CaseExpr {
-    pub target: Box<Augmented<CaseTargetExpr>>,
-    pub body: Box<Augmented<ValExpr>>,
+impl std::default::Default for CaseTargetExpr {
+    fn default() -> Self {
+        CaseTargetExpr::Error
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -111,6 +129,12 @@ pub enum ValPatExpr {
         pat: Box<Augmented<ValPatExpr>>,
         ty: Box<Augmented<TypeExpr>>,
     },
+}
+
+impl std::default::Default for ValPatExpr {
+    fn default() -> Self {
+        ValPatExpr::Error
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -171,8 +195,7 @@ pub enum ValExpr {
     // Matches an expression to the first matching pattern and destructures it
     CaseOf {
         expr: Box<Augmented<ValExpr>>,
-        first_case: Augmented<CaseExpr>,
-        rest_cases: Vec<Augmented<CaseExpr>>,
+        cases: Vec<(Augmented<CaseTargetExpr>, Augmented<ValExpr>)>,
     },
     // Block
     Block {
@@ -210,9 +233,15 @@ pub enum ValExpr {
     },
 }
 
+impl std::default::Default for ValExpr {
+    fn default() -> Self {
+        ValExpr::Error
+    }
+}
+
 #[derive(Clone, Debug)]
 pub enum BlockStatement {
-    NoOp,
+    Error,
     TypeDef {
         typat: Box<Augmented<TypePatExpr>>,
         value: Box<Augmented<TypeExpr>>,

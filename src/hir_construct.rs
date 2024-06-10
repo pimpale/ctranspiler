@@ -575,9 +575,9 @@ fn translate_augvalexpr(
             left_operand,
             right_operand,
         } => {
-            let left_operand = Box::new(tr_aug(*left_operand, env, translate_augvalexpr));
-            let right_operand = Box::new(tr_aug(*right_operand, env, translate_augvalexpr));
-            match op {
+            let left_operand = Box::new(translate_augvalexpr(*left_operand, env));
+            let right_operand = Box::new(translate_augvalexpr(*right_operand, env));
+            let val = match op {
                 ast::ValBinaryOpKind::Pipe => ValExpr::App {
                     fun: right_operand,
                     args: vec![*left_operand],
@@ -647,45 +647,62 @@ fn translate_augvalexpr(
                     left_operand,
                     right_operand,
                 },
-            }
+            };
+
+            Augmented { range, val }
         }
         ast::ValExpr::IfThen {
             cond,
             then_branch,
             else_branch,
-        } => ValExpr::IfThen {
-            cond: Box::new(tr_aug(*cond, env, translate_augvalexpr)),
-            then_branch: Box::new(tr_aug(*then_branch, env, translate_blockexpr)),
-            else_branch: else_branch.map(|x| Box::new(tr_aug(*x, env, translate_elseexpr))),
+        } => Augmented {
+            range,
+            val: ValExpr::IfThen {
+                cond: Box::new(translate_augvalexpr(*cond, env)),
+                then_branch: Box::new(tr_aug(*then_branch, env, translate_blockexpr)),
+                else_branch: else_branch.map(|x| Box::new(tr_aug(*x, env, translate_elseexpr))),
+            },
         },
         ast::ValExpr::CaseOf { expr, cases } => {
             let mut cases = cases
                 .into_iter()
                 .map(|x| tr_aug(x, env, translate_caseexpr))
                 .collect::<VecDeque<_>>();
-            match cases.pop_front() {
-                None => {
-                    env.dlogger.log_empty_caseof(expr.range);
-                    ValExpr::Error
-                }
-                Some(first_case) => ValExpr::CaseOf {
-                    expr: Box::new(tr_aug(*expr, env, translate_augvalexpr)),
-                    first_case,
-                    rest_cases: cases.into(),
+            Augmented {
+                range,
+                val: match cases.pop_front() {
+                    None => {
+                        env.dlogger.log_empty_caseof(expr.range);
+                        ValExpr::Error
+                    }
+                    Some(first_case) => ValExpr::CaseOf {
+                        expr: Box::new(translate_augvalexpr(*expr, env)),
+                        first_case,
+                        rest_cases: cases.into(),
+                    },
                 },
             }
         }
-        ast::ValExpr::Block(b) => translate_blockexpr(b.val, env),
-        ast::ValExpr::Group(v) => translate_augvalexpr(v.val, env),
-        ast::ValExpr::Array(items) => ValExpr::ArrayLiteral(
-            items
-                .into_iter()
-                .map(|x| tr_aug(x, env, translate_augvalexpr))
-                .collect(),
-        ),
-        ast::ValExpr::Identifier(i) => match env.lookup_val_identifier(i) {
-            Some(id) => ValExpr::Identifier(id),
-            None => ValExpr::Error,
+        ast::ValExpr::Block(b) => Augmented {
+            range,
+            val: translate_blockexpr(b.val, env),
+        },
+        ast::ValExpr::Group(v) => translate_augvalexpr(*v, env),
+        ast::ValExpr::Array(items) => Augmented {
+            range,
+            val: ValExpr::ArrayLiteral(
+                items
+                    .into_iter()
+                    .map(|x| translate_augvalexpr(x, env))
+                    .collect(),
+            ),
+        },
+        ast::ValExpr::Identifier(i) => Augmented {
+            range,
+            val: match env.lookup_val_identifier(i) {
+                Some(id) => ValExpr::Identifier(id),
+                None => ValExpr::Error,
+            },
         },
         ast::ValExpr::FnDef {
             typarams: Some(typarams),
@@ -711,7 +728,7 @@ fn translate_augvalexpr(
 
             let returnty = returnty.map(|rt| Box::new(translate_augtypeexpr(*rt, env)));
 
-            let body = Box::new(tr_aug(*body, env, translate_augvalexpr));
+            let body = Box::new(translate_augvalexpr(*body, env));
 
             // end type and val scope
             env.val_names_in_scope.pop();
@@ -750,46 +767,68 @@ fn translate_augvalexpr(
 
             let returnty = returnty.map(|rt| Box::new(translate_augtypeexpr(*rt, env)));
 
-            let body = Box::new(tr_aug(*body, env, translate_augvalexpr));
+            let body = Box::new(translate_augvalexpr(*body, env));
 
             // end type and val scope
             env.val_names_in_scope.pop();
             env.type_names_in_scope.pop();
 
-            ValExpr::FnDef {
+            let val = ValExpr::FnDef {
                 params,
                 returnty,
                 body,
+            };
+
+            Augmented { range, val }
+        }
+        ast::ValExpr::Concretize { root, tyargs } => Augmented {
+            range,
+            val: ValExpr::Concretization {
+                generic: Box::new(translate_augvalexpr(*root, env)),
+                tyargs: tyargs
+                    .into_iter()
+                    .map(|x| translate_augtypeexpr(x, env))
+                    .collect(),
+            },
+        },
+        ast::ValExpr::App { root, args } => Augmented {
+            range,
+            val: ValExpr::App {
+                fun: Box::new(translate_augvalexpr(*root, env)),
+                args: args
+                    .into_iter()
+                    .map(|x| translate_augvalexpr(x, env))
+                    .collect(),
+            },
+        },
+        ast::ValExpr::ArrayAccess { root, index } => Augmented {
+            range,
+            val: ValExpr::ArrayAccess {
+                root: Box::new(translate_augvalexpr(*root, env)),
+                index: Box::new(translate_augvalexpr(*index, env)),
+            },
+        },
+        ast::ValExpr::FieldAccess { root, field } => Augmented {
+            range,
+            val: ValExpr::FieldAccess {
+                root: Box::new(translate_augvalexpr(*root, env)),
+                field,
+            },
+        },
+        ast::ValExpr::New { ty, val } => {
+            let ty = Box::new(translate_augtypeexpr(*ty, env));
+            let val = Box::new(translate_augvalexpr(*val, env));
+            Augmented {
+                range,
+                val: ValExpr::New { ty, val },
             }
         }
-        ast::ValExpr::Concretize { root, tyargs } => ValExpr::Concretization {
-            generic: Box::new(tr_aug(*root, env, translate_augvalexpr)),
-            tyargs: tyargs
-                .into_iter()
-                .map(|x| translate_augtypeexpr(x, env))
-                .collect(),
-        },
-        ast::ValExpr::App { root, args } => ValExpr::App {
-            fun: Box::new(tr_aug(*root, env, translate_augvalexpr)),
-            args: args
-                .into_iter()
-                .map(|x| tr_aug(x, env, translate_augvalexpr))
-                .collect(),
-        },
-        ast::ValExpr::ArrayAccess { root, index } => ValExpr::ArrayAccess {
-            root: Box::new(tr_aug(*root, env, translate_augvalexpr)),
-            index: Box::new(tr_aug(*index, env, translate_augvalexpr)),
-        },
-        ast::ValExpr::FieldAccess { root, field } => ValExpr::FieldAccess {
-            root: Box::new(tr_aug(*root, env, translate_augvalexpr)),
-            field,
-        },
     }
 }
 
 fn translate_blockstatement(bs: ast::BlockStatement, env: &mut Environment) -> BlockStatement {
     match bs {
-        ast::BlockStatement::Error => BlockStatement::NoOp,
+        ast::BlockStatement::Error => BlockStatement::Error,
         ast::BlockStatement::TypeDef { typat, value } => {
             // first parse value so that we don't accidentally introduce the name of the type before the value
             let value = Box::new(translate_augtypeexpr(*value, env));
@@ -801,7 +840,7 @@ fn translate_blockstatement(bs: ast::BlockStatement, env: &mut Environment) -> B
         }
         ast::BlockStatement::ValDef { pat, value } => {
             // first parse value so that we don't accidentally introduce the name of the val before the value
-            let value = Box::new(tr_aug(*value, env, translate_augvalexpr));
+            let value = Box::new(translate_augvalexpr(*value, env));
 
             // now introduce name
             let pat = Box::new(translate_augpatexpr(*pat, env, false));
@@ -824,14 +863,14 @@ fn translate_blockstatement(bs: ast::BlockStatement, env: &mut Environment) -> B
                     .unwrap()
                     .insert(prefix.clone(), range);
             }
-            hir::BlockStatement::NoOp
+            hir::BlockStatement::Error
         }
         ast::BlockStatement::Set { place, value } => BlockStatement::Set {
-            place: Box::new(tr_aug(*place, env, translate_augvalexpr)),
-            value: Box::new(tr_aug(*value, env, translate_augvalexpr)),
+            place: Box::new(translate_augvalexpr(*place, env)),
+            value: Box::new(translate_augvalexpr(*value, env)),
         },
         ast::BlockStatement::While { cond, body } => BlockStatement::While {
-            cond: Box::new(tr_aug(*cond, env, translate_augvalexpr)),
+            cond: Box::new(translate_augvalexpr(*cond, env)),
             body: Box::new(tr_aug(*body, env, translate_blockexpr)),
         },
         ast::BlockStatement::For {
@@ -841,9 +880,9 @@ fn translate_blockstatement(bs: ast::BlockStatement, env: &mut Environment) -> B
             body,
         } => {
             // evaluate start, end, and by outside the scope
-            let start = Box::new(tr_aug(*range.val.start, env, translate_augvalexpr));
-            let end = Box::new(tr_aug(*range.val.end, env, translate_augvalexpr));
-            let by = by.map(|x| Box::new(tr_aug(*x, env, translate_augvalexpr)));
+            let start = Box::new(translate_augvalexpr(*range.val.start, env));
+            let end = Box::new(translate_augvalexpr(*range.val.end, env));
+            let by = by.map(|x| Box::new(translate_augvalexpr(*x, env)));
             // push val scope
             env.val_names_in_scope.push(HashMap::new());
             let pattern = Box::new(translate_augpatexpr(*pattern, env, false));
@@ -861,9 +900,7 @@ fn translate_blockstatement(bs: ast::BlockStatement, env: &mut Environment) -> B
                 inclusive: range.val.inclusive,
             }
         }
-        ast::BlockStatement::Do(v) => {
-            BlockStatement::Do(Box::new(tr_aug(*v, env, translate_augvalexpr)))
-        }
+        ast::BlockStatement::Do(v) => BlockStatement::Do(Box::new(translate_augvalexpr(*v, env))),
     }
 }
 
@@ -925,7 +962,7 @@ fn translate_augfilestatement(
         }
         ast::FileStatement::ValDef { pat, value } => {
             // first parse value so that we don't accidentally introduce the name of the val before the value
-            let value = Box::new(tr_aug(*value, env, translate_augvalexpr));
+            let value = Box::new(translate_augvalexpr(*value, env));
 
             // now introduce name
             let pat = Box::new(translate_augpatexpr(*pat, env, false));

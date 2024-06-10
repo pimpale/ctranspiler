@@ -45,6 +45,30 @@ impl std::fmt::Display for KindValue {
     }
 }
 
+impl KindValue {
+    pub fn supports_assign(&self, other: &KindValue) -> bool {
+        match (self, other) {
+            (KindValue::Unknown, _) => true,
+            (KindValue::Int, KindValue::Int) => true,
+            (KindValue::Float, KindValue::Float) => true,
+            (KindValue::Bool, KindValue::Bool) => true,
+            (KindValue::Type, KindValue::Type) => true,
+            (KindValue::Generic { paramkinds, returnkind }, KindValue::Generic { paramkinds: other_paramkinds, returnkind: other_returnkind }) => {
+                if paramkinds.len() != other_paramkinds.len() {
+                    return false;
+                }
+                for (paramkind, other_paramkind) in paramkinds.iter().zip(other_paramkinds.iter()) {
+                    if !paramkind.supports_assign(other_paramkind) {
+                        return false;
+                    }
+                }
+                return returnkind.supports_assign(other_returnkind);
+            }
+            _ => false,
+        }
+    }
+}
+
 // pub fn print_type_value(ty: &TypeValue, env: &Env) -> String {
 //     match ty {
 //         TypeValue::Error => "Error".to_string(),

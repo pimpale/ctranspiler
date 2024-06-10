@@ -1700,10 +1700,12 @@ fn parse_exact_typeexpr_generic<TkIter: Iterator<Item = Token>>(
         "type function definition",
         vec![TokenKind::Defun],
     );
+
     let body = Box::new(parse_typeexpr(tkiter, dlogger));
+    
     Augmented {
         metadata,
-        range: union_of(generic_tk.range, returnkind.range),
+        range: union_of(generic_tk.range, body.range),
         val: TypeExpr::Generic {
             params,
             returnkind,
