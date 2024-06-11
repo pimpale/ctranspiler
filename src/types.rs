@@ -1,10 +1,10 @@
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
-use std::hash::Hash;
 
 use crate::dlogger::DiagnosticLogger;
 use crate::hir::Augmented;
-use crate::{hir, hir_kindcheck, typecheck};
+use crate::{hir, typecheck};
+use indexmap::IndexMap;
 use lsp_types::Range;
 use num_bigint::BigInt;
 use num_rational::BigRational;
@@ -53,7 +53,16 @@ impl KindValue {
             (KindValue::Float, KindValue::Float) => true,
             (KindValue::Bool, KindValue::Bool) => true,
             (KindValue::Type, KindValue::Type) => true,
-            (KindValue::Generic { paramkinds, returnkind }, KindValue::Generic { paramkinds: other_paramkinds, returnkind: other_returnkind }) => {
+            (
+                KindValue::Generic {
+                    paramkinds,
+                    returnkind,
+                },
+                KindValue::Generic {
+                    paramkinds: other_paramkinds,
+                    returnkind: other_returnkind,
+                },
+            ) => {
                 if paramkinds.len() != other_paramkinds.len() {
                     return false;
                 }
@@ -69,90 +78,94 @@ impl KindValue {
     }
 }
 
-pub fn print_type_value(ty: &TypeValue, env: &Env) -> String {
-    match ty {
-        TypeValue::Unknown => "Unknown".to_string(),
-        TypeValue::SymbolicVariable(id) => {
-            format!("SymbolicVariable({})", env.type_name_table[*id])
+impl std::fmt::Display for TypeValue {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        match self {
+            TypeValue::Unknown => write!(f, "Unknown"),
+            TypeValue::SymbolicVariable(id) => {
+                write!(f, "SymbolicVariable({})", id)
+            }
+            TypeValue::Unit => write!(f, "Unit"),
+            TypeValue::Bool => write!(f, "Bool"),
+            TypeValue::RefConstructor => write!(f, "RefConstructor"),
+            TypeValue::ArrayConstructor => write!(f, "ArrayConstructor"),
+            TypeValue::SliceConstructor => write!(f, "SliceConstructor"),
+            TypeValue::IntConstructor => write!(f, "IntConstructor"),
+            TypeValue::UIntConstructor => write!(f, "UIntConstructor"),
+            TypeValue::FloatConstructor => write!(f, "FloatConstructor"),
+            TypeValue::Ref(ty) => write!(f, "Ref({})", (ty)),
+            TypeValue::Array(ty, size) => write!(f, "Array({}, {})", ty, size),
+            TypeValue::Slice(ty) => write!(f, "Slice({})", ty),
+            TypeValue::Int(ty) => write!(f, "Int({})", ty),
+            TypeValue::UInt(ty) => write!(f, "UInt({})", ty),
+            TypeValue::Float(ty) => write!(f, "Float({})", ty),
+            TypeValue::IntLit(n) => write!(f, "IntLit({})", n),
+            TypeValue::BoolLit(b) => write!(f, "BoolLit({})", b),
+            TypeValue::FloatLit(n) => write!(f, "FloatLit({})", n),
+            TypeValue::Fn {
+                paramtys,
+                returntype,
+            } => write!(
+                f,
+                "Fn {{ paramtys: [{}], returntype: {} }}",
+                paramtys
+                    .iter()
+                    .map(|x| x.to_string())
+                    .collect::<Vec<String>>()
+                    .join(", "),
+                returntype
+            ),
+            TypeValue::Struct(fields) => write!(
+                f,
+                "Struct {{ fields: [{}] }}",
+                fields
+                    .iter()
+                    .map(|(name, ty)| format!("{}: {}", name, ty))
+                    .collect::<Vec<String>>()
+                    .join(", ")
+            ),
+            TypeValue::Enum(fields) => write!(
+                f,
+                "Enum {{ fields: [{}] }}",
+                fields
+                    .iter()
+                    .map(|(name, ty)| format!("{}: {}", name, ty))
+                    .collect::<Vec<String>>()
+                    .join(", ")
+            ),
+            TypeValue::Union(fields) => write!(
+                f,
+                "Union {{ fields: [{}] }}",
+                fields
+                    .iter()
+                    .map(|(name, ty)| format!("{}: {}", name, ty))
+                    .collect::<Vec<String>>()
+                    .join(", ")
+            ),
+            TypeValue::Generic { typarams, body } => write!(
+                f,
+                "Generic {{ typarams: [{}], body: {} }}",
+                typarams
+                    .iter()
+                    .map(|typaram| print_typaram(typaram))
+                    .collect::<Vec<String>>()
+                    .join(", "),
+                (body)
+            ),
+            TypeValue::Concretization {
+                symbolic_constructor,
+                tyargs,
+            } => write!(
+                f,
+                "Concretization {{ symbolic_constructor: {}, tyargs: [{}] }}",
+                symbolic_constructor,
+                tyargs
+                    .iter()
+                    .map(|ty| ty.to_string())
+                    .collect::<Vec<String>>()
+                    .join(", ")
+            ),
         }
-        TypeValue::Unit => "Unit".to_string(),
-        TypeValue::Bool => "Bool".to_string(),
-        TypeValue::RefConstructor => "RefConstructor".to_string(),
-        TypeValue::ArrayConstructor => "ArrayConstructor".to_string(),
-        TypeValue::SliceConstructor => "SliceConstructor".to_string(),
-        TypeValue::IntConstructor => "IntConstructor".to_string(),
-        TypeValue::UIntConstructor => "UIntConstructor".to_string(),
-        TypeValue::FloatConstructor => "FloatConstructor".to_string(),
-        TypeValue::Ref(ty) => format!("Ref({})", print_type_value(ty, env)),
-        TypeValue::Array(ty, size) => format!(
-            "Array({}, {})",
-            print_type_value(ty, env),
-            print_type_value(size, env)
-        ),
-        TypeValue::Slice(ty) => format!("Slice({})", print_type_value(ty, env)),
-        TypeValue::Int(ty) => format!("Int({})", print_type_value(ty, env)),
-        TypeValue::UInt(ty) => format!("UInt({})", print_type_value(ty, env)),
-        TypeValue::Float(ty) => format!("Float({})", print_type_value(ty, env)),
-        TypeValue::IntLit(n) => format!("IntLit({})", n),
-        TypeValue::BoolLit(b) => format!("BoolLit({})", b),
-        TypeValue::FloatLit(n) => format!("FloatLit({})", n),
-        TypeValue::Fn {
-            paramtys,
-            returntype,
-        } => format!(
-            "Fn {{ paramtys: [{}], returntype: {} }}",
-            paramtys
-                .iter()
-                .map(|ty| print_type_value(ty, env))
-                .collect::<Vec<String>>()
-                .join(", "),
-            print_type_value(returntype, env)
-        ),
-        TypeValue::Struct(fields) => format!(
-            "Struct {{ fields: [{}] }}",
-            fields
-                .iter()
-                .map(|(name, ty)| format!("{}: {}", name, print_type_value(ty, env)))
-                .collect::<Vec<String>>()
-                .join(", ")
-        ),
-        TypeValue::Enum(fields) => format!(
-            "Enum {{ fields: [{}] }}",
-            fields
-                .iter()
-                .map(|(name, ty)| format!("{}: {}", name, print_type_value(ty, env)))
-                .collect::<Vec<String>>()
-                .join(", ")
-        ),
-        TypeValue::Union(fields) => format!(
-            "Union {{ fields: [{}] }}",
-            fields
-                .iter()
-                .map(|(name, ty)| format!("{}: {}", name, print_type_value(ty, env)))
-                .collect::<Vec<String>>()
-                .join(", ")
-        ),
-        TypeValue::Generic { typarams, body } => format!(
-            "Generic {{ typarams: [{}], body: {} }}",
-            typarams
-                .iter()
-                .map(|typaram| print_typaram(typaram))
-                .collect::<Vec<String>>()
-                .join(", "),
-            print_type_value(body, env)
-        ),
-        TypeValue::Concretization {
-            symbolic_constructor,
-            tyargs,
-        } => format!(
-            "Concretization {{ symbolic_constructor: {}, tyargs: [{}] }}",
-            env.type_name_table[*symbolic_constructor],
-            tyargs
-                .iter()
-                .map(|ty| print_type_value(ty, env))
-                .collect::<Vec<String>>()
-                .join(", ")
-        ),
     }
 }
 
@@ -204,9 +217,9 @@ pub enum TypeValue {
         returntype: Box<TypeValue>,
     },
     // struct and enumify
-    Struct(Vec<(String, TypeValue)>),
-    Enum(Vec<(String, TypeValue)>),
-    Union(Vec<(String, TypeValue)>),
+    Struct(IndexMap<String, TypeValue>),
+    Enum(IndexMap<String, TypeValue>),
+    Union(IndexMap<String, TypeValue>),
     // type of a generic value. Instantiated at every use point
     // type -> type
     Generic {
@@ -852,18 +865,16 @@ pub fn typecheck_hir_elseexpr_checkmode_and_patch(
 ) {
     match v.val {
         hir::ElseExpr::Error => {}
-        hir::ElseExpr::Else(ref e) => {
-            typecheck_hir_blockexpr_checkmode(e, dlogger, env, expected_type)
-        }
+        hir::ElseExpr::Else(ref e) => typecheck_hir_blockexpr_checkmode(e, dlogger, expected_type),
         hir::ElseExpr::Elif {
             ref cond,
             ref then_branch,
             ref else_branch,
         } => {
-            typecheck_hir_value_checkmode(cond, dlogger, env, &TypeValue::Bool);
-            typecheck_hir_blockexpr_checkmode(then_branch, dlogger, env, expected_type);
+            typecheck_hir_value_checkmode(cond, dlogger, &TypeValue::Bool);
+            typecheck_hir_blockexpr_checkmode(then_branch, dlogger, expected_type);
             if let Some(else_branch) = else_branch {
-                typecheck_hir_elseexpr_checkmode(else_branch, dlogger, env, expected_type);
+                typecheck_hir_elseexpr_checkmode(else_branch, dlogger, expected_type);
             }
         }
     }
@@ -882,36 +893,36 @@ pub fn typecheck_hir_blockstatement(
             ref value,
         } => {
             for typat in typarams {
-                intro_hir_typat_symbolic(typat, dlogger, env);
+                intro_hir_typat_symbolic(typat, dlogger);
             }
-            let tyval = typecheck_hir_type_infermode(value, dlogger, env);
+            let tyval = typecheck_hir_type_infermode(value, dlogger);
             let typarams = typarams
                 .iter()
-                .map(|x| hir_typat_to_param(x, dlogger, env))
+                .map(|x| hir_typat_to_param(x, dlogger))
                 .collect::<Vec<_>>();
-            intro_hir_typat(typat, dlogger, env, tyval, typarams);
+            intro_hir_typat(typat, dlogger, tyval, typarams);
         }
         hir::BlockStatement::ValDef { ref pat, ref value } => {
             for typat in typarams {
-                intro_hir_typat_symbolic(typat, dlogger, env);
+                intro_hir_typat_symbolic(typat, dlogger);
             }
-            let valty = typecheck_hir_value_infermode(value, dlogger, env);
+            let valty = typecheck_hir_value_infermode(value, dlogger);
             let typarams = typarams
                 .iter()
-                .map(|x| hir_typat_to_param(x, dlogger, env))
+                .map(|x| hir_typat_to_param(x, dlogger))
                 .collect::<Vec<_>>();
-            intro_and_typecheck_hir_pat_checkmode(pat, dlogger, env, &valty, &typarams);
+            intro_and_typecheck_hir_pat_checkmode(pat, dlogger, &valty, &typarams);
         }
         hir::BlockStatement::Set {
             ref place,
             ref value,
         } => {
-            let ty = typecheck_hir_value_infermode(place, dlogger, env);
-            typecheck_hir_value_checkmode(value, dlogger, env, &ty);
+            let ty = typecheck_hir_value_infermode(place, dlogger);
+            typecheck_hir_value_checkmode(value, dlogger, &ty);
         }
         hir::BlockStatement::While { ref cond, ref body } => {
-            typecheck_hir_value_checkmode(cond, dlogger, env, &TypeValue::Bool);
-            typecheck_hir_blockexpr_checkmode(body, dlogger, env, &TypeValue::Unit);
+            typecheck_hir_value_checkmode(cond, dlogger, &TypeValue::Bool);
+            typecheck_hir_blockexpr_checkmode(body, dlogger, &TypeValue::Unit);
         }
         hir::BlockStatement::For {
             pattern,
@@ -921,15 +932,15 @@ pub fn typecheck_hir_blockstatement(
             body,
             ..
         } => {
-            let index_type = typecheck_hir_value_infermode(&start, dlogger, env);
-            typecheck_hir_value_checkmode(&end, dlogger, env, &index_type);
+            let index_type = typecheck_hir_value_infermode(&start, dlogger);
+            typecheck_hir_value_checkmode(&end, dlogger, &index_type);
             if let Some(by) = by {
-                typecheck_hir_value_checkmode(&by, dlogger, env, &index_type);
+                typecheck_hir_value_checkmode(&by, dlogger, &index_type);
             }
-            typecheck_hir_blockexpr_checkmode(&body, dlogger, env, &TypeValue::Unit);
+            typecheck_hir_blockexpr_checkmode(&body, dlogger, &TypeValue::Unit);
         }
         hir::BlockStatement::Do(ref expr) => {
-            typecheck_hir_value_checkmode(expr, dlogger, env, &TypeValue::Unit);
+            typecheck_hir_value_checkmode(expr, dlogger, &TypeValue::Unit);
         }
     }
 }
@@ -941,10 +952,10 @@ pub fn typecheck_hir_blockexpr_checkmode(
     expected_type: &TypeValue,
 ) {
     for s in v.val.statements.iter() {
-        typecheck_hir_blockstatement(s, dlogger, env);
+        typecheck_hir_blockstatement(s, dlogger);
     }
     if let Some(ref e) = v.val.last_expression {
-        typecheck_hir_value_checkmode(e, dlogger, env, expected_type);
+        typecheck_hir_value_checkmode(e, dlogger, expected_type);
     }
 }
 
@@ -954,10 +965,10 @@ pub fn typecheck_hir_blockexpr_infermode(
     env: &Env,
 ) -> TypeValue {
     for s in v.val.statements.iter() {
-        typecheck_hir_blockstatement(s, dlogger, env);
+        typecheck_hir_blockstatement(s, dlogger);
     }
     if let Some(ref e) = v.val.last_expression {
-        typecheck_hir_value_infermode(e, dlogger, env)
+        typecheck_hir_value_infermode(e, dlogger)
     } else {
         TypeValue::Unit
     }
@@ -980,11 +991,9 @@ pub fn typecheck_hir_value_infermode(
         hir::ValExpr::Identifier(id) => env.val_type_table[*id]
             .expect("identifier not initialized with type")
             .clone(),
-        hir::ValExpr::Ref(v) => {
-            TypeValue::Ref(Box::new(typecheck_hir_value_infermode(v, dlogger, env)))
-        }
+        hir::ValExpr::Ref(v) => TypeValue::Ref(Box::new(typecheck_hir_value_infermode(v, dlogger))),
         hir::ValExpr::Deref(v) => {
-            let vtype = typecheck_hir_value_infermode(v, dlogger, env);
+            let vtype = typecheck_hir_value_infermode(v, dlogger);
             match vtype {
                 TypeValue::Ref(x) => *x,
                 _ => {
@@ -996,10 +1005,7 @@ pub fn typecheck_hir_value_infermode(
         hir::ValExpr::StructLiteral(fields) => {
             let mut fieldtypes = Vec::new();
             for (name, field) in fields.iter_mut() {
-                fieldtypes.push((
-                    name.clone(),
-                    typecheck_hir_value_infermode(field, dlogger, env),
-                ));
+                fieldtypes.push((name.clone(), typecheck_hir_value_infermode(field, dlogger)));
             }
             TypeValue::Struct(fieldtypes)
         }
@@ -1014,11 +1020,11 @@ pub fn typecheck_hir_value_infermode(
             | hir::ValBinaryOpKind::Mul
             | hir::ValBinaryOpKind::Div
             | hir::ValBinaryOpKind::Rem => {
-                let left_type = typecheck_hir_value_infermode(left_operand, dlogger, env);
+                let left_type = typecheck_hir_value_infermode(left_operand, dlogger);
 
                 match left_type {
                     binop_type @ (TypeValue::Int(_) | TypeValue::UInt(_) | TypeValue::Float(_)) => {
-                        typecheck_hir_value_checkmode(right_operand, dlogger, env, &binop_type);
+                        typecheck_hir_value_checkmode(right_operand, dlogger, &binop_type);
                         binop_type
                     }
                     _ => {
@@ -1031,11 +1037,11 @@ pub fn typecheck_hir_value_infermode(
             | hir::ValBinaryOpKind::Leq
             | hir::ValBinaryOpKind::Gt
             | hir::ValBinaryOpKind::Geq => {
-                let left_type = typecheck_hir_value_infermode(left_operand, dlogger, env);
+                let left_type = typecheck_hir_value_infermode(left_operand, dlogger);
 
                 match left_type {
                     TypeValue::Int(_) | TypeValue::UInt(_) | TypeValue::Float(_) => {
-                        typecheck_hir_value_checkmode(right_operand, dlogger, env, &left_type);
+                        typecheck_hir_value_checkmode(right_operand, dlogger, &left_type);
                         TypeValue::Bool
                     }
                     _ => {
@@ -1045,13 +1051,13 @@ pub fn typecheck_hir_value_infermode(
                 }
             }
             hir::ValBinaryOpKind::And | hir::ValBinaryOpKind::Or => {
-                typecheck_hir_value_checkmode(left_operand, dlogger, env, &TypeValue::Bool);
-                typecheck_hir_value_checkmode(right_operand, dlogger, env, &TypeValue::Bool);
+                typecheck_hir_value_checkmode(left_operand, dlogger, &TypeValue::Bool);
+                typecheck_hir_value_checkmode(right_operand, dlogger, &TypeValue::Bool);
                 TypeValue::Bool
             }
             hir::ValBinaryOpKind::Eq | hir::ValBinaryOpKind::Neq => {
-                let left_type = typecheck_hir_value_infermode(left_operand, dlogger, env);
-                typecheck_hir_value_checkmode(right_operand, dlogger, env, &left_type);
+                let left_type = typecheck_hir_value_infermode(left_operand, dlogger);
+                typecheck_hir_value_checkmode(right_operand, dlogger, &left_type);
 
                 match left_type {
                     TypeValue::Int(_) | TypeValue::UInt(_) | TypeValue::Float(_) => TypeValue::Bool,
@@ -1067,10 +1073,10 @@ pub fn typecheck_hir_value_infermode(
             then_branch,
             else_branch,
         } => {
-            typecheck_hir_value_checkmode(cond, dlogger, env, &TypeValue::Bool);
-            let if_type = typecheck_hir_blockexpr_infermode(then_branch, dlogger, env);
+            typecheck_hir_value_checkmode(cond, dlogger, &TypeValue::Bool);
+            let if_type = typecheck_hir_blockexpr_infermode(then_branch, dlogger);
             if let Some(elseexpr) = else_branch {
-                typecheck_hir_elseexpr_checkmode(elseexpr, dlogger, env, &if_type);
+                typecheck_hir_elseexpr_checkmode(elseexpr, dlogger, &if_type);
             }
             if_type
         }
@@ -1079,18 +1085,18 @@ pub fn typecheck_hir_value_infermode(
             first_case,
             rest_cases,
         } => {
-            let expr_type = typecheck_hir_value_infermode(expr, dlogger, env);
-            intro_and_typecheck_hir_targetexpr(&first_case.val.target, dlogger, env, &expr_type);
-            let first_case_type = typecheck_hir_value_infermode(&first_case.val.body, dlogger, env);
+            let expr_type = typecheck_hir_value_infermode(expr, dlogger);
+            intro_and_typecheck_hir_targetexpr(&first_case.val.target, dlogger, &expr_type);
+            let first_case_type = typecheck_hir_value_infermode(&first_case.val.body, dlogger);
             for case in rest_cases {
-                intro_and_typecheck_hir_targetexpr(&case.val.target, dlogger, env, &expr_type);
-                typecheck_hir_value_checkmode(&case.val.body, dlogger, env, &first_case_type);
+                intro_and_typecheck_hir_targetexpr(&case.val.target, dlogger, &expr_type);
+                typecheck_hir_value_checkmode(&case.val.body, dlogger, &first_case_type);
             }
             first_case_type
         }
-        hir::ValExpr::Block(block) => typecheck_hir_blockexpr_infermode(block, dlogger, env),
+        hir::ValExpr::Block(block) => typecheck_hir_blockexpr_infermode(block, dlogger),
         hir::ValExpr::ArrayAccess { root, index } => {
-            let rtype = typecheck_hir_value_infermode(root, dlogger, env);
+            let rtype = typecheck_hir_value_infermode(root, dlogger);
             typecheck_hir_value_checkmode(
                 index,
                 dlogger,
@@ -1106,7 +1112,7 @@ pub fn typecheck_hir_value_infermode(
             }
         }
         hir::ValExpr::FieldAccess { root, field } => {
-            let rtype = typecheck_hir_value_infermode(root, dlogger, env);
+            let rtype = typecheck_hir_value_infermode(root, dlogger);
             match rtype {
                 TypeValue::Struct(fields) => {
                     for (i, f) in fields.iter().enumerate() {
@@ -1129,9 +1135,9 @@ pub fn typecheck_hir_value_infermode(
                 TypeValue::Unknown
             }
             [first, others @ ..] => {
-                let first_type = typecheck_hir_value_infermode(first, dlogger, env);
+                let first_type = typecheck_hir_value_infermode(first, dlogger);
                 for elem in others {
-                    typecheck_hir_value_checkmode(elem, dlogger, env, &first_type);
+                    typecheck_hir_value_checkmode(elem, dlogger, &first_type);
                 }
                 TypeValue::Array(
                     Box::new(first_type),
@@ -1141,10 +1147,10 @@ pub fn typecheck_hir_value_infermode(
         },
         // concretize a generic val
         hir::ValExpr::Concretization { generic, tyargs } => {
-            let generic_type = typecheck_hir_value_infermode(generic, dlogger, env);
+            let generic_type = typecheck_hir_value_infermode(generic, dlogger);
             let tyargs = tyargs
                 .iter()
-                .map(|tyarg| typecheck_hir_type_infermode(tyarg, dlogger, env))
+                .map(|tyarg| typecheck_hir_type_infermode(tyarg, dlogger))
                 .collect::<Vec<_>>();
             match generic_type {
                 TypeValue::Generic {
@@ -1173,7 +1179,7 @@ pub fn typecheck_hir_value_infermode(
         }
         // apply a nongeneric function
         hir::ValExpr::App { fun, args } => {
-            let fn_type = typecheck_hir_value_infermode(fun, dlogger, env);
+            let fn_type = typecheck_hir_value_infermode(fun, dlogger);
             match fn_type {
                 TypeValue::Fn {
                     paramtys,
@@ -1183,14 +1189,13 @@ pub fn typecheck_hir_value_infermode(
                         dlogger.log_wrong_number_args(v.range, paramtys.len(), args.len());
                     } else {
                         for (arg, paramty) in args.iter().zip(paramtys.iter()) {
-                            typecheck_hir_value_checkmode(arg, dlogger, env, paramty);
+                            typecheck_hir_value_checkmode(arg, dlogger, paramty);
                         }
                     }
                     *returntype
                 }
                 _ => {
-                    dlogger
-                        .log_application_of_non_function(v.range, &print_type_value(&fn_type, env));
+                    dlogger.log_application_of_non_function(v.range, &(&fn_type));
                     TypeValue::Unknown
                 }
             }
@@ -1263,7 +1268,7 @@ fn intro_and_typecheck_hir_pat_checkmode(
                     match field_type {
                         Some(field_type) => {
                             intro_and_typecheck_hir_pat_checkmode(
-                                field_pat, dlogger, env, field_type, typarams,
+                                field_pat, dlogger, field_type, typarams,
                             );
                         }
                         None => {
@@ -1280,15 +1285,11 @@ fn intro_and_typecheck_hir_pat_checkmode(
             }
         },
         hir::ValPatExpr::Typed { ref pat, ref ty } => {
-            let pat_ty = typecheck_hir_type_infermode(ty, dlogger, env);
+            let pat_ty = typecheck_hir_type_infermode(ty, dlogger);
             if !pat_ty.unify_with(expected_type) {
-                dlogger.log_type_mismatch(
-                    ty.range,
-                    &print_type_value(expected_type, env),
-                    &print_type_value(&pat_ty, env),
-                );
+                dlogger.log_type_mismatch(ty.range, &(expected_type), &(&pat_ty));
             }
-            intro_and_typecheck_hir_pat_checkmode(pat, dlogger, env, &pat_ty, typarams);
+            intro_and_typecheck_hir_pat_checkmode(pat, dlogger, &pat_ty, typarams);
         }
     }
 }
@@ -1315,11 +1316,11 @@ fn intro_hir_pat_errors(
         }
         hir::ValPatExpr::StructLiteral(got_fields) => {
             for (_, ref field_pat) in got_fields {
-                intro_hir_pat_errors(field_pat, dlogger, env, typarams);
+                intro_hir_pat_errors(field_pat, dlogger, typarams);
             }
         }
         hir::ValPatExpr::Typed { ref pat, ref ty } => {
-            intro_hir_pat_errors(pat, dlogger, env, typarams);
+            intro_hir_pat_errors(pat, dlogger, typarams);
         }
     }
 }
@@ -1338,17 +1339,17 @@ fn intro_and_typecheck_hir_pat_infermode(
         }
         hir::ValPatExpr::Identifier { .. } => {
             dlogger.log_cannot_infer_pattern_type(pat.range);
-            intro_hir_pat_errors(pat, dlogger, env, typarams);
+            intro_hir_pat_errors(pat, dlogger, typarams);
             TypeValue::Unknown
         }
         hir::ValPatExpr::StructLiteral(_) => {
             dlogger.log_cannot_infer_pattern_type(pat.range);
-            intro_hir_pat_errors(pat, dlogger, env, typarams);
+            intro_hir_pat_errors(pat, dlogger, typarams);
             TypeValue::Unknown
         }
         hir::ValPatExpr::Typed { ref pat, ref ty } => {
-            let pat_ty = typecheck_hir_type_infermode(ty, dlogger, env);
-            intro_and_typecheck_hir_pat_checkmode(pat, dlogger, env, &pat_ty, typarams);
+            let pat_ty = typecheck_hir_type_infermode(ty, dlogger);
+            intro_and_typecheck_hir_pat_checkmode(pat, dlogger, &pat_ty, typarams);
             pat_ty
         }
     }
@@ -1403,7 +1404,7 @@ fn intro_and_typecheck_hir_targetexpr(
             typecheck_numerical_literal(i, nbits, false, dlogger, target.range)
         }
         (hir::CaseTargetExpr::PatExpr(ref pat), _) => {
-            intro_and_typecheck_hir_pat_checkmode(pat, dlogger, env, expr_type, &vec![]);
+            intro_and_typecheck_hir_pat_checkmode(pat, dlogger, expr_type, &vec![]);
         }
         _ => {
             let case_target_str = match target.val {
@@ -1413,11 +1414,7 @@ fn intro_and_typecheck_hir_targetexpr(
                 hir::CaseTargetExpr::Int(_) => "int".to_string(),
                 hir::CaseTargetExpr::PatExpr(_) => unreachable!(),
             };
-            dlogger.log_case_target_type_mismatch(
-                target.range,
-                &print_type_value(expr_type, env),
-                &case_target_str,
-            );
+            dlogger.log_case_target_type_mismatch(target.range, &(expr_type), &case_target_str);
         }
     }
 }
@@ -1432,7 +1429,7 @@ pub fn typecheck_hir_value_checkmode(
         (hir::ValExpr::Float(_), TypeValue::Float(_)) => {}
         // block expressions
         (hir::ValExpr::Block(ref block), _) => {
-            typecheck_hir_blockexpr_checkmode(block, dlogger, env, expected_type);
+            typecheck_hir_blockexpr_checkmode(block, dlogger, expected_type);
         }
         (
             hir::ValExpr::IfThen {
@@ -1442,10 +1439,10 @@ pub fn typecheck_hir_value_checkmode(
             },
             _,
         ) => {
-            typecheck_hir_value_checkmode(cond, dlogger, env, &TypeValue::Bool);
-            typecheck_hir_blockexpr_checkmode(then_branch, dlogger, env, expected_type);
+            typecheck_hir_value_checkmode(cond, dlogger, &TypeValue::Bool);
+            typecheck_hir_blockexpr_checkmode(then_branch, dlogger, expected_type);
             if let Some(ref elseexpr) = else_branch {
-                typecheck_hir_elseexpr_checkmode(elseexpr, dlogger, env, expected_type);
+                typecheck_hir_elseexpr_checkmode(elseexpr, dlogger, expected_type);
             }
         }
         (
@@ -1456,25 +1453,20 @@ pub fn typecheck_hir_value_checkmode(
             },
             _,
         ) => {
-            let expr_type = typecheck_hir_value_infermode(expr, dlogger, env);
-            intro_and_typecheck_hir_targetexpr(&first_case.val.target, dlogger, env, &expr_type);
-            typecheck_hir_value_checkmode(&first_case.val.body, dlogger, env, expected_type);
+            let expr_type = typecheck_hir_value_infermode(expr, dlogger);
+            intro_and_typecheck_hir_targetexpr(&first_case.val.target, dlogger, &expr_type);
+            typecheck_hir_value_checkmode(&first_case.val.body, dlogger, expected_type);
             for case in rest_cases {
-                intro_and_typecheck_hir_targetexpr(&case.val.target, dlogger, env, &expr_type);
-                typecheck_hir_value_checkmode(&case.val.body, dlogger, env, expected_type);
+                intro_and_typecheck_hir_targetexpr(&case.val.target, dlogger, &expr_type);
+                typecheck_hir_value_checkmode(&case.val.body, dlogger, expected_type);
             }
         }
         // everything else
         _ => {
-            let actual_type = typecheck_hir_value_infermode(v, dlogger, env);
+            let actual_type = typecheck_hir_value_infermode(v, dlogger);
             if !actual_type.unify_with(expected_type) {
-                dlogger.log_type_mismatch(
-                    v.range,
-                    &print_type_value(expected_type, env),
-                    &print_type_value(&actual_type, env),
-                );
+                dlogger.log_type_mismatch(v.range, &(expected_type), &(&actual_type));
             }
         }
     }
 }
- 

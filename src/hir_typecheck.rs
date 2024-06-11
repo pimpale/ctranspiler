@@ -38,17 +38,17 @@ pub fn typehint_of_val_pat_and_patch(
 // helper function to make reporting expected kind errors simpler
 fn expect_type<T>(
     v: &mut Augmented<T>,
-    expected: &TypeValue,
+    expected_hint: &TypeValue,
     actual: TypeValue,
     dlogger: &mut DiagnosticLogger,
 ) -> TypeValue
 where
     T: std::default::Default,
 {
-    if expected.supports_assign(&actual) {
+    if expected_hint.supports_assign(&actual) {
         actual
     } else {
-        dlogger.log_type_mismatch(v.range, &expected.to_string(), &actual.to_string());
+        dlogger.log_type_mismatch(v.range, &expected_hint.to_string(), &actual.to_string());
         v.val = T::default();
         TypeValue::Unknown
     }
@@ -113,7 +113,9 @@ pub fn typecheck_type_expr_and_patch(
             expect_type(v, expected_type, TypeValue::IntLit(i.clone()), dlogger)
         }
         hir::TypeExpr::Bool(i) => expect_type(v, expected_type, TypeValue::BoolLit(*i), dlogger),
-        hir::TypeExpr::Float(i) => expect_type(v, expected_type, TypeValue::FloatLit(i), dlogger),
+        hir::TypeExpr::Float(i) => {
+            expect_type(v, expected_type, TypeValue::FloatLit(i.clone()), dlogger)
+        }
         hir::TypeExpr::Fn { paramtys, returnty } => {
             // we can actually use the type hints here:
             // for each param, we evaluate the paramty with the expected type
@@ -134,16 +136,33 @@ pub fn typecheck_type_expr_and_patch(
                     // the expected type is not compatible
                     dlogger.log_unexpected_fn(v.range, &expected_type.to_string());
                     v.val = hir::TypeExpr::Error;
-                    return KindValue::Unknown;
+                    return TypeValue::Unknown;
                 }
             };
 
-            for arg in paramtys {
-                typecheck_type_expr_and_patch(arg, &TypeValue::Type, dlogger, checker);
+            if expected_params_type.len() != paramtys.len() {
+                dlogger.log_wrong_number_fn_params(
+                    v.range,
+                    expected_params_type.len(),
+                    paramtys.len(),
+                );
+                v.val = hir::TypeExpr::Error;
+                return TypeValue::Unknown;
             }
-            typecheck_type_expr_and_patch(returnty, &KindValue::Type, dlogger, checker);
 
-            expect_type(v, expected_type, KindValue::Type, dlogger)
+            let paramtys_actual = std::iter::zip(paramtys, expected_params_type)
+                .map(|(paramty, expected_type)| {
+                    typecheck_type_expr_and_patch(paramty, expected_type, dlogger, checker)
+                })
+                .collect();
+
+            let returnty_actual =
+                typecheck_type_expr_and_patch(returnty, &expected_return_type, dlogger, checker);
+
+            TypeValue::Fn {
+                paramtys: paramtys_actual,
+                returntype: Box::new(returnty_actual),
+            }
         }
         hir::TypeExpr::Struct(fields) => {
             for (_, expr) in fields {
