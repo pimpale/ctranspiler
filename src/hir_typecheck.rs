@@ -85,57 +85,59 @@ pub fn typecheck_type_expr_and_patch(
         hir::TypeExpr::Error => TypeValue::Unknown,
         hir::TypeExpr::Identifier(id) => {
             let actual_type = checker.type_type_table[*id]
-                    .clone()
-                    .expect("kind not initialized yet");
-            expect_type(
-                v,
-                expected_type,
-                actual_type,
-                dlogger,
-            )
+                .clone()
+                .expect("kind not initialized yet");
+            expect_type(v, expected_type, actual_type, dlogger)
         }
         hir::TypeExpr::BoolTy => expect_type(v, expected_type, TypeValue::Bool, dlogger),
-        hir::TypeExpr::RefConstructorTy => expect_type(
-            v,
-            expected_type,
-            TypeValue::RefConstructor,
-            dlogger,
-        ),
-        hir::TypeExpr::ArrayConstructorTy => expect_type(
-            v,
-            expected_type,
-            TypeValue::ArrayConstructor,
-            dlogger,
-        ),
-        hir::TypeExpr::SliceConstructorTy => expect_type(
-            v,
-            expected_type,
-            TypeValue::SliceConstructor,
-            dlogger,
-        ),
-        hir::TypeExpr::IntConstructorTy => expect_type(
-            v,
-            expected_type,
-            TypeValue::IntConstructor,
-            dlogger,
-        ),
-        hir::TypeExpr::UIntConstructorTy => expect_type(
-            v,
-            expected_type,
-            TypeValue::UIntConstructor,
-            dlogger,
-        ),
-        hir::TypeExpr::FloatConstructorTy => expect_type(
-            v,
-            expected_type,
-            TypeValue::FloatConstructor,
-            dlogger,
-        ),
+        hir::TypeExpr::RefConstructorTy => {
+            expect_type(v, expected_type, TypeValue::RefConstructor, dlogger)
+        }
+        hir::TypeExpr::ArrayConstructorTy => {
+            expect_type(v, expected_type, TypeValue::ArrayConstructor, dlogger)
+        }
+        hir::TypeExpr::SliceConstructorTy => {
+            expect_type(v, expected_type, TypeValue::SliceConstructor, dlogger)
+        }
+        hir::TypeExpr::IntConstructorTy => {
+            expect_type(v, expected_type, TypeValue::IntConstructor, dlogger)
+        }
+        hir::TypeExpr::UIntConstructorTy => {
+            expect_type(v, expected_type, TypeValue::UIntConstructor, dlogger)
+        }
+        hir::TypeExpr::FloatConstructorTy => {
+            expect_type(v, expected_type, TypeValue::FloatConstructor, dlogger)
+        }
 
-        hir::TypeExpr::Int(i) => expect_type(v, expected_type, TypeValue::IntLit(i.clone()), dlogger),
-        hir::TypeExpr::Bool(i) => expect_type(v, expected_type, TypeValue::BoolLit(i), dlogger),
+        hir::TypeExpr::Int(i) => {
+            expect_type(v, expected_type, TypeValue::IntLit(i.clone()), dlogger)
+        }
+        hir::TypeExpr::Bool(i) => expect_type(v, expected_type, TypeValue::BoolLit(*i), dlogger),
         hir::TypeExpr::Float(i) => expect_type(v, expected_type, TypeValue::FloatLit(i), dlogger),
         hir::TypeExpr::Fn { paramtys, returnty } => {
+            // we can actually use the type hints here:
+            // for each param, we evaluate the paramty with the expected type
+            // we evaluate the returnty with the expected returntype
+
+            let (expected_params_type, expected_return_type) = match expected_type {
+                TypeValue::Unknown => (
+                    &std::iter::repeat(TypeValue::Unknown)
+                        .take(paramtys.len())
+                        .collect(),
+                    TypeValue::Unknown,
+                ),
+                TypeValue::Fn {
+                    paramtys,
+                    returntype,
+                } => (paramtys, *returntype.clone()),
+                _ => {
+                    // the expected type is not compatible
+                    dlogger.log_unexpected_fn(v.range, &expected_type.to_string());
+                    v.val = hir::TypeExpr::Error;
+                    return KindValue::Unknown;
+                }
+            };
+
             for arg in paramtys {
                 typecheck_type_expr_and_patch(arg, &TypeValue::Type, dlogger, checker);
             }
