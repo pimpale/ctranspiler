@@ -620,10 +620,11 @@ pub fn typecheck_val_expr_and_patch(
             )
         }
         hir::ValExpr::CaseOf { expr, cases } => {
-            typecheck_val_expr_and_patch(expr, &KindValue::Type, dlogger, checker);
+            let expr_type =
+                typecheck_val_expr_and_patch(expr, &TypeValue::Unknown, dlogger, checker);
             for (target, body) in cases {
-                typecheck_case_target_expr_and_patch(target, &KindValue::Type, dlogger, checker);
-                typecheck_val_expr_and_patch(body, &KindValue::Type, dlogger, checker);
+                typecheck_case_target_expr_and_patch(target, &expr_type, dlogger, checker);
+                typecheck_val_expr_and_patch(body, expected_type, dlogger, checker);
             }
             expect_type(v, expected_type, KindValue::Type, dlogger)
         }
@@ -643,20 +644,103 @@ pub fn typecheck_val_expr_and_patch(
             }
         }
         hir::ValExpr::ArrayLiteral(vals) => {
+            let (inner_ty, len) = match expected_type {
+                TypeValue::Array(inner_ty, len) => (inner_ty.as_ref(), *len),
+                _ => (&TypeValue::Unknown, vals.len() as u64),
+            };
+
+            // if inner ty is unknown then attempt to infer it from the first element
+            let inner_ty = match inner_ty {
+                TypeValue::Unknown => {
+                    if let Some(first_val) = vals.first_mut() {
+                        typecheck_val_expr_and_patch(
+                            first_val,
+                            &TypeValue::Unknown,
+                            dlogger,
+                            checker,
+                        )
+                    } else {
+                        dlogger.log_cannot_infer_array_ty(v.range);
+                        v.val = hir::ValExpr::Error;
+                        TypeValue::Unknown
+                    }
+                }
+                _ => inner_ty.clone(),
+            };
+
+            // check all elements in the array
             for val in vals {
-                typecheck_val_expr_and_patch(val, &KindValue::Type, dlogger, checker);
+                typecheck_val_expr_and_patch(val, &inner_ty, dlogger, checker);
             }
-            expect_type(v, expected_type, KindValue::Type, dlogger)
+
+            // return the type of the array
+            expect_type(
+                v,
+                expected_type,
+                TypeValue::Array(Box::new(inner_ty), len),
+                dlogger,
+            )
         }
         hir::ValExpr::BinaryOp {
-            op: _,
+            op,
             left_operand,
             right_operand,
-        } => {
-            typecheck_val_expr_and_patch(left_operand, &KindValue::Type, dlogger, checker);
-            typecheck_val_expr_and_patch(right_operand, &KindValue::Type, dlogger, checker);
-            expect_type(v, expected_type, KindValue::Type, dlogger)
-        }
+        } => match op {
+            // number x number -> number
+            hir::ValBinaryOpKind::Add
+            | hir::ValBinaryOpKind::Sub
+            | hir::ValBinaryOpKind::Mul
+            | hir::ValBinaryOpKind::Div
+            | hir::ValBinaryOpKind::Rem => {
+                // left type
+                let left_type =
+                    typecheck_val_expr_and_patch(left_operand, &expected_type, dlogger, checker);
+                match left_type {
+                    TypeValue::Int(_) | TypeValue::UInt(_) | TypeValue::Float(_) => {}
+                    _ => {
+                        dlogger.log_invalid_binary_op(v.range, op, &left_type.to_string());
+                        v.val = hir::ValExpr::Error;
+                    }
+                }
+                typecheck_val_expr_and_patch(right_operand, &left_type, dlogger, checker);
+
+                expect_type(v, expected_type, left_type, dlogger)
+            }
+            // number x number -> bool
+            hir::ValBinaryOpKind::Lt
+            | hir::ValBinaryOpKind::Leq
+            | hir::ValBinaryOpKind::Gt
+            | hir::ValBinaryOpKind::Geq => {
+                // left type
+                let left_type = typecheck_val_expr_and_patch(
+                    left_operand,
+                    &TypeValue::Unknown,
+                    dlogger,
+                    checker,
+                );
+                match left_type {
+                    TypeValue::Int(_) | TypeValue::UInt(_) | TypeValue::Float(_) => {}
+                    _ => {
+                        dlogger.log_invalid_binary_op(v.range, op, &left_type.to_string());
+                        v.val = hir::ValExpr::Error;
+                    }
+                }
+                typecheck_val_expr_and_patch(right_operand, &left_type, dlogger, checker);
+
+                expect_type(v, expected_type, TypeValue::Bool, dlogger)
+            }
+            // bool x bool -> bool
+            hir::ValBinaryOpKind::And |
+            hir::ValBinaryOpKind::Or => {
+                typecheck_val_expr_and_patch(left_operand, &TypeValue::Bool, dlogger, checker);
+                typecheck_val_expr_and_patch(right_operand, &TypeValue::Bool, dlogger, checker);
+                expect_type(v, expected_type, TypeValue::Bool, dlogger)
+            },
+            // (number | bool) x (number | bool) -> bool
+            hir::ValBinaryOpKind::Eq => todo!(),
+            hir::ValBinaryOpKind::Neq => todo!(),
+        },
+
         hir::ValExpr::ArrayAccess { root, index } => {
             typecheck_val_expr_and_patch(root, &KindValue::Type, dlogger, checker);
             typecheck_val_expr_and_patch(index, &KindValue::Int, dlogger, checker);
