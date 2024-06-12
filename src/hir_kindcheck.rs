@@ -464,18 +464,6 @@ pub fn kindcheck_val_expr_and_patch(
             kindcheck_val_expr_and_patch(body, &KindValue::Type, dlogger, checker);
             expect_kind(v, expected_kind, KindValue::Type, dlogger)
         }
-        hir::ValExpr::IfThen {
-            cond,
-            then_branch,
-            else_branch,
-        } => {
-            kindcheck_val_expr_and_patch(cond, &KindValue::Type, dlogger, checker);
-            kindcheck_val_expr_and_patch(then_branch, &KindValue::Type, dlogger, checker);
-            if let Some(else_branch) = else_branch {
-                kindcheck_val_expr_and_patch(else_branch, &KindValue::Type, dlogger, checker);
-            }
-            expect_kind(v, expected_kind, KindValue::Type, dlogger)
-        }
         hir::ValExpr::CaseOf { expr, cases } => {
             kindcheck_val_expr_and_patch(expr, &KindValue::Type, dlogger, checker);
             for (target, body) in cases {
@@ -586,9 +574,24 @@ pub fn kindcheck_block_statement_and_patch(
             kindcheck_val_expr_and_patch(place, &KindValue::Type, dlogger, checker);
             kindcheck_val_expr_and_patch(value, &KindValue::Type, dlogger, checker);
         }
+        hir::BlockStatement::IfThen {
+            cond,
+            then_branch,
+            else_branch,
+        } => {
+            kindcheck_val_expr_and_patch(cond, &KindValue::Type, dlogger, checker);
+            for statement in then_branch {
+                kindcheck_block_statement_and_patch(statement, dlogger, checker);
+            }
+            for statement in else_branch {
+                kindcheck_block_statement_and_patch(statement, dlogger, checker);
+            }
+        }
         hir::BlockStatement::While { cond, body } => {
             kindcheck_val_expr_and_patch(cond, &KindValue::Type, dlogger, checker);
-            kindcheck_val_expr_and_patch(body, &KindValue::Type, dlogger, checker);
+            for statement in body {
+                kindcheck_block_statement_and_patch(statement, dlogger, checker);
+            }
         }
         hir::BlockStatement::For {
             pattern,
@@ -604,7 +607,9 @@ pub fn kindcheck_block_statement_and_patch(
             if let Some(by) = by {
                 kindcheck_val_expr_and_patch(by, &KindValue::Type, dlogger, checker);
             }
-            kindcheck_val_expr_and_patch(body, &KindValue::Type, dlogger, checker);
+            for statement in body {
+                kindcheck_block_statement_and_patch(statement, dlogger, checker);
+            }
         }
         hir::BlockStatement::Do(val) => {
             kindcheck_val_expr_and_patch(val, &KindValue::Type, dlogger, checker);

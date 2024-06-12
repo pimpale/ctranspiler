@@ -211,11 +211,6 @@ pub enum ValExpr {
         left_operand: Box<Augmented<ValExpr>>,
         right_operand: Box<Augmented<ValExpr>>,
     },
-    IfThen {
-        cond: Box<Augmented<ValExpr>>,
-        then_branch: Box<Augmented<BlockExpr>>,
-        else_branch: Option<Box<Augmented<ElseExpr>>>,
-    },
     // Matches an expression to the first matching pattern and destructures it
     CaseOf {
         expr: Box<Augmented<ValExpr>>,
@@ -274,6 +269,11 @@ pub enum BlockStatement {
     Set {
         place: Box<Augmented<ValExpr>>,
         value: Box<Augmented<ValExpr>>,
+    },
+    IfThen {
+        cond: Box<Augmented<ValExpr>>,
+        then_branch: Box<Augmented<BlockExpr>>,
+        else_branch: Option<Box<Augmented<ElseExpr>>>,
     },
     While {
         cond: Box<Augmented<ValExpr>>,

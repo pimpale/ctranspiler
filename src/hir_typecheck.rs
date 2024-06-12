@@ -530,91 +530,94 @@ pub fn typecheck_val_expr_and_patch(
             )
         }
         hir::ValExpr::Deref(inner) => {
-            let actual_kind =
-                typecheck_val_expr_and_patch(inner, &KindValue::Type, dlogger, checker);
-            expect_type(v, expected_type, actual_kind, dlogger)
-        }
-        hir::ValExpr::Generic { params, body } => {
-            let (expected_params_kind, expected_returnkind) = match expected_type {
-                KindValue::Unknown => (
-                    &std::iter::repeat(KindValue::Unknown)
-                        .take(params.len())
-                        .collect(),
-                    KindValue::Unknown,
-                ),
-                KindValue::Generic {
-                    paramkinds,
-                    returnkind,
-                } => (paramkinds, *returnkind.clone()),
-                _ => {
-                    // the expected type is not compatible
-                    dlogger.log_unexpected_generic(v.range, &expected_type.to_string());
-                    v.val = hir::ValExpr::Error;
-                    return KindValue::Unknown;
-                }
+            let expected_inner = match expected_type {
+                TypeValue::Ref(inner) => inner,
+                _ => &TypeValue::Unknown,
             };
-
-            // assert we have the right number of type arguments
-            if expected_params_kind.len() != params.len() {
-                dlogger.log_wrong_number_type_args(
-                    v.range,
-                    expected_params_kind.len(),
-                    params.len(),
-                );
-                v.val = hir::ValExpr::Error;
-                return KindValue::Unknown;
-            }
-
-            // check each type parameter
-            let paramkinds = std::iter::zip(params.iter_mut(), expected_params_kind)
-                .map(|(param, expected_param_kind)| {
-                    typecheck_type_pat_expr_and_patch(param, expected_param_kind, dlogger, checker)
-                })
-                .collect();
-
-            // ensure return kind matches
-            if expected_returnkind.supports_assign(&KindValue::Type) {
-                // check the body
-                typecheck_val_expr_and_patch(body, &KindValue::Type, dlogger, checker);
-                KindValue::Generic {
-                    paramkinds,
-                    returnkind: Box::new(KindValue::Type),
-                }
-            } else {
-                dlogger.log_kind_mismatch(
-                    v.range,
-                    &expected_returnkind.to_string(),
-                    &KindValue::Type.to_string(),
-                );
-                v.val = hir::ValExpr::Error;
-                KindValue::Unknown
-            }
+            let actual_type = typecheck_val_expr_and_patch(inner, expected_inner, dlogger, checker);
+            expect_type(v, expected_type, actual_type, dlogger)
         }
+        hir::ValExpr::Generic { params, body } => match expected_type {
+            TypeValue::Generic {
+                typarams: expected_params,
+                body: expected_body,
+            } => {
+                // we have already kindchecked, but make sure that the number of arguments is the same (as a sanity check)
+                assert_eq!(
+                    params.len(),
+                    expected_params.len(),
+                    "wrong number of arguments"
+                );
+                // we can actually check the body though
+                let body = typecheck_val_expr_and_patch(body, expected_body, dlogger, checker);
+                TypeValue::Generic {
+                    typarams: params.clone(),
+                    body: Box::new(body),
+                }
+            }
+            _ => {
+                // we don't know what the expected type is, so we just typecheck the body
+                let body =
+                    typecheck_val_expr_and_patch(body, &TypeValue::Unknown, dlogger, checker);
+                let actual = TypeValue::Generic {
+                    typarams: params.clone(),
+                    body: Box::new(body),
+                };
+                expect_type(v, expected_type, actual, dlogger)
+            }
+        },
         hir::ValExpr::FnDef {
             params,
             returnty,
             body,
         } => {
-            for param in params {
-                typecheck_val_pat_and_patch(param, &KindValue::Type, dlogger, checker);
-            }
-            if let Some(returnty) = returnty {
-                typecheck_type_expr_and_patch(returnty, &KindValue::Type, dlogger, checker);
-            }
-            typecheck_val_expr_and_patch(body, &KindValue::Type, dlogger, checker);
-            expect_type(v, expected_type, KindValue::Type, dlogger)
-        }
-        hir::ValExpr::IfThen {
-            cond,
-            then_branch,
-            else_branch,
-        } => {
-            typecheck_val_expr_and_patch(cond, &KindValue::Type, dlogger, checker);
-            typecheck_val_expr_and_patch(then_branch, &KindValue::Type, dlogger, checker);
-            if let Some(else_branch) = else_branch {
-                typecheck_val_expr_and_patch(else_branch, &KindValue::Type, dlogger, checker);
-            }
-            expect_type(v, expected_type, KindValue::Type, dlogger)
+            let (expected_paramtys, expected_returnty) = match expected_type {
+                TypeValue::Fn {
+                    paramtys,
+                    returntype,
+                } => (paramtys, returntype.as_ref()),
+                _ => (
+                    &params
+                        .iter()
+                        .map(|_| TypeValue::Unknown)
+                        .collect::<Vec<_>>(),
+                    &TypeValue::Unknown,
+                ),
+            };
+
+            let actual_paramtys = std::iter::zip(params.iter_mut(), expected_paramtys)
+                .map(|(param, expected_paramty)| {
+                    typecheck_val_pat_and_patch(param, expected_paramty, dlogger, checker)
+                })
+                .collect::<Vec<_>>();
+
+            let actual_returnty = match returnty {
+                Some(returnty) => {
+                    let actual_returnty = typecheck_type_expr_and_patch(returnty, dlogger, checker);
+                    // typecheck the returnty with the expected returnty
+                    expect_type(returnty, expected_returnty, actual_returnty, dlogger)
+                }
+                None => match expected_returnty {
+                    TypeValue::Unknown => {
+                        dlogger.log_cannot_infer_return_ty(v.range);
+                        expected_returnty.clone()
+                    }
+                    _ => expected_returnty.clone(),
+                },
+            };
+
+            // typecheck the body
+            typecheck_val_expr_and_patch(body, &actual_returnty, dlogger, checker);
+
+            expect_type(
+                v,
+                expected_type,
+                TypeValue::Fn {
+                    paramtys: actual_paramtys,
+                    returntype: Box::new(actual_returnty),
+                },
+                dlogger,
+            )
         }
         hir::ValExpr::CaseOf { expr, cases } => {
             typecheck_val_expr_and_patch(expr, &KindValue::Type, dlogger, checker);
@@ -727,14 +730,24 @@ pub fn typecheck_block_statement_and_patch(
             typecheck_val_expr_and_patch(place, &KindValue::Type, dlogger, checker);
             typecheck_val_expr_and_patch(value, &KindValue::Type, dlogger, checker);
         }
+        hir::BlockStatement::IfThen {
+            cond,
+            then_branch,
+            else_branch,
+        } => {
+            typecheck_val_expr_and_patch(cond, &TypeValue::Bool, dlogger, checker);
+            for statement in then_branch {
+                typecheck_block_statement_and_patch(statement, dlogger, checker);
+            }
+            for statement in else_branch {
+                typecheck_block_statement_and_patch(statement, dlogger, checker);
+            }
+        }
         hir::BlockStatement::While { cond, body } => {
             typecheck_val_expr_and_patch(cond, &TypeValue::Bool, dlogger, checker);
-            typecheck_val_expr_and_patch(
-                body,
-                &TypeValue::Struct(HashMap::new()),
-                dlogger,
-                checker,
-            );
+            for statement in body {
+                typecheck_block_statement_and_patch(statement, dlogger, checker);
+            }
         }
         hir::BlockStatement::For {
             pattern,
@@ -750,7 +763,9 @@ pub fn typecheck_block_statement_and_patch(
             if let Some(by) = by {
                 typecheck_val_expr_and_patch(by, &KindValue::Type, dlogger, checker);
             }
-            typecheck_val_expr_and_patch(body, &KindValue::Type, dlogger, checker);
+            for statement in body {
+                typecheck_block_statement_and_patch(statement, dlogger, checker);
+            }
         }
         hir::BlockStatement::Do(val) => {
             typecheck_val_expr_and_patch(val, &KindValue::Type, dlogger, checker);
@@ -767,7 +782,7 @@ pub fn typecheck_file_statement_and_patch(
         hir::FileStatement::Error => {}
         hir::FileStatement::TypeDef { value, typat } => {
             // try calculating the type of the type expression
-            let ty = typecheck_type_expr_and_patch(value,  dlogger, checker);
+            let ty = typecheck_type_expr_and_patch(value, dlogger, checker);
             // bind the resolved type to all the identifiers in type pattern
             typecheck_type_pat_expr_and_patch(typat, &ty, dlogger, checker);
         }

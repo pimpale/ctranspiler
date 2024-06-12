@@ -5,7 +5,7 @@ use lsp_types::Range;
 
 use crate::ast;
 use crate::dlogger::DiagnosticLogger;
-use crate::hir::{self, *};
+use crate::hir::*;
 
 struct Environment {
     dlogger: DiagnosticLogger,
@@ -256,11 +256,11 @@ fn translate_augkindexpr(
 
 fn translate_kindexpr(k: ast::KindExpr, env: &mut Environment) -> KindExpr {
     match k {
-        ast::KindExpr::Error => hir::KindExpr::Error,
-        ast::KindExpr::Type => hir::KindExpr::Type,
-        ast::KindExpr::Int => hir::KindExpr::Int,
-        ast::KindExpr::Float => hir::KindExpr::Float,
-        ast::KindExpr::Bool => hir::KindExpr::Bool,
+        ast::KindExpr::Error => KindExpr::Error,
+        ast::KindExpr::Type => KindExpr::Type,
+        ast::KindExpr::Int => KindExpr::Int,
+        ast::KindExpr::Float => KindExpr::Float,
+        ast::KindExpr::Bool => KindExpr::Bool,
         ast::KindExpr::Generic { args, returnkind } => KindExpr::Constructor {
             paramkinds: args
                 .into_iter()
@@ -279,7 +279,7 @@ fn translate_augtypepatexpr(
     match val {
         ast::TypePatExpr::Error => Augmented {
             range,
-            val: hir::TypePatExpr::Error,
+            val: TypePatExpr::Error,
         },
         ast::TypePatExpr::Typed { identifier, kind } => Augmented {
             range,
@@ -312,7 +312,7 @@ fn translate_augtypeexpr(
     match val {
         ast::TypeExpr::Error => Augmented {
             range,
-            val: hir::TypeExpr::Error,
+            val: TypeExpr::Error,
         },
         ast::TypeExpr::Identifier(identifier) => Augmented {
             range,
@@ -520,19 +520,34 @@ fn translate_caseexpr(
     )
 }
 
-fn translate_elseexpr(e: ast::ElseExpr, env: &mut Environment) -> ValExpr {
-    match e {
-        ast::ElseExpr::Error => ValExpr::Error,
-        ast::ElseExpr::Else(body) => translate_blockexpr(body.val, env),
+fn translate_augelseexpr(
+    ast::Augmented { val, range, .. }: ast::Augmented<ast::ElseExpr>,
+    env: &mut Environment,
+) -> Vec<Augmented<BlockStatement>> {
+    match val {
+        ast::ElseExpr::Error => vec![],
+        ast::ElseExpr::Else(body) => translate_blockexpr_statement(body.val, env),
         ast::ElseExpr::Elif {
             cond,
             then_branch,
             else_branch,
-        } => ValExpr::IfThen {
-            cond: Box::new(translate_augvalexpr(*cond, env)),
-            then_branch: Box::new(tr_aug(*then_branch, env, translate_blockexpr)),
-            else_branch: else_branch.map(|e| Box::new(tr_aug(*e, env, translate_elseexpr))),
-        },
+        } => {
+            let cond = Box::new(translate_augvalexpr(*cond, env));
+            let then_branch = translate_blockexpr_statement(then_branch.val, env);
+            let else_branch = match else_branch {
+                Some(else_branch) => translate_augelseexpr(*else_branch, env),
+                None => vec![],
+            };
+
+            vec![Augmented {
+                range,
+                val: BlockStatement::IfThen {
+                    cond,
+                    then_branch,
+                    else_branch,
+                },
+            }]
+        }
     }
 }
 
@@ -662,18 +677,6 @@ fn translate_augvalexpr(
 
             Augmented { range, val }
         }
-        ast::ValExpr::IfThen {
-            cond,
-            then_branch,
-            else_branch,
-        } => Augmented {
-            range,
-            val: ValExpr::IfThen {
-                cond: Box::new(translate_augvalexpr(*cond, env)),
-                then_branch: Box::new(tr_aug(*then_branch, env, translate_blockexpr)),
-                else_branch: else_branch.map(|x| Box::new(tr_aug(*x, env, translate_elseexpr))),
-            },
-        },
         ast::ValExpr::CaseOf { expr, cases } => {
             let expr = Box::new(translate_augvalexpr(*expr, env));
             let cases = cases
@@ -687,7 +690,7 @@ fn translate_augvalexpr(
         }
         ast::ValExpr::Block(b) => Augmented {
             range,
-            val: translate_blockexpr(b.val, env),
+            val: translate_blockexpr_val(b.val, env),
         },
         ast::ValExpr::Group(v) => translate_augvalexpr(*v, env),
         ast::ValExpr::Array(items) => Augmented {
@@ -828,6 +831,27 @@ fn translate_augvalexpr(
     }
 }
 
+fn translate_blockexpr_statement(
+    b: ast::BlockExpr,
+    env: &mut Environment,
+) -> Vec<Augmented<BlockStatement>> {
+    // introduce new scope
+    env.type_names_in_scope.push(HashMap::new());
+    env.val_names_in_scope.push(HashMap::new());
+    env.use_prefixes.push(IndexMap::new());
+    let statements: Vec<Augmented<BlockStatement>> = b
+        .statements
+        .into_iter()
+        .map(|x| tr_aug(x, env, translate_blockstatement))
+        .collect();
+    // end scope
+    env.type_names_in_scope.pop();
+    env.val_names_in_scope.pop();
+    env.use_prefixes.pop();
+
+    statements
+}
+
 fn translate_blockstatement(bs: ast::BlockStatement, env: &mut Environment) -> BlockStatement {
     match bs {
         ast::BlockStatement::Error => BlockStatement::Error,
@@ -865,15 +889,27 @@ fn translate_blockstatement(bs: ast::BlockStatement, env: &mut Environment) -> B
                     .unwrap()
                     .insert(prefix.clone(), range);
             }
-            hir::BlockStatement::Error
+            BlockStatement::Error
         }
         ast::BlockStatement::Set { place, value } => BlockStatement::Set {
             place: Box::new(translate_augvalexpr(*place, env)),
             value: Box::new(translate_augvalexpr(*value, env)),
         },
+        ast::BlockStatement::IfThen {
+            cond,
+            then_branch,
+            else_branch,
+        } => BlockStatement::IfThen {
+            cond: Box::new(translate_augvalexpr(*cond, env)),
+            then_branch: translate_blockexpr_statement(then_branch.val, env),
+            else_branch: match else_branch {
+                Some(else_branch) => translate_augelseexpr(*else_branch, env),
+                None => vec![],
+            },
+        },
         ast::BlockStatement::While { cond, body } => BlockStatement::While {
             cond: Box::new(translate_augvalexpr(*cond, env)),
-            body: Box::new(tr_aug(*body, env, translate_blockexpr)),
+            body: translate_blockexpr_statement(body.val, env),
         },
         ast::BlockStatement::For {
             pattern,
@@ -889,7 +925,7 @@ fn translate_blockstatement(bs: ast::BlockStatement, env: &mut Environment) -> B
             env.val_names_in_scope.push(HashMap::new());
             let pattern = Box::new(translate_augpatexpr(*pattern, env, false));
             // parse body
-            let body = Box::new(tr_aug(*body, env, translate_blockexpr));
+            let body = translate_blockexpr_statement(body.val, env);
             // pop val scope
             env.val_names_in_scope.pop();
             // return
@@ -906,7 +942,7 @@ fn translate_blockstatement(bs: ast::BlockStatement, env: &mut Environment) -> B
     }
 }
 
-fn translate_blockexpr(b: ast::BlockExpr, env: &mut Environment) -> ValExpr {
+fn translate_blockexpr_val(b: ast::BlockExpr, env: &mut Environment) -> ValExpr {
     // introduce new scope
     env.type_names_in_scope.push(HashMap::new());
     env.val_names_in_scope.push(HashMap::new());
