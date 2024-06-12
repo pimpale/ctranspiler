@@ -134,9 +134,7 @@ pub fn typecheck_type_expr_and_patch(
                 } => (paramtys, *returntype.clone()),
                 _ => {
                     // the expected type is not compatible
-                    dlogger.log_unexpected_fn(v.range, &expected_type.to_string());
-                    v.val = hir::TypeExpr::Error;
-                    return TypeValue::Unknown;
+                    return expect_type(v, expected_type,  , dlogger);
                 }
             };
 
@@ -165,6 +163,16 @@ pub fn typecheck_type_expr_and_patch(
             }
         }
         hir::TypeExpr::Struct(fields) => {
+            // check if the expected type is a struct, if not log an error
+            let expected_fields = match expected_type {
+                TypeValue::Unknown => {
+                    &fields.iter().map(|(name, _)| (name.clone(), TypeValue::Unknown)).collect()
+                },
+                TypeValue::Struct(fields) => fields,
+
+            }
+            
+            
             for (_, expr) in fields {
                 typecheck_type_expr_and_patch(expr, &KindValue::Type, dlogger, checker);
             }
