@@ -185,7 +185,7 @@ fn print_typaram(typaram: &Augmented<hir::TypePatExpr>) -> String {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum TypeValue {
     // An error when parsing
     Unknown,
@@ -202,24 +202,24 @@ pub enum TypeValue {
     FloatConstructor,
     // the constructed type
     Ref(Box<TypeValue>),
-    Array(Box<TypeValue>, Box<TypeValue>),
+    Array(Box<TypeValue>, u64),
     Slice(Box<TypeValue>),
-    Int(Box<TypeValue>),
-    UInt(Box<TypeValue>),
-    Float(Box<TypeValue>),
+    Int(u64),
+    UInt(u64),
+    Float(u64),
     // const literals
-    IntLit(BigInt),
+    IntLit(i64),
     BoolLit(bool),
-    FloatLit(BigRational),
+    FloatLit(f64),
     // type of a function
     Fn {
         paramtys: Vec<TypeValue>,
         returntype: Box<TypeValue>,
     },
     // struct and enumify
-    Struct(IndexMap<String, TypeValue>),
-    Enum(IndexMap<String, TypeValue>),
-    Union(IndexMap<String, TypeValue>),
+    Struct(HashMap<String, TypeValue>),
+    Enum(HashMap<String, TypeValue>),
+    Union(HashMap<String, TypeValue>),
     // type of a generic value. Instantiated at every use point
     // type -> type
     Generic {
@@ -683,68 +683,6 @@ impl TypeValue {
     }
 }
 
-fn concretize_type_expr(constructor: &TypeValue, mut tyargs: Vec<TypeValue>) -> TypeValue {
-    match constructor {
-        TypeValue::Unknown => TypeValue::Unknown,
-        TypeValue::SymbolicVariable(id) => TypeValue::Concretization {
-            symbolic_constructor: *id,
-            tyargs,
-        },
-        TypeValue::RefConstructor => {
-            assert!(tyargs.len() == 1, "wrong number of arguments");
-            let arg0 = tyargs.remove(0);
-            TypeValue::Ref(Box::new(arg0))
-        }
-        TypeValue::ArrayConstructor => {
-            assert!(tyargs.len() == 2, "wrong number of arguments");
-            let arg1 = tyargs.remove(1);
-            let arg0 = tyargs.remove(0);
-            TypeValue::Array(Box::new(arg0), Box::new(arg1))
-        }
-        TypeValue::SliceConstructor => {
-            assert!(tyargs.len() == 1, "wrong number of arguments");
-            let arg0 = tyargs.remove(0);
-            TypeValue::Ref(Box::new(arg0))
-        }
-        TypeValue::IntConstructor => {
-            assert!(tyargs.len() == 1, "wrong number of arguments");
-            let arg0 = tyargs.remove(0);
-            TypeValue::Int(Box::new(arg0))
-        }
-        TypeValue::UIntConstructor => {
-            assert!(tyargs.len() == 1, "wrong number of arguments");
-            let arg0 = tyargs.remove(0);
-            TypeValue::UInt(Box::new(arg0))
-        }
-        TypeValue::FloatConstructor => {
-            assert!(tyargs.len() == 1, "wrong number of arguments");
-            let arg0 = tyargs.remove(0);
-            TypeValue::Float(Box::new(arg0))
-        }
-        TypeValue::Generic { typarams, body } => {
-            assert!(
-                typarams.len() == tyargs.len(),
-                "wrong number of arguments; should be kindchecked"
-            );
-            let mut bindings = HashMap::new();
-            for (typat, tyarg) in std::iter::zip(typarams, tyargs) {
-                match &typat.val {
-                    hir::TypePatExpr::Typed { id, .. } => {
-                        bindings.insert(*id, tyarg);
-                    }
-                    hir::TypePatExpr::Identifier(id) => {
-                        bindings.insert(*id, tyarg);
-                    }
-                    hir::TypePatExpr::Error => {}
-                }
-            }
-            body.subst(&bindings)
-        }
-        _ => {
-            unreachable!("concretization of a non-generic; should have been kindchecked");
-        }
-    }
-}
 
 // evaluate a type expression in a context
 // NOTE: we assume that all identifiers have already been resolved.

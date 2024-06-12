@@ -186,9 +186,9 @@ fn translate_augstructitemexpr<T, U>(
     replace_eponymous: impl Fn(ast::Identifier, &mut Environment) -> U,
     env: &mut Environment,
     items: Vec<ast::Augmented<ast::StructItemExpr<T>>>,
-) -> IndexMap<String, Augmented<U>> {
+) -> Vec<(Augmented<String>, Augmented<U>)> {
     let mut identifier_ranges: IndexMap<String, Range> = IndexMap::new();
-    let mut out_items: IndexMap<String, Augmented<U>> = IndexMap::new();
+    let mut out_items: Vec<(Augmented<String>, Augmented<U>)> = Vec::new();
     for ast::Augmented { range, val, .. } in items {
         match val {
             ast::StructItemExpr::Error => {}
@@ -200,9 +200,11 @@ fn translate_augstructitemexpr<T, U>(
                     env.dlogger
                         .log_duplicate_field_name(range, *preexisting_range, &identifier);
                 } else {
-                    identifier_ranges.insert(identifier.clone(), identifier_range);
-                    out_items.insert(
-                        identifier.clone(),
+                    out_items.push((
+                        Augmented {
+                            range: identifier_range,
+                            val: identifier.clone(),
+                        },
                         Augmented {
                             range,
                             val: replace_eponymous(
@@ -213,7 +215,7 @@ fn translate_augstructitemexpr<T, U>(
                                 env,
                             ),
                         },
-                    );
+                    ));
                 }
             }
             ast::StructItemExpr::Eponymous(_) => {}
@@ -230,7 +232,13 @@ fn translate_augstructitemexpr<T, U>(
                         .log_duplicate_field_name(range, *preexisting_range, &identifier);
                 } else {
                     identifier_ranges.insert(identifier.clone(), identifier_range);
-                    out_items.insert(identifier, lower(*expr, env));
+                    out_items.push((
+                        Augmented {
+                            range: identifier_range,
+                            val: identifier,
+                        },
+                        lower(*expr, env),
+                    ));
                 }
             }
             ast::StructItemExpr::Identified { .. } => {}

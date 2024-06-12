@@ -601,7 +601,7 @@ impl DiagnosticLogger {
         })
     }
 
-    pub fn log_int_too_large(&mut self, range: Range, nbits: &BigInt) {
+    pub fn log_int_too_large(&mut self, range: Range, nbits: u64) {
         self.log(Diagnostic {
             range,
             severity: Some(DiagnosticSeverity::ERROR),
@@ -615,7 +615,7 @@ impl DiagnosticLogger {
         })
     }
 
-    pub fn log_int_too_small(&mut self, range: Range, nbits: &BigInt) {
+    pub fn log_int_too_small(&mut self, range: Range, nbits: u64) {
         self.log(Diagnostic {
             range,
             severity: Some(DiagnosticSeverity::ERROR),

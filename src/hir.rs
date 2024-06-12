@@ -1,9 +1,8 @@
-use indexmap::IndexMap;
 use lsp_types::Range;
 use num_bigint::BigInt;
 use num_rational::BigRational;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Augmented<T> {
     pub range: Range,
     pub val: T,
@@ -19,7 +18,7 @@ pub enum HirPhase {
     Monomorphization,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum KindExpr {
     Error,
     Int,
@@ -61,9 +60,9 @@ pub enum TypeExpr {
         returnty: Box<Augmented<TypeExpr>>,
     },
     // struct and enum
-    Struct(IndexMap<String, Augmented<TypeExpr>>),
-    Enum(IndexMap<String, Augmented<TypeExpr>>),
-    Union(IndexMap<String, Augmented<TypeExpr>>),
+    Struct(Vec<(Augmented<String>, Augmented<TypeExpr>)>),
+    Enum(Vec<(Augmented<String>, Augmented<TypeExpr>)>),
+    Union(Vec<(Augmented<String>, Augmented<TypeExpr>)>),
     // generic
     Concretization {
         genericty: Box<Augmented<TypeExpr>>,
@@ -82,7 +81,7 @@ impl std::default::Default for TypeExpr {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum TypePatExpr {
     Error,
     Identifier(usize),
@@ -120,7 +119,7 @@ pub enum ValPatExpr {
         mutable: bool,
         id: usize,
     },
-    StructLiteral(IndexMap<String, Augmented<ValPatExpr>>),
+    StructLiteral(Vec<(Augmented<String>, Augmented<ValPatExpr>)>),
     New {
         pat: Box<Augmented<ValPatExpr>>,
         ty: Box<Augmented<TypeExpr>>,
@@ -181,7 +180,7 @@ pub enum ValExpr {
         body: Box<Augmented<ValExpr>>,
     },
     // Constructs a new compound type
-    StructLiteral(IndexMap<String, Augmented<ValExpr>>),
+    StructLiteral(Vec<(Augmented<String>, Augmented<ValExpr>)>),
     // Creates a new instance of a nominal type
     New {
         ty: Box<Augmented<TypeExpr>>,

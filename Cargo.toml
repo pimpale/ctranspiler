@@ -10,7 +10,7 @@ serde = { version = "1.0.203", features = ["derive"] }
 num-bigint =  { version = "0.4.5", features = ["serde"] }
 num-rational = { version = "0.4.2", features = ["serde"] }
 num-traits = "0.2.19"
-lsp-types = "0.96.0"
+lsp-types = "0.97.0"
 peekmore = "1.3.0"
 strum = { version = "0.26.2", features = ["derive"] }
 bumpalo = { version = "3.16.0", features = ["allocator_api"] }
