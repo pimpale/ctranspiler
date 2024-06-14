@@ -492,7 +492,7 @@ pub fn kindcheck_val_expr_and_patch(
         }
         hir::ValExpr::ArrayAccess { root, index } => {
             kindcheck_val_expr_and_patch(root, &KindValue::Type, dlogger, checker);
-            kindcheck_val_expr_and_patch(index, &KindValue::Int, dlogger, checker);
+            kindcheck_val_expr_and_patch(index, &KindValue::Type, dlogger, checker);
             expect_kind(v, expected_kind, KindValue::Type, dlogger)
         }
         hir::ValExpr::FieldAccess { root, .. } => {

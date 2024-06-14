@@ -453,21 +453,24 @@ pub fn typecheck_val_expr_and_patch(
                 dlogger,
             ),
         },
-        hir::ValExpr::String(s) => expect_type(
-            v,
-            expected_type,
-            TypeValue::Concretization {
-                constructor: TypeValueConstructor::ArrayConstructor,
-                tyargs: vec![
-                    TypeValue::Concretization {
-                        constructor: TypeValueConstructor::IntConstructor,
-                        tyargs: vec![TypeValue::Bool, TypeValue::Unknown],
-                    },
-                    TypeValue::IntLit(s.len() as i64),
-                ],
-            },
-            dlogger,
-        ),
+        hir::ValExpr::String(s) => {
+            let l = s.len();
+            expect_type(
+                v,
+                expected_type,
+                TypeValue::Concretization {
+                    constructor: TypeValueConstructor::ArrayConstructor,
+                    tyargs: vec![
+                        TypeValue::Concretization {
+                            constructor: TypeValueConstructor::IntConstructor,
+                            tyargs: vec![TypeValue::Bool, TypeValue::Unknown],
+                        },
+                        TypeValue::IntLit(l as i64),
+                    ],
+                },
+                dlogger,
+            )
+        }
         hir::ValExpr::StructLiteral(fields) => {
             let expected_fields = match expected_type {
                 TypeValue::Struct(fields) => fields.clone(),
@@ -477,7 +480,7 @@ pub fn typecheck_val_expr_and_patch(
                     .collect(),
             };
 
-            let actual_fields = HashMap::new();
+            let mut actual_fields = HashMap::new();
             for (name, val) in fields {
                 match expected_fields.get(&name.val) {
                     Some(expected_type) => {
@@ -487,8 +490,8 @@ pub fn typecheck_val_expr_and_patch(
                         );
                     }
                     None => {
+                        //TODO: delete these fields from the struct literal
                         dlogger.log_unexpected_field(v.range, &name.val.clone());
-                        v.val = hir::ValExpr::Error;
                     }
                 }
             }
@@ -675,6 +678,8 @@ pub fn typecheck_val_expr_and_patch(
                 _ => &TypeValue::Unknown,
             };
 
+            let vals_len = vals.len();
+
             match vals.split_first_mut() {
                 Some((first, rest)) => {
                     let first_val_type =
@@ -689,7 +694,7 @@ pub fn typecheck_val_expr_and_patch(
                         expected_type,
                         TypeValue::Concretization {
                             constructor: TypeValueConstructor::ArrayConstructor,
-                            tyargs: vec![first_val_type, TypeValue::IntLit(1 + rest.len() as i64)],
+                            tyargs: vec![first_val_type, TypeValue::IntLit(vals_len as i64)],
                         },
                         dlogger,
                     )
@@ -721,12 +726,27 @@ pub fn typecheck_val_expr_and_patch(
                     typecheck_val_expr_and_patch(left_operand, &expected_type, dlogger, checker);
                 let right_type =
                     typecheck_val_expr_and_patch(right_operand, &left_type, dlogger, checker);
-                match (left_type, right_type) {
+                match (&left_type, &right_type) {
                     (
-                        TypeValue::Int(Some(lsgn), Some(lsz)),
-                        TypeValue::Int(Some(rsgn), Some(rsz)),
-                    ) if lsgn == rsgn && lsz == rsz => {}
-                    (TypeValue::Float(Some(lsz)), TypeValue::Float(Some(rsz))) if lsz == rsz => {}
+                        TypeValue::Concretization {
+                            constructor: TypeValueConstructor::IntConstructor,
+                            tyargs: l_tyargs,
+                        },
+                        TypeValue::Concretization {
+                            constructor: TypeValueConstructor::IntConstructor,
+                            tyargs: r_tyargs,
+                        },
+                    ) if l_tyargs == r_tyargs => {}
+                    (
+                        TypeValue::Concretization {
+                            constructor: TypeValueConstructor::FloatConstructor,
+                            tyargs: l_tyargs,
+                        },
+                        TypeValue::Concretization {
+                            constructor: TypeValueConstructor::FloatConstructor,
+                            tyargs: r_tyargs,
+                        },
+                    ) if l_tyargs == r_tyargs => {}
                     _ => {
                         dlogger.log_invalid_binary_op(
                             v.range,
@@ -754,12 +774,27 @@ pub fn typecheck_val_expr_and_patch(
                 let right_type =
                     typecheck_val_expr_and_patch(right_operand, &left_type, dlogger, checker);
 
-                match (left_type, right_type) {
+                match (&left_type, &right_type) {
                     (
-                        TypeValue::Int(Some(lsgn), Some(lsz)),
-                        TypeValue::Int(Some(rsgn), Some(rsz)),
-                    ) if lsgn == rsgn && lsz == rsz => {}
-                    (TypeValue::Float(Some(lsz)), TypeValue::Float(Some(rsz))) if lsz == rsz => {}
+                        TypeValue::Concretization {
+                            constructor: TypeValueConstructor::IntConstructor,
+                            tyargs: l_tyargs,
+                        },
+                        TypeValue::Concretization {
+                            constructor: TypeValueConstructor::IntConstructor,
+                            tyargs: r_tyargs,
+                        },
+                    ) if l_tyargs == r_tyargs => {}
+                    (
+                        TypeValue::Concretization {
+                            constructor: TypeValueConstructor::FloatConstructor,
+                            tyargs: l_tyargs,
+                        },
+                        TypeValue::Concretization {
+                            constructor: TypeValueConstructor::FloatConstructor,
+                            tyargs: r_tyargs,
+                        },
+                    ) if l_tyargs == r_tyargs => {}
                     _ => {
                         dlogger.log_invalid_binary_op(
                             v.range,
@@ -792,12 +827,28 @@ pub fn typecheck_val_expr_and_patch(
                 let right_type =
                     typecheck_val_expr_and_patch(right_operand, &left_type, dlogger, checker);
 
-                match (left_type, right_type) {
+                match (&left_type, &right_type) {
                     (
-                        TypeValue::Int(Some(lsgn), Some(lsz)),
-                        TypeValue::Int(Some(rsgn), Some(rsz)),
-                    ) if lsgn == rsgn && lsz == rsz => {}
-                    (TypeValue::Float(Some(lsz)), TypeValue::Float(Some(rsz))) if lsz == rsz => {}
+                        TypeValue::Concretization {
+                            constructor: TypeValueConstructor::IntConstructor,
+                            tyargs: l_tyargs,
+                        },
+                        TypeValue::Concretization {
+                            constructor: TypeValueConstructor::IntConstructor,
+                            tyargs: r_tyargs,
+                        },
+                    ) if l_tyargs == r_tyargs => {}
+                    (
+                        TypeValue::Concretization {
+                            constructor: TypeValueConstructor::FloatConstructor,
+                            tyargs: l_tyargs,
+                        },
+                        TypeValue::Concretization {
+                            constructor: TypeValueConstructor::FloatConstructor,
+                            tyargs: r_tyargs,
+                        },
+                    ) if l_tyargs == r_tyargs => {}
+                    (TypeValue::Bool, TypeValue::Bool) => {}
                     _ => {
                         dlogger.log_invalid_binary_op(
                             v.range,
@@ -814,53 +865,80 @@ pub fn typecheck_val_expr_and_patch(
         },
 
         hir::ValExpr::ArrayAccess { root, index } => {
-            // let expected_inner = Array
+            let expected_inner_type = TypeValue::Concretization {
+                constructor: TypeValueConstructor::ArrayConstructor,
+                tyargs: vec![expected_type.clone(), TypeValue::Unknown],
+            };
 
-            typecheck_val_expr_and_patch(root, &KindValue::Type, dlogger, checker);
-            typecheck_val_expr_and_patch(index, &KindValue::Int, dlogger, checker);
-            expect_type(v, expected_type, KindValue::Type, dlogger)
+            let usize_type = TypeValue::Concretization {
+                constructor: TypeValueConstructor::IntConstructor,
+                tyargs: vec![TypeValue::BoolLit(false), TypeValue::IntLit(64)],
+            };
+
+            let actual_type =
+                typecheck_val_expr_and_patch(root, &expected_inner_type, dlogger, checker);
+            typecheck_val_expr_and_patch(index, &usize_type, dlogger, checker);
+
+            expect_type(v, expected_type, actual_type, dlogger)
         }
-        hir::ValExpr::FieldAccess { root, .. } => {
-            typecheck_val_expr_and_patch(root, &KindValue::Type, dlogger, checker);
-            expect_type(v, expected_type, KindValue::Type, dlogger)
+        hir::ValExpr::FieldAccess { root, field } => {
+            let inner_type =
+                typecheck_val_expr_and_patch(root, &TypeValue::Unknown, dlogger, checker);
+
+            match inner_type {
+                TypeValue::Struct(fields) => match fields.get(field) {
+                    Some(field_type) => expect_type(v, expected_type, field_type.clone(), dlogger),
+                    None => {
+                        dlogger.log_missing_field(v.range, field);
+                        v.val = hir::ValExpr::Error;
+                        TypeValue::Unknown
+                    }
+                },
+                _ => {
+                    dlogger.log_cannot_access_field_of_non_struct(v.range, &inner_type.to_string());
+                    v.val = hir::ValExpr::Error;
+                    TypeValue::Unknown
+                }
+            }
         }
         hir::ValExpr::Concretization { generic, tyargs } => {
-            let kind_of_generic =
-                typecheck_val_expr_and_patch(generic, &KindValue::Unknown, dlogger, checker);
-            match kind_of_generic {
-                KindValue::Unknown => TypeValue::Unknown,
-                KindValue::Generic {
-                    paramkinds: expected_kinds,
-                    returnkind,
-                } => {
-                    if expected_kinds.len() != tyargs.len() {
-                        dlogger.log_wrong_number_type_args(
-                            v.range,
-                            expected_kinds.len(),
-                            tyargs.len(),
-                        );
-                        v.val = hir::ValExpr::Error;
-                        KindValue::Unknown
-                    } else {
-                        for (tyarg, ref argkind) in std::iter::zip(tyargs, expected_kinds) {
-                            typecheck_type_expr_and_patch(tyarg, argkind, dlogger, checker);
-                        }
-                        expect_type(v, expected_type, *returnkind, dlogger)
-                    }
-                }
-                _ => {
-                    dlogger.log_cannot_be_concretized(v.range);
-                    v.val = hir::ValExpr::Error;
-                    KindValue::Unknown
-                }
-            }
+            // first we evaluate the type of the generic function
+            let generic_val =
+                typecheck_val_expr_and_patch(generic, &TypeValue::Unknown, dlogger, checker);
+            let tyargs = tyargs
+                .iter_mut()
+                .map(|x| typecheck_type_expr_and_patch(x, dlogger, checker))
+                .collect::<Vec<_>>();
+            // attempt to concretize the type (will only work if there are no symbolic variables in the type)
+            concretize_type_expr(&generic_val, tyargs)
         }
         hir::ValExpr::App { fun, args } => {
-            typecheck_val_expr_and_patch(fun, &KindValue::Type, dlogger, checker);
-            for arg in args {
-                typecheck_val_expr_and_patch(arg, &KindValue::Type, dlogger, checker);
+            let fun_ty = typecheck_val_expr_and_patch(fun, &TypeValue::Unknown, dlogger, checker);
+
+            let (paramtys, returnty) = match fun_ty {
+                TypeValue::Fn {
+                    paramtys,
+                    returntype,
+                } => (paramtys, returntype),
+                _ => {
+                    dlogger.log_not_callable(v.range, &fun_ty.to_string());
+                    v.val = hir::ValExpr::Error;
+                    return TypeValue::Unknown;
+                }
+            };
+
+            for (arg, paramty) in std::iter::zip(args, paramtys) {
+                typecheck_val_expr_and_patch(arg, &paramty, dlogger, checker);
             }
-            expect_type(v, expected_type, KindValue::Type, dlogger)
+
+            // mark wrong number of args as errors
+            if args.len() != paramtys.len() {
+                dlogger.log_wrong_number_args(v.range, paramtys.len(), args.len());
+                v.val = hir::ValExpr::Error;
+            }
+
+            // type of the function application
+            expect_type(v, expected_type, *returnty, dlogger)
         }
     }
 }
@@ -885,8 +963,9 @@ pub fn typecheck_block_statement_and_patch(
             typecheck_val_pat_and_patch(pat, &ty, dlogger, checker);
         }
         hir::BlockStatement::Set { place, value } => {
-            typecheck_val_expr_and_patch(place, &KindValue::Type, dlogger, checker);
-            typecheck_val_expr_and_patch(value, &KindValue::Type, dlogger, checker);
+            let dest_ty =
+                typecheck_val_expr_and_patch(place, &TypeValue::Unknown, dlogger, checker);
+            typecheck_val_expr_and_patch(value, &dest_ty, dlogger, checker);
         }
         hir::BlockStatement::IfThen {
             cond,
@@ -926,7 +1005,7 @@ pub fn typecheck_block_statement_and_patch(
             }
         }
         hir::BlockStatement::Do(val) => {
-            typecheck_val_expr_and_patch(val, &KindValue::Type, dlogger, checker);
+            typecheck_val_expr_and_patch(val, &TypeValue::Unit, dlogger, checker);
         }
     }
 }

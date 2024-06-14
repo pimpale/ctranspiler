@@ -169,16 +169,16 @@ impl DiagnosticLogger {
             k => {
                 let expected_str = match k {
                     1 => format_token(Some(&expected_kind[0])),
-                    _ => expected_kind
-                        .into_iter()
-                        .enumerate()
-                        .fold(String::new(), |a, (i, ref x)| match i {
+                    _ => expected_kind.into_iter().enumerate().fold(
+                        String::new(),
+                        |a, (i, ref x)| match i {
                             0 => format!("one of {}", format_token(Some(x))),
                             _ if i == l - 1 => {
                                 format!("{} or {}", a, format_token(Some(x)))
                             }
                             _ => format!("{}, {}", a, format_token(Some(x))),
-                        }),
+                        },
+                    ),
                 };
 
                 format!(
@@ -276,26 +276,22 @@ impl DiagnosticLogger {
         })
     }
 
-    // pub fn log_not_callable<A: Allocator + Clone>(
-    //   &mut self,
-    //   range: Range,
-    //   got_type: &thir::Ty<'_, A>,
-    // ) {
-    //   self.log(Diagnostic {
-    //     range,
-    //     severity: Some(DiagnosticSeverity::ERROR),
-    //     code: Some(NumberOrString::Number(28)),
-    //     code_description: None,
-    //     source: self.source.clone(),
-    //     message: format!(
-    //       "expected function type but found type {}, which is not callable",
-    //       got_type
-    //     ),
-    //     related_information: None,
-    //     tags: None,
-    //     data: None,
-    //   })
-    // }
+    pub fn log_not_callable(&mut self, range: Range, got_type: &str) {
+        self.log(Diagnostic {
+            range,
+            severity: Some(DiagnosticSeverity::ERROR),
+            code: Some(NumberOrString::Number(28)),
+            code_description: None,
+            source: self.source.clone(),
+            message: format!(
+                "expected function type but found type {}, which is not callable",
+                got_type
+            ),
+            related_information: None,
+            tags: None,
+            data: None,
+        })
+    }
 
     pub fn log_unused_label(&mut self, range: Range) {
         self.log(Diagnostic {
@@ -812,11 +808,7 @@ impl DiagnosticLogger {
         let message = if expected == found {
             format!("expected {} arguments, found {}", expected, found)
         } else {
-            format!(
-                "expected {} arguments, found {}",
-                expected,
-                found,
-            )
+            format!("expected {} arguments, found {}", expected, found,)
         };
         self.log(Diagnostic {
             range,
@@ -838,10 +830,7 @@ impl DiagnosticLogger {
             code: Some(NumberOrString::Number(64)),
             code_description: None,
             source: self.source.clone(),
-            message: format!(
-                "expected kind {}, but found a generic",
-                expected_kind
-            ),
+            message: format!("expected kind {}, but found a generic", expected_kind),
             related_information: None,
             tags: None,
             data: None,
@@ -957,6 +946,20 @@ impl DiagnosticLogger {
                 "invalid binary operation `{}` between types {} and {}",
                 op, lhs, rhs
             ),
+            related_information: None,
+            tags: None,
+            data: None,
+        })
+    }
+
+    pub fn log_cannot_access_field_of_non_struct(&mut self, range: Range, found_type: &str) {
+        self.log(Diagnostic {
+            range,
+            severity: Some(DiagnosticSeverity::ERROR),
+            code: Some(NumberOrString::Number(73)),
+            code_description: None,
+            source: self.source.clone(),
+            message: format!("cannot access field of non-struct `{}`", found_type),
             related_information: None,
             tags: None,
             data: None,
