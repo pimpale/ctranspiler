@@ -889,4 +889,77 @@ impl DiagnosticLogger {
             data: None,
         })
     }
+
+    pub fn log_missing_field(&mut self, range: Range, field: &str) {
+        self.log(Diagnostic {
+            range,
+            severity: Some(DiagnosticSeverity::ERROR),
+            code: Some(NumberOrString::Number(68)),
+            code_description: None,
+            source: self.source.clone(),
+            message: format!("field `{}` not in struct", field),
+            related_information: None,
+            tags: None,
+            data: None,
+        })
+    }
+
+    pub fn log_unexpected_field(&mut self, range: Range, field: &str) {
+        self.log(Diagnostic {
+            range,
+            severity: Some(DiagnosticSeverity::ERROR),
+            code: Some(NumberOrString::Number(69)),
+            code_description: None,
+            source: self.source.clone(),
+            message: format!("unexpected field `{}`", field),
+            related_information: None,
+            tags: None,
+            data: None,
+        })
+    }
+
+    pub fn log_cannot_destructure_non_struct(&mut self, range: Range, found_type: &str) {
+        self.log(Diagnostic {
+            range,
+            severity: Some(DiagnosticSeverity::ERROR),
+            code: Some(NumberOrString::Number(70)),
+            code_description: None,
+            source: self.source.clone(),
+            message: format!("cannot destructure non-struct `{}`", found_type),
+            related_information: None,
+            tags: None,
+            data: None,
+        })
+    }
+
+    pub fn log_cannot_new_type(&mut self, range: Range, found_type: &str) {
+        self.log(Diagnostic {
+            range,
+            severity: Some(DiagnosticSeverity::ERROR),
+            code: Some(NumberOrString::Number(71)),
+            code_description: None,
+            source: self.source.clone(),
+            message: format!("cannot new type `{}` (must be symbolic)", found_type),
+            related_information: None,
+            tags: None,
+            data: None,
+        })
+    }
+
+    pub fn log_invalid_binary_op(&mut self, range: Range, op: &str, lhs: &str, rhs: &str) {
+        self.log(Diagnostic {
+            range,
+            severity: Some(DiagnosticSeverity::ERROR),
+            code: Some(NumberOrString::Number(72)),
+            code_description: None,
+            source: self.source.clone(),
+            message: format!(
+                "invalid binary operation `{}` between types {} and {}",
+                op, lhs, rhs
+            ),
+            related_information: None,
+            tags: None,
+            data: None,
+        })
+    }
 }

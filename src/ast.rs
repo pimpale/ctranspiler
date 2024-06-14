@@ -59,7 +59,6 @@ pub enum TypeExpr {
     ArrayConstructorTy,
     SliceConstructorTy,
     IntConstructorTy,
-    UIntConstructorTy,
     FloatConstructorTy,
     // const literals
     Int(BigInt),

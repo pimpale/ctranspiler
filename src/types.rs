@@ -153,7 +153,7 @@ impl std::fmt::Display for TypeValue {
                 (body)
             ),
             TypeValue::Concretization {
-                symbolic_constructor,
+                constructor: symbolic_constructor,
                 tyargs,
             } => write!(
                 f,
@@ -186,6 +186,16 @@ fn print_typaram(typaram: &Augmented<hir::TypePatExpr>) -> String {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+pub enum TypeValueConstructor {
+    SymbolicVariable(usize),
+    RefConstructor,
+    ArrayConstructor,
+    SliceConstructor,
+    IntConstructor,
+    FloatConstructor,
+}
+
+#[derive(Clone, Debug, PartialEq)]
 pub enum TypeValue {
     // An error when parsing
     Unknown,
@@ -198,15 +208,7 @@ pub enum TypeValue {
     ArrayConstructor,
     SliceConstructor,
     IntConstructor,
-    UIntConstructor,
     FloatConstructor,
-    // the constructed type
-    Ref(Box<TypeValue>),
-    Array(Box<TypeValue>, u64),
-    Slice(Box<TypeValue>),
-    Int(u64),
-    UInt(u64),
-    Float(u64),
     // const literals
     IntLit(i64),
     BoolLit(bool),
@@ -228,7 +230,7 @@ pub enum TypeValue {
     },
     // where the type constructor is symbolic
     Concretization {
-        symbolic_constructor: usize,
+        constructor: TypeValueConstructor,
         tyargs: Vec<TypeValue>,
     },
 }
@@ -388,7 +390,7 @@ impl TypeValue {
                 body: Box::new(body.subst(bindings)),
             },
             TypeValue::Concretization {
-                symbolic_constructor,
+                constructor: symbolic_constructor,
                 tyargs,
             } => {
                 // substitute in the arguments
@@ -401,7 +403,7 @@ impl TypeValue {
                     Some(constructor) => concretize_type_expr(constructor, tyargs),
                     // otherwise we just keep the concretization
                     None => TypeValue::Concretization {
-                        symbolic_constructor: *symbolic_constructor,
+                        constructor: *symbolic_constructor,
                         tyargs,
                     },
                 }
@@ -645,11 +647,11 @@ impl TypeValue {
             }
             (
                 Self::Concretization {
-                    symbolic_constructor: l_symbolic_constructor,
+                    constructor: l_symbolic_constructor,
                     tyargs: l_tyargs,
                 },
                 Self::Concretization {
-                    symbolic_constructor: r_symbolic_constructor,
+                    constructor: r_symbolic_constructor,
                     tyargs: r_tyargs,
                 },
             ) => {

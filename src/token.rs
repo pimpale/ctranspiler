@@ -41,7 +41,6 @@ pub enum TokenKind {
     ArrayTy, // Array
     SliceTy, // Slice
     IntTy,   // Int
-    UIntTy,  // UInt
     FloatTy, // Float
     BoolTy,  // Bool
     // Kinds

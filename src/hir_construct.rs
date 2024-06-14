@@ -341,10 +341,6 @@ fn translate_augtypeexpr(
             range,
             val: TypeExpr::IntConstructorTy,
         },
-        ast::TypeExpr::UIntConstructorTy => Augmented {
-            range,
-            val: TypeExpr::UIntConstructorTy,
-        },
         ast::TypeExpr::FloatConstructorTy => Augmented {
             range,
             val: TypeExpr::FloatConstructorTy,

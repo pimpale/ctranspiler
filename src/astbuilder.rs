@@ -631,23 +631,6 @@ fn parse_exact_elseexpr<TkIter: Iterator<Item = Token>>(
     }
 }
 
-// parses an if or panics
-fn parse_exact_valexpr_if<TkIter: Iterator<Item = Token>>(
-    tkiter: &mut PeekMoreIterator<TkIter>,
-    dlogger: &mut DiagnosticLogger,
-) -> Augmented<ValExpr> {
-    let (range, metadata, cond, then_branch, else_branch) = parse_exact_if(tkiter, dlogger);
-    Augmented {
-        metadata,
-        range,
-        val: ValExpr::IfThen {
-            cond,
-            then_branch,
-            else_branch,
-        },
-    }
-}
-
 // parses a bool
 fn parse_exact_valexpr_bool<TkIter: Iterator<Item = Token>>(
     tkiter: &mut PeekMoreIterator<TkIter>,
@@ -745,7 +728,6 @@ fn decide_valexpr_term<TkIter: Iterator<Item = Token>>(
         TokenKind::ParenLeft => Some(parse_exact_valexpr_group::<TkIter>),
         TokenKind::Block => Some(parse_exact_valexpr_block::<TkIter>),
         TokenKind::Case => Some(parse_exact_valexpr_case::<TkIter>),
-        TokenKind::If => Some(parse_exact_valexpr_if::<TkIter>),
         TokenKind::Identifier(_) => Some(parse_exact_valexpr_identifier::<TkIter>),
         _ => None,
     }
@@ -1512,20 +1494,6 @@ fn parse_exact_typeexpr_intty<TkIter: Iterator<Item = Token>>(
     }
 }
 
-// parses an exact uint or panics
-fn parse_exact_typeexpr_uintty<TkIter: Iterator<Item = Token>>(
-    tkiter: &mut PeekMoreIterator<TkIter>,
-    _dlogger: &mut DiagnosticLogger,
-) -> Augmented<TypeExpr> {
-    let metadata = get_metadata(tkiter);
-    let tk = exact_token(tkiter, TokenKind::UIntTy);
-    Augmented {
-        metadata,
-        range: tk.range,
-        val: TypeExpr::UIntConstructorTy,
-    }
-}
-
 // parses an exact float or panics
 fn parse_exact_typeexpr_floatty<TkIter: Iterator<Item = Token>>(
     tkiter: &mut PeekMoreIterator<TkIter>,
@@ -1727,7 +1695,6 @@ pub fn parse_typeexpr_term<TkIter: Iterator<Item = Token>>(
         Some(TokenKind::Identifier(_)) => parse_exact_typeexpr_identifier(tkiter, dlogger),
         Some(TokenKind::BoolTy) => parse_exact_typeexpr_boolty(tkiter, dlogger),
         Some(TokenKind::IntTy) => parse_exact_typeexpr_intty(tkiter, dlogger),
-        Some(TokenKind::UIntTy) => parse_exact_typeexpr_uintty(tkiter, dlogger),
         Some(TokenKind::FloatTy) => parse_exact_typeexpr_floatty(tkiter, dlogger),
         Some(TokenKind::ArrayTy) => parse_exact_typeexpr_arrayty(tkiter, dlogger),
         Some(TokenKind::SliceTy) => parse_exact_typeexpr_slicety(tkiter, dlogger),

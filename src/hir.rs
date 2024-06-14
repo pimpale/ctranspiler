@@ -1,6 +1,7 @@
 use lsp_types::Range;
 use num_bigint::BigInt;
 use num_rational::BigRational;
+use strum::AsRefStr;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Augmented<T> {
@@ -48,7 +49,6 @@ pub enum TypeExpr {
     ArrayConstructorTy,
     SliceConstructorTy,
     IntConstructorTy,
-    UIntConstructorTy,
     FloatConstructorTy,
     // const literals
     Int(BigInt),
@@ -136,7 +136,7 @@ impl std::default::Default for ValPatExpr {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, AsRefStr)]
 pub enum ValBinaryOpKind {
     // Math
     Add,

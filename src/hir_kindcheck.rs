@@ -129,16 +129,7 @@ pub fn kindcheck_type_expr_and_patch(
             v,
             expected_kind,
             KindValue::Generic {
-                paramkinds: vec![KindValue::Int],
-                returnkind: Box::new(KindValue::Type),
-            },
-            dlogger,
-        ),
-        hir::TypeExpr::UIntConstructorTy => expect_kind(
-            v,
-            expected_kind,
-            KindValue::Generic {
-                paramkinds: vec![KindValue::Int],
+                paramkinds: vec![KindValue::Bool, KindValue::Int],
                 returnkind: Box::new(KindValue::Type),
             },
             dlogger,
