@@ -48,12 +48,15 @@ fn expect_type<T>(
 where
     T: std::default::Default,
 {
-    if expected_hint.supports_assign(&actual) {
-        actual
-    } else {
-        dlogger.log_type_mismatch(v.range, &expected_hint.to_string(), &actual.to_string());
-        v.val = T::default();
-        TypeValue::Unknown
+    match (actual, expected_hint) {
+        (actual @ TypeValue::Unknown, _) => actual,
+        (actual, TypeValue::Unknown) => actual,
+        (actual, expected) if &actual == expected => actual,
+        (actual, expected) => {
+            dlogger.log_type_mismatch(v.range, &actual.to_string(), &expected.to_string());
+            v.val = T::default();
+            TypeValue::Unknown
+        }
     }
 }
 
@@ -229,6 +232,7 @@ pub fn typecheck_type_expr_and_patch(
             Ok(i) => TypeValue::IntLit(i),
             Err(e) => {
                 dlogger.log_int_too_large(v.range, 64);
+                v.val = hir::TypeExpr::Error;
                 TypeValue::Unknown
             }
         },
@@ -327,6 +331,7 @@ pub fn typecheck_val_pat_and_patch(
 
             let mut actual_fields = HashMap::new();
 
+            let mut has_error = false;
             for (name, expr) in fields {
                 match expected_fields.remove(&name.val) {
                     Some(expected_type) => {
@@ -337,12 +342,18 @@ pub fn typecheck_val_pat_and_patch(
                     }
                     None => {
                         dlogger.log_unexpected_field(v.range, &name.val);
+                        has_error = true;
                     }
                 }
             }
 
             for (name, _) in expected_fields {
                 dlogger.log_missing_field(v.range, &name);
+                has_error = true;
+            }
+
+            if has_error {
+                v.val = hir::ValPatExpr::Error;
             }
 
             expect_type(v, expected_type, TypeValue::Struct(actual_fields), dlogger)
@@ -480,6 +491,8 @@ pub fn typecheck_val_expr_and_patch(
                     .collect(),
             };
 
+            let mut has_error = false;
+
             let mut actual_fields = HashMap::new();
             for (name, val) in fields {
                 match expected_fields.get(&name.val) {
@@ -490,14 +503,19 @@ pub fn typecheck_val_expr_and_patch(
                         );
                     }
                     None => {
-                        //TODO: delete these fields from the struct literal
                         dlogger.log_unexpected_field(v.range, &name.val.clone());
+                        has_error = true;
                     }
                 }
             }
 
             for (name, expected_type) in expected_fields {
                 dlogger.log_missing_field(v.range, &name);
+                has_error = true;
+            }
+
+            if has_error {
+                v.val = hir::ValExpr::Error;
             }
 
             expect_type(v, expected_type, TypeValue::Struct(actual_fields), dlogger)
@@ -927,13 +945,16 @@ pub fn typecheck_val_expr_and_patch(
                 }
             };
 
+            let args_len = args.len();
+            let paramtys_len = paramtys.len();
+
             for (arg, paramty) in std::iter::zip(args, paramtys) {
                 typecheck_val_expr_and_patch(arg, &paramty, dlogger, checker);
             }
 
             // mark wrong number of args as errors
-            if args.len() != paramtys.len() {
-                dlogger.log_wrong_number_args(v.range, paramtys.len(), args.len());
+            if args_len != paramtys_len {
+                dlogger.log_wrong_number_args(v.range, paramtys_len, args_len);
                 v.val = hir::ValExpr::Error;
             }
 
@@ -994,12 +1015,15 @@ pub fn typecheck_block_statement_and_patch(
             by,
             body,
         } => {
-            typecheck_val_pat_and_patch(pattern, &KindValue::Type, dlogger, checker);
-            typecheck_val_expr_and_patch(start, &KindValue::Type, dlogger, checker);
-            typecheck_val_expr_and_patch(end, &KindValue::Type, dlogger, checker);
+            let ty_hint = typehint_of_val_pat_and_patch(pattern, dlogger, checker);
+            let ty = typecheck_val_expr_and_patch(start, &ty_hint, dlogger, checker);
+            typecheck_val_expr_and_patch(end, &ty, dlogger, checker);
             if let Some(by) = by {
-                typecheck_val_expr_and_patch(by, &KindValue::Type, dlogger, checker);
+                typecheck_val_expr_and_patch(by, &ty, dlogger, checker);
             }
+            
+            typecheck_val_pat_and_patch(pattern, &ty, dlogger, checker);
+
             for statement in body {
                 typecheck_block_statement_and_patch(statement, dlogger, checker);
             }

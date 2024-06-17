@@ -583,14 +583,14 @@ impl DiagnosticLogger {
         })
     }
 
-    pub fn log_type_mismatch(&mut self, range: Range, error: &str) {
+    pub fn log_type_mismatch(&mut self, range: Range, expected_type: &str, found_type: &str) {
         self.log(Diagnostic {
             range,
             severity: Some(DiagnosticSeverity::ERROR),
             code: Some(NumberOrString::Number(48)),
             code_description: None,
             source: self.source.clone(),
-            message: format!("type error: {}", error),
+            message: format!("type error: expected {} but found {}", expected_type, found_type),
             related_information: None,
             tags: None,
             data: None,
