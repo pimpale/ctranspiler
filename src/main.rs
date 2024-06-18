@@ -11,7 +11,6 @@ mod token;
 mod tokenize;
 mod types;
 mod utils;
-mod typecheck;
 
 use std::io::stdin;
 use std::io::Read;
@@ -20,15 +19,20 @@ use astbuilder::construct_ast;
 use dlogger::DiagnosticLog;
 use hir_construct::construct_hir;
 use tokenize::tokenize;
+use typecheck::TypeChecker;
 
 
 fn main() {
     let mut log = DiagnosticLog::new();
+    // read input bytes
     let charstream = stdin().bytes().map_while(|x| x.ok());
+    // lex input
     let tokenstream = tokenize(charstream, log.get_logger(Some(String::from("acnc-lex"))));
-    let ast = construct_ast(tokenstream, log.get_logger(Some(String::from("acnc-ast"))));
-
-    // create and lower hir
+    // parse tokens
+    let ast_filestatement_stream = construct_ast(tokenstream, log.get_logger(Some(String::from("acnc-ast"))));
+    
+    
+    // resolve variables and desugar
     let (
         hir,
         type_name_table,
@@ -40,22 +44,34 @@ fn main() {
         log.get_logger(Some(String::from("acnc-hir (construct)"))),
     );
 
-    // // kindcheck
-    // let type_kind_table = hir_kindcheck::do_kindcheck(
-    //     &mut hir,
-    //     &type_range_table,
-    //     &type_name_table,
-    //     log.get_logger(Some(String::from("acnc-hir (kindcheck)"))),
-    // );
+    // construct typechecking data
+    let typechecker = TypeChecker {
+        type_name_table: &type_name_table,
+        type_range_table: &type_range_table,
+        val_name_table: &val_name_table,
+        val_range_table: &val_range_table,
+        type_kind_table: todo!(),
+        type_type_table: todo!(),
+        val_kind_table: todo!(),
+        val_type_table: todo!(),
+    }
 
-    // // typecheck
-    // let val_kind_table = hir_typecheck::do_typecheck(
-    //     &mut hir,
-    //     &type_range_table,
-    //     &type_name_table,
-    //     &type_kind_table,
-    //     &val_range_table,
-    //     &val_name_table,
-    //     log.get_logger(Some(String::from("acnc-hir (typecheck)"))),
-    // );
+    // kindcheck
+    let type_kind_table = hir_kindcheck::do_kindcheck(
+        &mut hir,
+        &type_range_table,
+        &type_name_table,
+        log.get_logger(Some(String::from("acnc-hir (kindcheck)"))),
+    );
+
+    // typecheck
+    let val_kind_table = hir_typecheck::do_typecheck(
+        &mut hir,
+        &type_range_table,
+        &type_name_table,
+        &type_kind_table,
+        &val_range_table,
+        &val_name_table,
+        log.get_logger(Some(String::from("acnc-hir (typecheck)"))),
+    );
 }

@@ -1295,7 +1295,7 @@ fn parse_exact_blockstatement_use<TkIter: Iterator<Item = Token>>(
     Augmented {
         range,
         metadata,
-        val: BlockStatement::Use { prefix },
+        val: BlockStatement::Use { namespace: prefix },
     }
 }
 
@@ -1670,7 +1670,7 @@ fn parse_exact_typeexpr_generic<TkIter: Iterator<Item = Token>>(
     );
 
     let body = Box::new(parse_typeexpr(tkiter, dlogger));
-    
+
     Augmented {
         metadata,
         range: union_of(generic_tk.range, body.range),
@@ -1924,11 +1924,11 @@ fn parse_exact_filestatement_use<TkIter: Iterator<Item = Token>>(
     tkiter: &mut PeekMoreIterator<TkIter>,
     dlogger: &mut DiagnosticLogger,
 ) -> Augmented<FileStatement> {
-    let (range, metadata, prefix) = parse_exact_use(tkiter, dlogger);
+    let (range, metadata, namespace) = parse_exact_use(tkiter, dlogger);
     Augmented {
         range,
         metadata,
-        val: FileStatement::Use { prefix },
+        val: FileStatement::Use { namespace },
     }
 }
 
@@ -1959,38 +1959,45 @@ pub fn parse_filestatement<TkIter: Iterator<Item = Token>>(
     }
 }
 
-pub fn parse_translationunit<TkIter: Iterator<Item = Token>>(
-    tkiter: &mut PeekMoreIterator<TkIter>,
-    dlogger: &mut DiagnosticLogger,
-) -> TranslationUnit {
-    let mut statements = vec![];
+struct StatementIterator<'a, 'b, Source: Iterator<Item = Token>, Statement> {
+    source: &'a mut PeekMoreIterator<Source>,
+    dlogger: &'b mut DiagnosticLogger,
+    parse_fn: fn(&mut PeekMoreIterator<Source>, &mut DiagnosticLogger) -> Augmented<Statement>,
+}
 
-    let sep_tok = TokenKind::Semicolon;
-
-    loop {
-        // if next token is none, break
-        if tkiter.peek_nth(0).unwrap().kind == None {
-            break;
+impl<'a, 'b, Source: Iterator<Item = Token>, Statement> StatementIterator<'a, 'b, Source, Statement> {
+    fn new(
+        source: &'a mut PeekMoreIterator<Source>,
+        dlogger: &'b mut DiagnosticLogger,
+        parse_fn: fn(&mut PeekMoreIterator<Source>, &mut DiagnosticLogger) -> Augmented<Statement>,
+    ) -> Self {
+        Self {
+            source,
+            dlogger,
+            parse_fn,
         }
-
-        // parse a statement
-        statements.push(parse_filestatement(tkiter, dlogger));
-
-        // parse sep (if it exists)
-        tkiter.next().unwrap();
-        if tkiter.peek_nth(0).unwrap().kind.as_ref() == Some(&sep_tok) {
-            tkiter.next();
-        }
-    }
-
-    TranslationUnit {
-        declarations: statements,
     }
 }
 
-pub fn construct_ast<TkIterSource: IntoIterator<Item = Token>>(
-    tokens: TkIterSource,
-    mut dlogger: DiagnosticLogger,
-) -> TranslationUnit {
-    parse_translationunit(&mut tokens.into_iter().peekmore(), &mut dlogger)
+impl<'a, 'b, Source: Iterator<Item = Token>, Statement> Iterator
+    for StatementIterator<'a, 'b, Source, Statement>
+{
+    type Item = Augmented<Statement>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        // if next token is none, break
+        if self.source.peek_nth(0).unwrap().kind == None {
+            return None;
+        }
+
+        // parse a statement
+        let statement = (self.parse_fn)(&mut self.source, &mut self.dlogger);
+
+        // parse sep (if it exists)
+        if self.source.peek_nth(0).unwrap().kind.as_ref() == Some(&TokenKind::Semicolon) {
+            self.source.next();
+        }
+
+        Some(statement)
+    }
 }

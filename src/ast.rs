@@ -263,7 +263,7 @@ pub enum BlockStatement {
         value: Box<Augmented<ValExpr>>,
     },
     Use {
-        prefix: Identifier,
+        namespace: Identifier,
     },
     Set {
         place: Box<Augmented<ValExpr>>,
@@ -299,17 +299,10 @@ pub enum FileStatement {
         value: Box<Augmented<ValExpr>>,
     },
     Use {
-        prefix: Identifier,
+        namespace: Identifier,
     },
     Namespace {
         namespace: Identifier,
         items: Vec<Augmented<FileStatement>>,
     },
-}
-
-// TODO: add imports
-
-#[derive(Serialize, Deserialize, Clone, Debug)]
-pub struct TranslationUnit {
-    pub declarations: Vec<Augmented<FileStatement>>,
 }

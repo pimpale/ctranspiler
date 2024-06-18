@@ -590,7 +590,10 @@ impl DiagnosticLogger {
             code: Some(NumberOrString::Number(48)),
             code_description: None,
             source: self.source.clone(),
-            message: format!("type error: expected {} but found {}", expected_type, found_type),
+            message: format!(
+                "type error: expected {} but found {}",
+                expected_type, found_type
+            ),
             related_information: None,
             tags: None,
             data: None,

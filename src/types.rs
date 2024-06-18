@@ -10,6 +10,7 @@ pub enum KindValue {
     Float,
     Bool,
     Type,
+    Value,
     Generic {
         paramkinds: Vec<KindValue>,
         returnkind: Box<KindValue>,

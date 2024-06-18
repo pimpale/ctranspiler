@@ -1,8 +1,31 @@
 use crate::dlogger::DiagnosticLogger;
-use crate::hir;
+use crate::hir::{self, Environment};
 use crate::hir::Augmented;
-use crate::typecheck::{evaluate_hir_kind, TypeChecker};
 use crate::types::{KindValue, TypeValue};
+
+pub fn evaluate_hir_kind(kind: &Augmented<hir::KindExpr>) -> KindValue {
+    match &kind.val {
+        hir::KindExpr::Error => KindValue::Unknown,
+        hir::KindExpr::Type => KindValue::Type,
+        hir::KindExpr::Int => KindValue::Int,
+        hir::KindExpr::Float => KindValue::Float,
+        hir::KindExpr::Bool => KindValue::Bool,
+        hir::KindExpr::Constructor {
+            paramkinds,
+            returnkind,
+        } => {
+            let mut paramkinds_out = vec![];
+            for arg in paramkinds.iter() {
+                paramkinds_out.push(evaluate_hir_kind(arg));
+            }
+            KindValue::Generic {
+                paramkinds: paramkinds_out,
+                returnkind: Box::new(evaluate_hir_kind(&returnkind)),
+            }
+        }
+    }
+}
+
 
 pub fn kindhint_of_type_pat(v: &Augmented<hir::TypePatExpr>) -> KindValue {
     match &v.val {
@@ -15,7 +38,7 @@ pub fn kindhint_of_type_pat(v: &Augmented<hir::TypePatExpr>) -> KindValue {
 pub fn kindhint_of_val_pat_and_patch(
     v: &mut Augmented<hir::ValPatExpr>,
     dlogger: &mut DiagnosticLogger,
-    checker: &mut TypeChecker,
+    checker: &mut Environment,
 ) -> KindValue {
     match &mut v.val {
         hir::ValPatExpr::Error => KindValue::Unknown,
@@ -52,7 +75,7 @@ pub fn kindcheck_type_pat_expr_and_patch(
     v: &mut Augmented<hir::TypePatExpr>,
     expected_kind: &KindValue,
     dlogger: &mut DiagnosticLogger,
-    checker: &mut TypeChecker,
+    checker: &mut Environment,
 ) -> KindValue {
     match &mut v.val {
         hir::TypePatExpr::Error => KindValue::Unknown,
@@ -64,13 +87,13 @@ pub fn kindcheck_type_pat_expr_and_patch(
                 KindValue::Unknown
             } else {
                 // otherwise we assign the expected kind to the identifier
-                checker.type_kind_table[*id] = Some(expected_kind.clone());
+                checker.kind_table[*id] = Some(expected_kind.clone());
                 expected_kind.clone()
             }
         }
         hir::TypePatExpr::Typed { kind, id } => {
             let kind = evaluate_hir_kind(kind);
-            checker.type_kind_table[*id] = Some(kind.clone());
+            checker.kind_table[*id] = Some(kind.clone());
             expect_kind(v, expected_kind, kind, dlogger)
         }
     }
@@ -82,7 +105,7 @@ pub fn kindcheck_type_expr_and_patch(
     v: &mut Augmented<hir::TypeExpr>,
     expected_kind: &KindValue,
     dlogger: &mut DiagnosticLogger,
-    checker: &mut TypeChecker,
+    checker: &mut Environment,
 ) -> KindValue {
     match &mut v.val {
         hir::TypeExpr::Error => KindValue::Unknown,
@@ -91,7 +114,7 @@ pub fn kindcheck_type_expr_and_patch(
             expect_kind(
                 v,
                 expected_kind,
-                checker.type_kind_table[id]
+                checker.kind_table[id]
                     .clone()
                     .expect("kind not initialized yet"),
                 dlogger,
@@ -285,7 +308,7 @@ pub fn kindcheck_val_pat_and_patch(
     v: &mut Augmented<hir::ValPatExpr>,
     expected_kind: &KindValue,
     dlogger: &mut DiagnosticLogger,
-    checker: &mut TypeChecker,
+    checker: &mut Environment,
 ) -> KindValue {
     match &mut v.val {
         hir::ValPatExpr::Error => KindValue::Unknown,
@@ -307,7 +330,7 @@ pub fn kindcheck_val_pat_and_patch(
                 KindValue::Unknown
             } else {
                 // otherwise we assign the expected kind to the identifier
-                checker.val_kind_table[*id] = Some(expected_kind.clone());
+                checker.kind_table[*id] = Some(expected_kind.clone());
                 expected_kind.clone()
             }
         }
@@ -333,7 +356,7 @@ pub fn kindcheck_case_target_expr_and_patch(
     v: &mut Augmented<hir::CaseTargetExpr>,
     expected_kind: &KindValue,
     dlogger: &mut DiagnosticLogger,
-    checker: &mut TypeChecker,
+    checker: &mut Environment,
 ) -> KindValue {
     match &mut v.val {
         hir::CaseTargetExpr::Error => KindValue::Unknown,
@@ -349,12 +372,12 @@ pub fn kindcheck_val_expr_and_patch(
     v: &mut Augmented<hir::ValExpr>,
     expected_kind: &KindValue,
     dlogger: &mut DiagnosticLogger,
-    checker: &mut TypeChecker,
+    checker: &mut Environment,
 ) -> KindValue {
     match &mut v.val {
         hir::ValExpr::Error => KindValue::Unknown,
         hir::ValExpr::Identifier(id) => {
-            let actual_kind = checker.val_kind_table[*id]
+            let actual_kind = checker.kind_table[*id]
                 .clone()
                 .expect("kind not initialized yet");
             expect_kind(v, expected_kind, actual_kind, dlogger)
@@ -543,10 +566,11 @@ pub fn kindcheck_val_expr_and_patch(
 pub fn kindcheck_block_statement_and_patch(
     v: &mut Augmented<hir::BlockStatement>,
     dlogger: &mut DiagnosticLogger,
-    checker: &mut TypeChecker,
+    checker: &mut Environment,
 ) {
     match &mut v.val {
         hir::BlockStatement::Error => {}
+        hir::BlockStatement::NoOp => {}
         hir::BlockStatement::TypeDef { value, typat } => {
             // get hint from the type pattern
             let kind_hint = kindhint_of_type_pat(typat);
@@ -611,7 +635,7 @@ pub fn kindcheck_block_statement_and_patch(
 pub fn kindcheck_file_statement_and_patch(
     v: &mut Augmented<hir::FileStatement>,
     dlogger: &mut DiagnosticLogger,
-    checker: &mut TypeChecker,
+    checker: &mut Environment,
 ) {
     match &mut v.val {
         hir::FileStatement::Error => {}

@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::hash::Hash;
 
 use indexmap::IndexMap;
 use lsp_types::Range;
@@ -7,123 +8,42 @@ use crate::ast;
 use crate::dlogger::DiagnosticLogger;
 use crate::hir::*;
 
-struct Environment {
-    dlogger: DiagnosticLogger,
-    prefixes: Vec<String>,
-    use_prefixes: Vec<IndexMap<String, Range>>,
-    // the global identifier tables
-    type_range_table: Vec<Range>,
-    type_name_table: Vec<String>,
-    val_range_table: Vec<Range>,
-    val_name_table: Vec<String>,
-    // these are the names that are in scope
-    type_names_in_scope: Vec<HashMap<String, usize>>,
-    val_names_in_scope: Vec<HashMap<String, usize>>,
-}
-
-fn get_if_in_scope<'a, T>(
-    name: &str,
-    scopes: &'a Vec<HashMap<String, T>>,
-    prefixes: &'a Vec<IndexMap<String, Range>>,
-) -> Option<&'a T> {
-    for (prefix, _) in prefixes.iter().flatten().rev() {
-        let prefixed_name = [prefix.clone(), name.to_string()].concat();
-        for scope in scopes.iter().rev() {
-            if let Some(val) = scope.get(&prefixed_name) {
-                return Some(val);
-            }
-        }
-    }
-    return None;
-}
-
-fn range_if_dupe<'a>(
-    name: &str,
-    current_scope: &Vec<HashMap<String, usize>>,
-    range_table: &'a Vec<Range>,
-) -> Option<&'a Range> {
-    let id = current_scope.last().unwrap().get(name);
-    match id {
-        Some(id) => Some(&range_table[*id]),
-        None => None,
-    }
-}
-
-fn range_if_prefix_dupe<'a>(
-    name: &str,
-    scopes: &'a Vec<IndexMap<String, Range>>,
-) -> Option<&'a Range> {
-    for scope in scopes.iter().rev() {
-        if let Some(val) = scope.get(name) {
-            return Some(val);
-        }
-    }
-    return None;
-}
-
 impl Environment {
-    fn introduce_type_identifier(
+    fn introduce_identifier(
         &mut self,
         ast::Identifier { identifier, range }: ast::Identifier,
-        should_prefix: bool,
+        dlogger: &mut DiagnosticLogger,
     ) -> Option<usize> {
         match identifier {
             Some(identifier) => {
-                let identifier = if should_prefix {
-                    [self.prefixes.concat(), identifier].concat()
-                } else {
-                    identifier
-                };
-                if let Some(previous_range) = range_if_dupe(
-                    &identifier,
-                    &self.type_names_in_scope,
-                    &self.type_range_table,
-                ) {
-                    self.dlogger
-                        .log_duplicate_identifier(range, *previous_range, &identifier);
-                    None
-                } else {
-                    let id = self.type_name_table.len();
-                    self.type_names_in_scope
-                        .last_mut()
-                        .unwrap()
-                        .insert(identifier.clone(), id);
-                    self.type_name_table.push(identifier.clone());
-                    self.type_range_table.push(range);
-                    Some(id)
-                }
-            }
-            None => None,
-        }
-    }
-
-    fn introduce_val_identifier(
-        &mut self,
-        ast::Identifier { identifier, range }: ast::Identifier,
-        should_prefix: bool,
-    ) -> Option<usize> {
-        match identifier {
-            Some(identifier) => {
-                let identifier = if should_prefix {
-                    [self.prefixes.concat(), identifier].concat()
-                } else {
-                    identifier
-                };
-
-                if let Some(previous_range) =
-                    range_if_dupe(&identifier, &self.val_names_in_scope, &self.val_range_table)
+                if let Some(previous_range) = self
+                    .names_in_scope
+                    .iter()
+                    .rev()
+                    .flat_map(|scope| match scope.get(&identifier) {
+                        Some(Name::Value(id)) => Some(self.range_table[*id]),
+                        _ => None,
+                    })
+                    .next()
                 {
-                    self.dlogger
-                        .log_duplicate_identifier(range, *previous_range, &identifier);
+                    dlogger.log_duplicate_identifier(range, previous_range, &identifier);
                     None
                 } else {
-                    let id = self.val_name_table.len();
-                    self.val_names_in_scope
+                    let id = self.name_table.len();
+                    self.names_in_scope
                         .last_mut()
                         .unwrap()
-                        .insert(identifier.clone(), id);
-                    self.val_name_table.push(identifier.clone());
-                    self.val_range_table.push(range);
+                        .insert(identifier.clone(), Name::Value(id));
+                    self.name_table.push(
+                        [
+                            self.namespaces.last().unwrap(),
+                            [identifier.clone()].as_slice(),
+                        ]
+                        .concat(),
+                    );
+                    self.range_table.push(range);
+                    self.kind_table.push(None);
+                    self.type_table.push(None);
                     Some(id)
                 }
             }
@@ -131,40 +51,49 @@ impl Environment {
         }
     }
 
-    fn lookup_type_identifier(&mut self, identifier: ast::Identifier) -> Option<usize> {
+    fn use_namespace(&mut self, identifier: ast::Identifier, dlogger: &mut DiagnosticLogger) {
         match &identifier.identifier {
-            Some(identifier_name) => {
-                if let Some(id) = get_if_in_scope(
-                    identifier_name,
-                    &self.type_names_in_scope,
-                    &self.use_prefixes,
-                ) {
-                    Some(*id)
-                } else {
-                    self.dlogger
-                        .log_unknown_identifier(identifier.range, identifier_name);
-                    None
+            Some(identifier_name) => match self
+                .names_in_scope
+                .iter()
+                .rev()
+                .flat_map(|scope| match scope.get(identifier_name).cloned() {
+                    Some(Name::Namespace(v)) => Some(v),
+                    _ => None,
+                })
+                .next()
+            {
+                Some(id) => self.names_in_scope.last_mut().unwrap().extend(id),
+                None => {
+                    dlogger.log_unknown_identifier(identifier.range, identifier_name);
                 }
-            }
-            None => None,
+            },
+            None => {}
         }
     }
 
-    fn lookup_val_identifier(&mut self, identifier: ast::Identifier) -> Option<usize> {
+    fn lookup_identifier(
+        &self,
+        identifier: ast::Identifier,
+        dlogger: &mut DiagnosticLogger,
+    ) -> Option<usize> {
         match &identifier.identifier {
-            Some(identifier_name) => {
-                if let Some(id) = get_if_in_scope(
-                    identifier_name,
-                    &self.val_names_in_scope,
-                    &self.use_prefixes,
-                ) {
-                    Some(*id)
-                } else {
-                    self.dlogger
-                        .log_unknown_identifier(identifier.range, identifier_name);
+            Some(identifier_name) => match self
+                .names_in_scope
+                .iter()
+                .rev()
+                .flat_map(|scope| match scope.get(identifier_name) {
+                    Some(Name::Value(id)) => Some(id),
+                    _ => None,
+                })
+                .next()
+            {
+                Some(id) => Some(*id),
+                None => {
+                    dlogger.log_unknown_identifier(identifier.range, identifier_name);
                     None
                 }
-            }
+            },
             None => None,
         }
     }
@@ -173,18 +102,20 @@ impl Environment {
 fn tr_aug<T, U>(
     x: ast::Augmented<T>,
     env: &mut Environment,
-    f: impl Fn(T, &mut Environment) -> U,
+    dlogger: &mut DiagnosticLogger,
+    f: impl Fn(T, &mut Environment, &mut DiagnosticLogger) -> U,
 ) -> Augmented<U> {
     Augmented {
         range: x.range,
-        val: f(x.val, env),
+        val: f(x.val, env, dlogger),
     }
 }
 
 fn translate_augstructitemexpr<T, U>(
-    lower: impl Fn(ast::Augmented<T>, &mut Environment) -> Augmented<U>,
-    replace_eponymous: impl Fn(ast::Identifier, &mut Environment) -> U,
+    mut lower: impl FnMut(ast::Augmented<T>, &mut Environment, &mut DiagnosticLogger) -> Augmented<U>,
+    mut replace_eponymous: impl FnMut(ast::Identifier, &mut Environment, &mut DiagnosticLogger) -> U,
     env: &mut Environment,
+    dlogger: &mut DiagnosticLogger,
     items: Vec<ast::Augmented<ast::StructItemExpr<T>>>,
 ) -> Vec<(Augmented<String>, Augmented<U>)> {
     let mut identifier_ranges: IndexMap<String, Range> = IndexMap::new();
@@ -197,8 +128,7 @@ fn translate_augstructitemexpr<T, U>(
                 range: identifier_range,
             }) => {
                 if let Some(preexisting_range) = identifier_ranges.get(&identifier) {
-                    env.dlogger
-                        .log_duplicate_field_name(range, *preexisting_range, &identifier);
+                    dlogger.log_duplicate_field_name(range, *preexisting_range, &identifier);
                 } else {
                     out_items.push((
                         Augmented {
@@ -213,6 +143,7 @@ fn translate_augstructitemexpr<T, U>(
                                     range: identifier_range,
                                 },
                                 env,
+                                dlogger,
                             ),
                         },
                     ));
@@ -228,8 +159,7 @@ fn translate_augstructitemexpr<T, U>(
                 expr,
             } => {
                 if let Some(preexisting_range) = identifier_ranges.get(&identifier) {
-                    env.dlogger
-                        .log_duplicate_field_name(range, *preexisting_range, &identifier);
+                    dlogger.log_duplicate_field_name(range, *preexisting_range, &identifier);
                 } else {
                     identifier_ranges.insert(identifier.clone(), identifier_range);
                     out_items.push((
@@ -237,7 +167,7 @@ fn translate_augstructitemexpr<T, U>(
                             range: identifier_range,
                             val: identifier,
                         },
-                        lower(*expr, env),
+                        lower(*expr, env, dlogger),
                     ));
                 }
             }
@@ -250,11 +180,16 @@ fn translate_augstructitemexpr<T, U>(
 fn translate_augkindexpr(
     k: ast::Augmented<ast::KindExpr>,
     env: &mut Environment,
+    dlogger: &mut DiagnosticLogger,
 ) -> Augmented<KindExpr> {
-    tr_aug(k, env, translate_kindexpr)
+    tr_aug(k, env, dlogger, translate_kindexpr)
 }
 
-fn translate_kindexpr(k: ast::KindExpr, env: &mut Environment) -> KindExpr {
+fn translate_kindexpr(
+    k: ast::KindExpr,
+    env: &mut Environment,
+    dlogger: &mut DiagnosticLogger,
+) -> KindExpr {
     match k {
         ast::KindExpr::Error => KindExpr::Error,
         ast::KindExpr::Type => KindExpr::Type,
@@ -264,9 +199,9 @@ fn translate_kindexpr(k: ast::KindExpr, env: &mut Environment) -> KindExpr {
         ast::KindExpr::Generic { args, returnkind } => KindExpr::Constructor {
             paramkinds: args
                 .into_iter()
-                .map(|k| translate_augkindexpr(k, env))
+                .map(|k| translate_augkindexpr(k, env, dlogger))
                 .collect(),
-            returnkind: Box::new(translate_augkindexpr(*returnkind, env)),
+            returnkind: Box::new(translate_augkindexpr(*returnkind, env, dlogger)),
         },
     }
 }
@@ -274,7 +209,7 @@ fn translate_kindexpr(k: ast::KindExpr, env: &mut Environment) -> KindExpr {
 fn translate_augtypepatexpr(
     ast::Augmented { range, val, .. }: ast::Augmented<ast::TypePatExpr>,
     env: &mut Environment,
-    should_prefix: bool,
+    dlogger: &mut DiagnosticLogger,
 ) -> Augmented<TypePatExpr> {
     match val {
         ast::TypePatExpr::Error => Augmented {
@@ -283,17 +218,17 @@ fn translate_augtypepatexpr(
         },
         ast::TypePatExpr::Typed { identifier, kind } => Augmented {
             range,
-            val: match env.introduce_type_identifier(identifier, should_prefix) {
+            val: match env.introduce_identifier(identifier, dlogger) {
                 Some(id) => TypePatExpr::Typed {
                     id,
-                    kind: Box::new(tr_aug(*kind, env, translate_kindexpr)),
+                    kind: Box::new(tr_aug(*kind, env, dlogger, translate_kindexpr)),
                 },
                 None => TypePatExpr::Error,
             },
         },
         ast::TypePatExpr::Identifier(identifier) => Augmented {
             range,
-            val: match env.introduce_type_identifier(identifier, should_prefix) {
+            val: match env.introduce_identifier(identifier, dlogger) {
                 Some(id) => TypePatExpr::Identifier(id),
                 None => TypePatExpr::Error,
             },
@@ -308,6 +243,7 @@ fn translate_augtypeexpr(
         val,
     }: ast::Augmented<ast::TypeExpr>,
     env: &mut Environment,
+    dlogger: &mut DiagnosticLogger,
 ) -> Augmented<TypeExpr> {
     match val {
         ast::TypeExpr::Error => Augmented {
@@ -316,7 +252,7 @@ fn translate_augtypeexpr(
         },
         ast::TypeExpr::Identifier(identifier) => Augmented {
             range,
-            val: match env.lookup_type_identifier(identifier) {
+            val: match env.lookup_identifier(identifier, dlogger) {
                 Some(id) => TypeExpr::Identifier(id),
                 None => TypeExpr::Error,
             },
@@ -364,18 +300,19 @@ fn translate_augtypeexpr(
                     range,
                     val: TypeExpr::RefConstructorTy,
                 }),
-                tyargs: vec![translate_augtypeexpr(*t, env)],
+                tyargs: vec![translate_augtypeexpr(*t, env, dlogger)],
             },
         },
         ast::TypeExpr::Struct(items) => Augmented {
             range,
             val: TypeExpr::Struct(translate_augstructitemexpr(
                 translate_augtypeexpr,
-                |id, env| match env.lookup_type_identifier(id) {
+                |id, env, dlogger| match env.lookup_identifier(id, dlogger) {
                     Some(id) => TypeExpr::Identifier(id),
                     None => TypeExpr::Error,
                 },
                 env,
+                dlogger,
                 items,
             )),
         },
@@ -383,11 +320,12 @@ fn translate_augtypeexpr(
             range,
             val: TypeExpr::Enum(translate_augstructitemexpr(
                 translate_augtypeexpr,
-                |id, env| match env.lookup_type_identifier(id) {
+                |id, env, dlogger| match env.lookup_identifier(id, dlogger) {
                     Some(id) => TypeExpr::Identifier(id),
                     None => TypeExpr::Error,
                 },
                 env,
+                dlogger,
                 items,
             )),
         },
@@ -395,15 +333,16 @@ fn translate_augtypeexpr(
             range,
             val: TypeExpr::Union(translate_augstructitemexpr(
                 translate_augtypeexpr,
-                |id, env| match env.lookup_type_identifier(id) {
+                |id, env, dlogger| match env.lookup_identifier(id, dlogger) {
                     Some(id) => TypeExpr::Identifier(id),
                     None => TypeExpr::Error,
                 },
                 env,
+                dlogger,
                 items,
             )),
         },
-        ast::TypeExpr::Group(t) => translate_augtypeexpr(*t, env),
+        ast::TypeExpr::Group(t) => translate_augtypeexpr(*t, env, dlogger),
         ast::TypeExpr::Generic {
             params,
             returnkind,
@@ -413,19 +352,19 @@ fn translate_augtypeexpr(
             val: TypeExpr::Generic {
                 params: params
                     .into_iter()
-                    .map(|x| translate_augtypepatexpr(x, env, false))
+                    .map(|x| translate_augtypepatexpr(x, env, dlogger))
                     .collect(),
-                returnkind: returnkind.map(|rk| Box::new(translate_augkindexpr(*rk, env))),
-                body: Box::new(translate_augtypeexpr(*body, env)),
+                returnkind: returnkind.map(|rk| Box::new(translate_augkindexpr(*rk, env, dlogger))),
+                body: Box::new(translate_augtypeexpr(*body, env, dlogger)),
             },
         },
         ast::TypeExpr::Concretization { root, tyargs } => Augmented {
             range,
             val: TypeExpr::Concretization {
-                genericty: Box::new(translate_augtypeexpr(*root, env)),
+                genericty: Box::new(translate_augtypeexpr(*root, env, dlogger)),
                 tyargs: tyargs
                     .into_iter()
-                    .map(|x| translate_augtypeexpr(x, env))
+                    .map(|x| translate_augtypeexpr(x, env, dlogger))
                     .collect(),
             },
         },
@@ -434,9 +373,9 @@ fn translate_augtypeexpr(
             val: TypeExpr::Fn {
                 paramtys: paramtys
                     .into_iter()
-                    .map(|x| translate_augtypeexpr(x, env))
+                    .map(|x| translate_augtypeexpr(x, env, dlogger))
                     .collect(),
-                returnty: Box::new(translate_augtypeexpr(*returnty, env)),
+                returnty: Box::new(translate_augtypeexpr(*returnty, env, dlogger)),
             },
         },
     }
@@ -445,7 +384,7 @@ fn translate_augtypeexpr(
 fn translate_augpatexpr(
     ast::Augmented { range, val, .. }: ast::Augmented<ast::ValPatExpr>,
     env: &mut Environment,
-    should_prefix: bool,
+    dlogger: &mut DiagnosticLogger,
 ) -> Augmented<ValPatExpr> {
     match val {
         ast::ValPatExpr::Error => Augmented {
@@ -461,7 +400,7 @@ fn translate_augpatexpr(
             mutable,
         } => Augmented {
             range,
-            val: match env.introduce_val_identifier(identifier, should_prefix) {
+            val: match env.introduce_identifier(identifier, dlogger) {
                 Some(id) => ValPatExpr::Identifier { id, mutable },
                 None => ValPatExpr::Error,
             },
@@ -469,39 +408,44 @@ fn translate_augpatexpr(
         ast::ValPatExpr::StructLiteral(items) => Augmented {
             range,
             val: ValPatExpr::StructLiteral(translate_augstructitemexpr(
-                |x, env| translate_augpatexpr(x, env, should_prefix),
-                |id, env| match env.introduce_val_identifier(id, should_prefix) {
+                |x, env, dlogger| translate_augpatexpr(x, env, dlogger),
+                |id, env, dlogger| match env.introduce_identifier(id, dlogger) {
                     Some(id) => ValPatExpr::Identifier { mutable: false, id },
                     None => ValPatExpr::Error,
                 },
                 env,
+                dlogger,
                 items,
             )),
         },
         ast::ValPatExpr::Typed { pat, ty } => Augmented {
             range,
             val: ValPatExpr::Typed {
-                pat: Box::new(translate_augpatexpr(*pat, env, should_prefix)),
-                ty: Box::new(translate_augtypeexpr(*ty, env)),
+                pat: Box::new(translate_augpatexpr(*pat, env, dlogger)),
+                ty: Box::new(translate_augtypeexpr(*ty, env, dlogger)),
             },
         },
         ast::ValPatExpr::New { ty, pat } => Augmented {
             range,
             val: ValPatExpr::New {
-                ty: Box::new(translate_augtypeexpr(*ty, env)),
-                pat: Box::new(translate_augpatexpr(*pat, env, should_prefix)),
+                ty: Box::new(translate_augtypeexpr(*ty, env, dlogger)),
+                pat: Box::new(translate_augpatexpr(*pat, env, dlogger)),
             },
         },
     }
 }
 
-fn translate_casetargetexpr(c: ast::CaseTargetExpr, env: &mut Environment) -> CaseTargetExpr {
+fn translate_casetargetexpr(
+    c: ast::CaseTargetExpr,
+    env: &mut Environment,
+    dlogger: &mut DiagnosticLogger,
+) -> CaseTargetExpr {
     match c {
         ast::CaseTargetExpr::Error => CaseTargetExpr::Error,
         ast::CaseTargetExpr::Bool(b) => CaseTargetExpr::Bool(b),
         ast::CaseTargetExpr::Int(i) => CaseTargetExpr::Int(i),
         ast::CaseTargetExpr::PatExpr(pat) => {
-            CaseTargetExpr::PatExpr(Box::new(translate_augpatexpr(*pat, env, false)))
+            CaseTargetExpr::PatExpr(Box::new(translate_augpatexpr(*pat, env, dlogger)))
         }
     }
 }
@@ -509,29 +453,31 @@ fn translate_casetargetexpr(c: ast::CaseTargetExpr, env: &mut Environment) -> Ca
 fn translate_caseexpr(
     c: ast::CaseExpr,
     env: &mut Environment,
+    dlogger: &mut DiagnosticLogger,
 ) -> (Augmented<CaseTargetExpr>, Augmented<ValExpr>) {
     (
-        tr_aug(*c.target, env, translate_casetargetexpr),
-        translate_augvalexpr(*c.body, env),
+        tr_aug(*c.target, env, dlogger, translate_casetargetexpr),
+        translate_augvalexpr(*c.body, env, dlogger),
     )
 }
 
 fn translate_augelseexpr(
     ast::Augmented { val, range, .. }: ast::Augmented<ast::ElseExpr>,
     env: &mut Environment,
+    dlogger: &mut DiagnosticLogger,
 ) -> Vec<Augmented<BlockStatement>> {
     match val {
         ast::ElseExpr::Error => vec![],
-        ast::ElseExpr::Else(body) => translate_blockexpr_statement(body.val, env),
+        ast::ElseExpr::Else(body) => translate_blockexpr_statement(body.val, env, dlogger),
         ast::ElseExpr::Elif {
             cond,
             then_branch,
             else_branch,
         } => {
-            let cond = Box::new(translate_augvalexpr(*cond, env));
-            let then_branch = translate_blockexpr_statement(then_branch.val, env);
+            let cond = Box::new(translate_augvalexpr(*cond, env, dlogger));
+            let then_branch = translate_blockexpr_statement(then_branch.val, env, dlogger);
             let else_branch = match else_branch {
-                Some(else_branch) => translate_augelseexpr(*else_branch, env),
+                Some(else_branch) => translate_augelseexpr(*else_branch, env, dlogger),
                 None => vec![],
             };
 
@@ -550,6 +496,7 @@ fn translate_augelseexpr(
 fn translate_augvalexpr(
     ast::Augmented { range, val, .. }: ast::Augmented<ast::ValExpr>,
     env: &mut Environment,
+    dlogger: &mut DiagnosticLogger,
 ) -> Augmented<ValExpr> {
     match val {
         ast::ValExpr::Error => Augmented {
@@ -574,21 +521,22 @@ fn translate_augvalexpr(
         },
         ast::ValExpr::Ref(v) => Augmented {
             range,
-            val: ValExpr::Ref(Box::new(translate_augvalexpr(*v, env))),
+            val: ValExpr::Ref(Box::new(translate_augvalexpr(*v, env, dlogger))),
         },
         ast::ValExpr::Deref(v) => Augmented {
             range,
-            val: ValExpr::Deref(Box::new(translate_augvalexpr(*v, env))),
+            val: ValExpr::Deref(Box::new(translate_augvalexpr(*v, env, dlogger))),
         },
         ast::ValExpr::StructLiteral(items) => Augmented {
             range,
             val: ValExpr::StructLiteral(translate_augstructitemexpr(
-                |x, env| translate_augvalexpr(x, env),
-                |id, env| match env.lookup_val_identifier(id) {
+                |x, env, dlogger| translate_augvalexpr(x, env, dlogger),
+                |id, env, dlogger| match env.lookup_identifier(id, dlogger) {
                     Some(id) => ValExpr::Identifier(id),
                     None => ValExpr::Error,
                 },
                 env,
+                dlogger,
                 items,
             )),
         },
@@ -597,8 +545,8 @@ fn translate_augvalexpr(
             left_operand,
             right_operand,
         } => {
-            let left_operand = Box::new(translate_augvalexpr(*left_operand, env));
-            let right_operand = Box::new(translate_augvalexpr(*right_operand, env));
+            let left_operand = Box::new(translate_augvalexpr(*left_operand, env, dlogger));
+            let right_operand = Box::new(translate_augvalexpr(*right_operand, env, dlogger));
             let val = match op {
                 ast::ValBinaryOpKind::Pipe => ValExpr::App {
                     fun: right_operand,
@@ -674,10 +622,10 @@ fn translate_augvalexpr(
             Augmented { range, val }
         }
         ast::ValExpr::CaseOf { expr, cases } => {
-            let expr = Box::new(translate_augvalexpr(*expr, env));
+            let expr = Box::new(translate_augvalexpr(*expr, env, dlogger));
             let cases = cases
                 .into_iter()
-                .map(|x| translate_caseexpr(x.val, env))
+                .map(|x| translate_caseexpr(x.val, env, dlogger))
                 .collect();
             Augmented {
                 range,
@@ -686,21 +634,21 @@ fn translate_augvalexpr(
         }
         ast::ValExpr::Block(b) => Augmented {
             range,
-            val: translate_blockexpr_val(b.val, env),
+            val: translate_blockexpr_val(b.val, env, dlogger),
         },
-        ast::ValExpr::Group(v) => translate_augvalexpr(*v, env),
+        ast::ValExpr::Group(v) => translate_augvalexpr(*v, env, dlogger),
         ast::ValExpr::Array(items) => Augmented {
             range,
             val: ValExpr::ArrayLiteral(
                 items
                     .into_iter()
-                    .map(|x| translate_augvalexpr(x, env))
+                    .map(|x| translate_augvalexpr(x, env, dlogger))
                     .collect(),
             ),
         },
         ast::ValExpr::Identifier(i) => Augmented {
             range,
-            val: match env.lookup_val_identifier(i) {
+            val: match env.lookup_identifier(i, dlogger) {
                 Some(id) => ValExpr::Identifier(id),
                 None => ValExpr::Error,
             },
@@ -712,28 +660,26 @@ fn translate_augvalexpr(
             body,
         } => {
             // introduce new type and val scope
-            env.type_names_in_scope.push(HashMap::new());
-            env.val_names_in_scope.push(HashMap::new());
+            env.names_in_scope.push(HashMap::new());
 
             // insert typarams into scope
             let typarams = typarams
                 .into_iter()
-                .map(|x| translate_augtypepatexpr(x, env, false))
+                .map(|x| translate_augtypepatexpr(x, env, dlogger))
                 .collect();
 
             // insert params into scope
             let params = params
                 .into_iter()
-                .map(|x| translate_augpatexpr(x, env, false))
+                .map(|x| translate_augpatexpr(x, env, dlogger))
                 .collect();
 
-            let returnty = returnty.map(|rt| Box::new(translate_augtypeexpr(*rt, env)));
+            let returnty = returnty.map(|rt| Box::new(translate_augtypeexpr(*rt, env, dlogger)));
 
-            let body = Box::new(translate_augvalexpr(*body, env));
+            let body = Box::new(translate_augvalexpr(*body, env, dlogger));
 
             // end type and val scope
-            env.val_names_in_scope.pop();
-            env.type_names_in_scope.pop();
+            env.names_in_scope.pop();
 
             Augmented {
                 range,
@@ -757,22 +703,20 @@ fn translate_augvalexpr(
             body,
         } => {
             // introduce new type and val scope
-            env.type_names_in_scope.push(HashMap::new());
-            env.val_names_in_scope.push(HashMap::new());
+            env.names_in_scope.push(HashMap::new());
 
             // insert params into scope
             let params = params
                 .into_iter()
-                .map(|x| translate_augpatexpr(x, env, false))
+                .map(|x| translate_augpatexpr(x, env, dlogger))
                 .collect();
 
-            let returnty = returnty.map(|rt| Box::new(translate_augtypeexpr(*rt, env)));
+            let returnty = returnty.map(|rt| Box::new(translate_augtypeexpr(*rt, env, dlogger)));
 
-            let body = Box::new(translate_augvalexpr(*body, env));
+            let body = Box::new(translate_augvalexpr(*body, env, dlogger));
 
             // end type and val scope
-            env.val_names_in_scope.pop();
-            env.type_names_in_scope.pop();
+            env.names_in_scope.pop();
 
             let val = ValExpr::FnDef {
                 params,
@@ -785,40 +729,40 @@ fn translate_augvalexpr(
         ast::ValExpr::Concretize { root, tyargs } => Augmented {
             range,
             val: ValExpr::Concretization {
-                generic: Box::new(translate_augvalexpr(*root, env)),
+                generic: Box::new(translate_augvalexpr(*root, env, dlogger)),
                 tyargs: tyargs
                     .into_iter()
-                    .map(|x| translate_augtypeexpr(x, env))
+                    .map(|x| translate_augtypeexpr(x, env, dlogger))
                     .collect(),
             },
         },
         ast::ValExpr::App { root, args } => Augmented {
             range,
             val: ValExpr::App {
-                fun: Box::new(translate_augvalexpr(*root, env)),
+                fun: Box::new(translate_augvalexpr(*root, env, dlogger)),
                 args: args
                     .into_iter()
-                    .map(|x| translate_augvalexpr(x, env))
+                    .map(|x| translate_augvalexpr(x, env, dlogger))
                     .collect(),
             },
         },
         ast::ValExpr::ArrayAccess { root, index } => Augmented {
             range,
             val: ValExpr::ArrayAccess {
-                root: Box::new(translate_augvalexpr(*root, env)),
-                index: Box::new(translate_augvalexpr(*index, env)),
+                root: Box::new(translate_augvalexpr(*root, env, dlogger)),
+                index: Box::new(translate_augvalexpr(*index, env, dlogger)),
             },
         },
         ast::ValExpr::FieldAccess { root, field } => Augmented {
             range,
             val: ValExpr::FieldAccess {
-                root: Box::new(translate_augvalexpr(*root, env)),
+                root: Box::new(translate_augvalexpr(*root, env, dlogger)),
                 field,
             },
         },
         ast::ValExpr::New { ty, val } => {
-            let ty = Box::new(translate_augtypeexpr(*ty, env));
-            let val = Box::new(translate_augvalexpr(*val, env));
+            let ty = Box::new(translate_augtypeexpr(*ty, env, dlogger));
+            let val = Box::new(translate_augvalexpr(*val, env, dlogger));
             Augmented {
                 range,
                 val: ValExpr::New { ty, val },
@@ -830,82 +774,69 @@ fn translate_augvalexpr(
 fn translate_blockexpr_statement(
     b: ast::BlockExpr,
     env: &mut Environment,
+    dlogger: &mut DiagnosticLogger,
 ) -> Vec<Augmented<BlockStatement>> {
     // introduce new scope
-    env.type_names_in_scope.push(HashMap::new());
-    env.val_names_in_scope.push(HashMap::new());
-    env.use_prefixes.push(IndexMap::new());
+    env.names_in_scope.push(HashMap::new());
     let statements: Vec<Augmented<BlockStatement>> = b
         .statements
         .into_iter()
-        .map(|x| tr_aug(x, env, translate_blockstatement))
+        .map(|x| tr_aug(x, env, dlogger, translate_blockstatement))
         .collect();
     // end scope
-    env.type_names_in_scope.pop();
-    env.val_names_in_scope.pop();
-    env.use_prefixes.pop();
+    env.names_in_scope.pop();
 
     statements
 }
 
-fn translate_blockstatement(bs: ast::BlockStatement, env: &mut Environment) -> BlockStatement {
+fn translate_blockstatement(
+    bs: ast::BlockStatement,
+    env: &mut Environment,
+    dlogger: &mut DiagnosticLogger,
+) -> BlockStatement {
     match bs {
         ast::BlockStatement::Error => BlockStatement::Error,
         ast::BlockStatement::TypeDef { typat, value } => {
             // first parse value so that we don't accidentally introduce the name of the type before the value
-            let value = Box::new(translate_augtypeexpr(*value, env));
+            let value = Box::new(translate_augtypeexpr(*value, env, dlogger));
 
             // now introduce name
-            let typat = Box::new(translate_augtypepatexpr(*typat, env, false));
+            let typat = Box::new(translate_augtypepatexpr(*typat, env, dlogger));
 
             BlockStatement::TypeDef { typat, value }
         }
         ast::BlockStatement::ValDef { pat, value } => {
             // first parse value so that we don't accidentally introduce the name of the val before the value
-            let value = Box::new(translate_augvalexpr(*value, env));
+            let value = Box::new(translate_augvalexpr(*value, env, dlogger));
 
             // now introduce name
-            let pat = Box::new(translate_augpatexpr(*pat, env, false));
+            let pat = Box::new(translate_augpatexpr(*pat, env, dlogger));
 
             BlockStatement::ValDef { pat, value }
         }
-        ast::BlockStatement::Use {
-            prefix: ast::Identifier { range, identifier },
-        } => {
-            if let Some(prefix) = identifier {
-                // duplicate use is a warning, so we can continue
-                if let Some(previous_range) = range_if_prefix_dupe(&prefix, &env.use_prefixes) {
-                    env.dlogger
-                        .log_duplicate_use(range, *previous_range, &prefix);
-                    // we need to remove the previous use (if it was in the same scope)
-                    env.use_prefixes.last_mut().unwrap().shift_remove(&prefix);
-                }
-                env.use_prefixes
-                    .last_mut()
-                    .unwrap()
-                    .insert(prefix.clone(), range);
-            }
-            BlockStatement::Error
+        ast::BlockStatement::Use { namespace } => {
+            env.use_namespace(namespace, dlogger);
+            BlockStatement::NoOp
         }
         ast::BlockStatement::Set { place, value } => BlockStatement::Set {
-            place: Box::new(translate_augvalexpr(*place, env)),
-            value: Box::new(translate_augvalexpr(*value, env)),
+            place: Box::new(translate_augvalexpr(*place, env, dlogger)),
+            value: Box::new(translate_augvalexpr(*value, env, dlogger)),
         },
         ast::BlockStatement::IfThen {
             cond,
             then_branch,
             else_branch,
         } => BlockStatement::IfThen {
-            cond: Box::new(translate_augvalexpr(*cond, env)),
-            then_branch: translate_blockexpr_statement(then_branch.val, env),
+            cond: Box::new(translate_augvalexpr(*cond, env, dlogger)),
+            then_branch: translate_blockexpr_statement(then_branch.val, env, dlogger),
             else_branch: match else_branch {
-                Some(else_branch) => translate_augelseexpr(*else_branch, env),
+                Some(else_branch) => translate_augelseexpr(*else_branch, env, dlogger),
                 None => vec![],
             },
         },
         ast::BlockStatement::While { cond, body } => BlockStatement::While {
-            cond: Box::new(translate_augvalexpr(*cond, env)),
-            body: translate_blockexpr_statement(body.val, env),
+            cond: Box::new(translate_augvalexpr(*cond, env, dlogger)),
+            body: translate_blockexpr_statement(body.val, env, dlogger),
         },
         ast::BlockStatement::For {
             pattern,
@@ -914,16 +845,16 @@ fn translate_blockstatement(bs: ast::BlockStatement, env: &mut Environment) -> B
             body,
         } => {
             // evaluate start, end, and by outside the scope
-            let start = Box::new(translate_augvalexpr(*range.val.start, env));
-            let end = Box::new(translate_augvalexpr(*range.val.end, env));
-            let by = by.map(|x| Box::new(translate_augvalexpr(*x, env)));
+            let start = Box::new(translate_augvalexpr(*range.val.start, env, dlogger));
+            let end = Box::new(translate_augvalexpr(*range.val.end, env, dlogger));
+            let by = by.map(|x| Box::new(translate_augvalexpr(*x, env, dlogger)));
             // push val scope
-            env.val_names_in_scope.push(HashMap::new());
-            let pattern = Box::new(translate_augpatexpr(*pattern, env, false));
+            env.names_in_scope.push(HashMap::new());
+            let pattern = Box::new(translate_augpatexpr(*pattern, env, dlogger));
             // parse body
-            let body = translate_blockexpr_statement(body.val, env);
+            let body = translate_blockexpr_statement(body.val, env, dlogger);
             // pop val scope
-            env.val_names_in_scope.pop();
+            env.names_in_scope.pop();
             // return
             BlockStatement::For {
                 pattern,
@@ -934,24 +865,26 @@ fn translate_blockstatement(bs: ast::BlockStatement, env: &mut Environment) -> B
                 inclusive: range.val.inclusive,
             }
         }
-        ast::BlockStatement::Do(v) => BlockStatement::Do(Box::new(translate_augvalexpr(*v, env))),
+        ast::BlockStatement::Do(v) => {
+            BlockStatement::Do(Box::new(translate_augvalexpr(*v, env, dlogger)))
+        }
     }
 }
 
-fn translate_blockexpr_val(b: ast::BlockExpr, env: &mut Environment) -> ValExpr {
+fn translate_blockexpr_val(
+    b: ast::BlockExpr,
+    env: &mut Environment,
+    dlogger: &mut DiagnosticLogger,
+) -> ValExpr {
     // introduce new scope
-    env.type_names_in_scope.push(HashMap::new());
-    env.val_names_in_scope.push(HashMap::new());
-    env.use_prefixes.push(IndexMap::new());
+    env.names_in_scope.push(HashMap::new());
     let mut statements: Vec<Augmented<BlockStatement>> = b
         .statements
         .into_iter()
-        .map(|x| tr_aug(x, env, translate_blockstatement))
+        .map(|x| tr_aug(x, env, dlogger, translate_blockstatement))
         .collect();
     // end scope
-    env.type_names_in_scope.pop();
-    env.val_names_in_scope.pop();
-    env.use_prefixes.pop();
+    env.names_in_scope.pop();
 
     // if the last statement is a do statement, then we need to make it the last expression
     match statements.pop() {
@@ -979,15 +912,16 @@ fn translate_blockexpr_val(b: ast::BlockExpr, env: &mut Environment) -> ValExpr 
 fn translate_augfilestatement(
     ast::Augmented { range, val, .. }: ast::Augmented<ast::FileStatement>,
     env: &mut Environment,
+    dlogger: &mut DiagnosticLogger,
 ) -> Vec<Augmented<FileStatement>> {
     match val {
         ast::FileStatement::Error => vec![],
         ast::FileStatement::TypeDef { typat, value } => {
             // first parse value so that we don't accidentally introduce the name of the type before the value
-            let value = Box::new(translate_augtypeexpr(*value, env));
+            let value = Box::new(translate_augtypeexpr(*value, env, dlogger));
 
             // now introduce name
-            let typat = Box::new(translate_augtypepatexpr(*typat, env, false));
+            let typat = Box::new(translate_augtypepatexpr(*typat, env, dlogger));
 
             vec![Augmented {
                 val: FileStatement::TypeDef { typat, value },
@@ -996,32 +930,18 @@ fn translate_augfilestatement(
         }
         ast::FileStatement::ValDef { pat, value } => {
             // first parse value so that we don't accidentally introduce the name of the val before the value
-            let value = Box::new(translate_augvalexpr(*value, env));
+            let value = Box::new(translate_augvalexpr(*value, env, dlogger));
 
             // now introduce name
-            let pat = Box::new(translate_augpatexpr(*pat, env, false));
+            let pat = Box::new(translate_augpatexpr(*pat, env, dlogger));
 
             vec![Augmented {
                 val: FileStatement::ValDef { pat, value },
                 range: range.clone(),
             }]
         }
-        ast::FileStatement::Use {
-            prefix: ast::Identifier { identifier, range },
-        } => {
-            if let Some(prefix) = identifier {
-                // duplicate use is a warning, so we can continue
-                if let Some(previous_range) = range_if_prefix_dupe(&prefix, &env.use_prefixes) {
-                    env.dlogger
-                        .log_duplicate_use(range, *previous_range, &prefix);
-                    // we need to remove the previous use (if it was in the same scope)
-                    env.use_prefixes.last_mut().unwrap().shift_remove(&prefix);
-                }
-                env.use_prefixes
-                    .last_mut()
-                    .unwrap()
-                    .insert(prefix.clone(), range);
-            }
+        ast::FileStatement::Use { namespace } => {
+            env.use_namespace(namespace, dlogger);
             vec![]
         }
         ast::FileStatement::Namespace {
@@ -1034,36 +954,30 @@ fn translate_augfilestatement(
         } => {
             let mut out_items = vec![];
             if let Some(identifier) = identifier {
-                // file statements in this block will have this prepended to their names
-                env.prefixes.push(identifier.clone());
-                // also create new scope for uses, and insert this into it
-                env.use_prefixes
-                    .push(IndexMap::from([(identifier.clone(), identifier_range)]));
+                // push prefix
+                env.namespaces.push(identifier.clone());
+                // new scope
+                env.names_in_scope.push(HashMap::new());
                 // translate items
                 for item in items {
-                    out_items.extend(translate_augfilestatement(item, env));
+                    out_items.extend(translate_augfilestatement(item, env, dlogger));
                 }
-                // pop scope
-                env.use_prefixes.pop();
+                // pop scope and insert into the parent scope
+                let namespace_scope = env.names_in_scope.pop().unwrap();
+                env.names_in_scope
+                    .last_mut()
+                    .unwrap()
+                    .insert(identifier.clone(), Name::Namespace(namespace_scope));
                 // pop prefix
-                env.prefixes.pop();
+                env.namespaces.pop();
             }
             out_items
         }
     }
 }
 
-pub fn construct_hir(
-    tu: ast::TranslationUnit,
-    dlogger: DiagnosticLogger,
-) -> (
-    TranslationUnit,
-    Vec<String>,
-    Vec<Range>,
-    Vec<String>,
-    Vec<Range>,
-) {
-    let mut env = Environment {
+pub fn init_env(dlogger: DiagnosticLogger) -> Environment {
+    return Environment {
         type_names_in_scope: vec![HashMap::new()],
         val_names_in_scope: vec![HashMap::new()],
         prefixes: vec![],
@@ -1074,18 +988,4 @@ pub fn construct_hir(
         val_name_table: vec![],
         val_range_table: vec![],
     };
-    (
-        TranslationUnit {
-            declarations: tu
-                .declarations
-                .into_iter()
-                .flat_map(|x| translate_augfilestatement(x, &mut env))
-                .collect(),
-            phase: HirPhase::NameResolved,
-        },
-        env.type_name_table,
-        env.type_range_table,
-        env.val_name_table,
-        env.val_range_table,
-    )
 }
