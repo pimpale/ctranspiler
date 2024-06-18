@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
+use crate::hir;
 use crate::hir::Augmented;
-use crate::{hir, typecheck};
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum KindValue {
@@ -10,7 +10,7 @@ pub enum KindValue {
     Float,
     Bool,
     Type,
-    Value,
+    Val,
     Generic {
         paramkinds: Vec<KindValue>,
         returnkind: Box<KindValue>,
@@ -22,6 +22,7 @@ impl std::fmt::Display for KindValue {
         match self {
             KindValue::Unknown => write!(f, "Unknown"),
             KindValue::Type => write!(f, "Type"),
+            KindValue::Val => write!(f, "Val"),
             KindValue::Int => write!(f, "Int"),
             KindValue::Float => write!(f, "Float"),
             KindValue::Bool => write!(f, "Bool"),
@@ -72,7 +73,6 @@ impl KindValue {
     }
 }
 
-
 impl std::fmt::Display for TypeValueConstructor {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
@@ -86,7 +86,6 @@ impl std::fmt::Display for TypeValueConstructor {
             TypeValueConstructor::FloatConstructor => write!(f, "FloatConstructor"),
         }
     }
-
 }
 
 impl std::fmt::Display for TypeValue {

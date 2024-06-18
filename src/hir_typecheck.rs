@@ -6,17 +6,16 @@ use num_rational::{BigRational, Ratio};
 use num_traits::ToPrimitive;
 
 use crate::dlogger::DiagnosticLogger;
-use crate::hir::Augmented;
-use crate::typecheck::{evaluate_hir_kind, TypeChecker};
+use crate::hir::{Augmented, Environment};
 use crate::types::{KindValue, TypeValue, TypeValueConstructor};
-use crate::{hir, typecheck};
+use crate::{hir};
 
 // gets a hint but doesn't bind any free variables yet
 // doesn't thoroughly traverse the tree, so make sure to call typecheck_type_expr_and_patch on this node afterwards
 pub fn typehint_of_val_pat_and_patch(
     v: &mut Augmented<hir::ValPatExpr>,
     dlogger: &mut DiagnosticLogger,
-    checker: &mut TypeChecker,
+    checker: &mut Environment,
 ) -> TypeValue {
     match &mut v.val {
         hir::ValPatExpr::Error => TypeValue::Unknown,
@@ -64,16 +63,16 @@ pub fn typecheck_type_pat_expr_and_patch(
     v: &mut Augmented<hir::TypePatExpr>,
     expected_type: &TypeValue,
     _dlogger: &mut DiagnosticLogger,
-    checker: &mut TypeChecker,
+    checker: &mut Environment,
 ) -> TypeValue {
     match &mut v.val {
         hir::TypePatExpr::Error => TypeValue::Unknown,
         hir::TypePatExpr::Identifier(id) => {
-            checker.type_type_table[*id] = Some(expected_type.clone());
+            checker.type_table[*id] = Some(expected_type.clone());
             expected_type.clone()
         }
         hir::TypePatExpr::Typed { id, .. } => {
-            checker.type_type_table[*id] = Some(expected_type.clone());
+            checker.type_table[*id] = Some(expected_type.clone());
             expected_type.clone()
         }
     }
@@ -160,7 +159,7 @@ fn subst(val: &TypeValue, bindings: &HashMap<usize, TypeValue>) -> TypeValue {
     }
 }
 
-fn concretize_type_expr(constructor: &TypeValue, mut tyargs: Vec<TypeValue>) -> TypeValue {
+fn concretize_type_expr(constructor: &TypeValue, tyargs: Vec<TypeValue>) -> TypeValue {
     match constructor {
         TypeValue::Unknown => TypeValue::Unknown,
         TypeValue::SymbolicVariable(id) => TypeValue::Concretization {
@@ -217,7 +216,7 @@ fn concretize_type_expr(constructor: &TypeValue, mut tyargs: Vec<TypeValue>) -> 
 pub fn typecheck_type_expr_and_patch(
     v: &mut Augmented<hir::TypeExpr>,
     dlogger: &mut DiagnosticLogger,
-    checker: &mut TypeChecker,
+    checker: &mut Environment,
 ) -> TypeValue {
     match &mut v.val {
         hir::TypeExpr::Error => TypeValue::Unknown,
@@ -311,13 +310,13 @@ pub fn typecheck_val_pat_and_patch(
     v: &mut Augmented<hir::ValPatExpr>,
     expected_type: &TypeValue,
     dlogger: &mut DiagnosticLogger,
-    checker: &mut TypeChecker,
+    checker: &mut Environment,
 ) -> TypeValue {
     match &mut v.val {
         hir::ValPatExpr::Error => TypeValue::Unknown,
         hir::ValPatExpr::Ignore => expected_type.clone(),
         hir::ValPatExpr::Identifier { id, .. } => {
-            checker.val_type_table[*id] = Some(expected_type.clone());
+            checker.type_table[*id] = Some(expected_type.clone());
             expected_type.clone()
         }
         hir::ValPatExpr::StructLiteral(fields) => {
@@ -362,7 +361,7 @@ pub fn typecheck_val_pat_and_patch(
             // the symbolic type we are deconstructing
             let symbolic_type_to_construct = typecheck_type_expr_and_patch(ty, dlogger, checker);
             let dereferenced_type = match symbolic_type_to_construct {
-                TypeValue::SymbolicVariable(id) => checker.type_type_table[id]
+                TypeValue::SymbolicVariable(id) => checker.type_table[id]
                     .clone()
                     .expect("type not initialized yet (should be kindchecked)"),
                 _ => {
@@ -391,7 +390,7 @@ pub fn typecheck_case_target_expr_and_patch(
     v: &mut Augmented<hir::CaseTargetExpr>,
     expected_hint: &TypeValue,
     dlogger: &mut DiagnosticLogger,
-    checker: &mut TypeChecker,
+    checker: &mut Environment,
 ) -> TypeValue {
     match &mut v.val {
         hir::CaseTargetExpr::Error => TypeValue::Unknown,
@@ -421,12 +420,12 @@ pub fn typecheck_val_expr_and_patch(
     v: &mut Augmented<hir::ValExpr>,
     expected_type: &TypeValue,
     dlogger: &mut DiagnosticLogger,
-    checker: &mut TypeChecker,
+    checker: &mut Environment,
 ) -> TypeValue {
     match &mut v.val {
         hir::ValExpr::Error => TypeValue::Unknown,
         hir::ValExpr::Identifier(id) => {
-            let actual_type = checker.val_type_table[*id]
+            let actual_type = checker.type_table[*id]
                 .clone()
                 .expect("type not initialized yet");
             expect_type(v, expected_type, actual_type, dlogger)
@@ -524,7 +523,7 @@ pub fn typecheck_val_expr_and_patch(
             // the symbolic type we are constructing
             let symbolic_type_to_construct = typecheck_type_expr_and_patch(ty, dlogger, checker);
             let dereferenced_type = match symbolic_type_to_construct {
-                TypeValue::SymbolicVariable(id) => checker.type_type_table[id]
+                TypeValue::SymbolicVariable(id) => checker.type_table[id]
                     .clone()
                     .expect("type not initialized yet (should be kindchecked)"),
                 _ => {
@@ -967,17 +966,18 @@ pub fn typecheck_val_expr_and_patch(
 pub fn typecheck_block_statement_and_patch(
     v: &mut Augmented<hir::BlockStatement>,
     dlogger: &mut DiagnosticLogger,
-    checker: &mut TypeChecker,
+    checker: &mut Environment,
 ) {
     match &mut v.val {
         hir::BlockStatement::Error => {}
+        hir::BlockStatement::NoOp => {}
         hir::BlockStatement::TypeDef { value, typat } => {
             // try calculating the kind of the type expression
             let ty = typecheck_type_expr_and_patch(value, dlogger, checker);
             // bind the resolved kind to all the identifiers in type pattern
             typecheck_type_pat_expr_and_patch(typat, &ty, dlogger, checker);
         }
-        hir::BlockStatement::ValDef { pat, value } => {
+        hir::BlockStatement::Let { pat, value } => {
             // get hint from the value pattern
             let type_hint = typehint_of_val_pat_and_patch(pat, dlogger, checker);
             let ty = typecheck_val_expr_and_patch(value, &type_hint, dlogger, checker);
@@ -1037,7 +1037,7 @@ pub fn typecheck_block_statement_and_patch(
 pub fn typecheck_file_statement_and_patch(
     v: &mut Augmented<hir::FileStatement>,
     dlogger: &mut DiagnosticLogger,
-    checker: &mut TypeChecker,
+    checker: &mut Environment,
 ) {
     match &mut v.val {
         hir::FileStatement::Error => {}

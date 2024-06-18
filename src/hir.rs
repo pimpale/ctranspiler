@@ -34,65 +34,6 @@ impl std::default::Default for KindExpr {
 }
 
 #[derive(Clone, Debug)]
-pub enum TypeExpr {
-    // An error when parsing
-    Error,
-    Identifier(usize),
-    // types
-    BoolTy,
-    RefConstructorTy,
-    ArrayConstructorTy,
-    SliceConstructorTy,
-    IntConstructorTy,
-    FloatConstructorTy,
-    // const literals
-    Int(BigInt),
-    Bool(bool),
-    Float(BigRational),
-    // type of a function
-    Fn {
-        paramtys: Vec<Augmented<TypeExpr>>,
-        returnty: Box<Augmented<TypeExpr>>,
-    },
-    // struct and enum
-    Struct(Vec<(Augmented<String>, Augmented<TypeExpr>)>),
-    Enum(Vec<(Augmented<String>, Augmented<TypeExpr>)>),
-    Union(Vec<(Augmented<String>, Augmented<TypeExpr>)>),
-    // generic
-    Concretization {
-        genericty: Box<Augmented<TypeExpr>>,
-        tyargs: Vec<Augmented<TypeExpr>>,
-    },
-    Generic {
-        params: Vec<Augmented<TypePatExpr>>,
-        returnkind: Option<Box<Augmented<KindExpr>>>,
-        body: Box<Augmented<TypeExpr>>,
-    },
-}
-
-impl std::default::Default for TypeExpr {
-    fn default() -> Self {
-        TypeExpr::Error
-    }
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub enum TypePatExpr {
-    Error,
-    Identifier(usize),
-    Typed {
-        id: usize,
-        kind: Box<Augmented<KindExpr>>,
-    },
-}
-
-impl std::default::Default for TypePatExpr {
-    fn default() -> Self {
-        TypePatExpr::Error
-    }
-}
-
-#[derive(Clone, Debug)]
 pub enum CaseTargetExpr {
     Error,
     Bool(bool),
@@ -117,11 +58,15 @@ pub enum ValPatExpr {
     StructLiteral(Vec<(Augmented<String>, Augmented<ValPatExpr>)>),
     New {
         pat: Box<Augmented<ValPatExpr>>,
-        ty: Box<Augmented<TypeExpr>>,
+        ty: Box<Augmented<ValExpr>>,
     },
     Typed {
         pat: Box<Augmented<ValPatExpr>>,
-        ty: Box<Augmented<TypeExpr>>,
+        ty: Box<Augmented<ValExpr>>,
+    },
+    Kinded {
+        pat: Box<Augmented<ValPatExpr>>,
+        kind: Box<Augmented<KindExpr>>,
     },
 }
 
@@ -162,23 +107,17 @@ pub enum ValExpr {
     String(Vec<u8>),
     Ref(Box<Augmented<ValExpr>>),
     Deref(Box<Augmented<ValExpr>>),
-    // Generic (only used in functions atm)
-    Generic {
-        params: Vec<Augmented<TypePatExpr>>,
-        // return kind is always TYPE
-        body: Box<Augmented<ValExpr>>,
-    },
     // Function
     FnDef {
         params: Vec<Augmented<ValPatExpr>>,
-        returnty: Option<Box<Augmented<TypeExpr>>>,
+        returnty: Option<Box<Augmented<ValExpr>>>,
         body: Box<Augmented<ValExpr>>,
     },
     // Constructs a new compound type
     StructLiteral(Vec<(Augmented<String>, Augmented<ValExpr>)>),
     // Creates a new instance of a nominal type
     New {
-        ty: Box<Augmented<TypeExpr>>,
+        ty: Box<Augmented<ValExpr>>,
         val: Box<Augmented<ValExpr>>,
     },
     // Matches an expression to the first matching pattern and destructures it
@@ -210,15 +149,36 @@ pub enum ValExpr {
         root: Box<Augmented<ValExpr>>,
         field: String,
     },
-    // Concretization
-    Concretization {
-        generic: Box<Augmented<ValExpr>>,
-        tyargs: Vec<Augmented<TypeExpr>>,
-    },
     // Function application
     App {
         fun: Box<Augmented<ValExpr>>,
         args: Vec<Augmented<ValExpr>>,
+    },
+    // types
+    BoolTy,
+    RefConstructorTy,
+    ArrayConstructorTy,
+    SliceConstructorTy,
+    IntConstructorTy,
+    FloatConstructorTy,
+    // type of a function
+    FnTy {
+        paramtys: Vec<Augmented<ValExpr>>,
+        returnty: Box<Augmented<ValExpr>>,
+    },
+    // struct and enum
+    Struct(Vec<(Augmented<String>, Augmented<ValExpr>)>),
+    Enum(Vec<(Augmented<String>, Augmented<ValExpr>)>),
+    Union(Vec<(Augmented<String>, Augmented<ValExpr>)>),
+    // generic
+    Concretization {
+        generic: Box<Augmented<ValExpr>>,
+        tyargs: Vec<Augmented<ValExpr>>,
+    },
+    Generic {
+        params: Vec<Augmented<ValPatExpr>>,
+        returnkind: Option<Box<Augmented<KindExpr>>>,
+        body: Box<Augmented<ValExpr>>,
     },
 }
 
@@ -232,11 +192,7 @@ impl std::default::Default for ValExpr {
 pub enum BlockStatement {
     Error,
     NoOp,
-    TypeDef {
-        typat: Box<Augmented<TypePatExpr>>,
-        value: Box<Augmented<TypeExpr>>,
-    },
-    ValDef {
+    Let {
         pat: Box<Augmented<ValPatExpr>>,
         value: Box<Augmented<ValExpr>>,
     },
@@ -268,8 +224,8 @@ pub enum BlockStatement {
 pub enum FileStatement {
     Error,
     TypeDef {
-        typat: Box<Augmented<TypePatExpr>>,
-        value: Box<Augmented<TypeExpr>>,
+        typat: Box<Augmented<ValPatExpr>>,
+        value: Box<Augmented<ValExpr>>,
     },
     ValDef {
         pat: Box<Augmented<ValPatExpr>>,

@@ -48,58 +48,6 @@ pub struct Identifier {
     pub range: Range,
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug)]
-pub enum TypeExpr {
-    // An error when parsing
-    Error,
-    Identifier(Identifier),
-    // types
-    BoolTy,
-    RefConstructorTy,
-    ArrayConstructorTy,
-    SliceConstructorTy,
-    IntConstructorTy,
-    FloatConstructorTy,
-    // const literals
-    Int(BigInt),
-    Bool(bool),
-    Float(BigRational),
-    // unary ops
-    Ref(Box<Augmented<TypeExpr>>),
-    // concretization
-    Concretization {
-        root: Box<Augmented<TypeExpr>>,
-        tyargs: Vec<Augmented<TypeExpr>>,
-    },
-    // structs and enums
-    Struct(Vec<Augmented<StructItemExpr<TypeExpr>>>),
-    Enum(Vec<Augmented<StructItemExpr<TypeExpr>>>),
-    Union(Vec<Augmented<StructItemExpr<TypeExpr>>>),
-    // For grouping apps
-    Group(Box<Augmented<TypeExpr>>),
-    // generic is the equivalent of a function on the type level
-    Generic {
-        params: Vec<Augmented<TypePatExpr>>,
-        returnkind: Option<Box<Augmented<KindExpr>>>,
-        body: Box<Augmented<TypeExpr>>,
-    },
-    // type of a function
-    Fn {
-        paramtys: Vec<Augmented<TypeExpr>>,
-        returnty: Box<Augmented<TypeExpr>>,
-    },
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug)]
-pub enum TypePatExpr {
-    Error,
-    Identifier(Identifier),
-    Typed {
-        identifier: Identifier,
-        kind: Box<Augmented<KindExpr>>,
-    },
-}
-
 #[derive(Serialize, Deserialize, Clone, Debug, AsRefStr)]
 pub enum ValBinaryOpKind {
     // Function call
@@ -149,13 +97,17 @@ pub enum ValPatExpr {
 
     // destructure nominal type
     New {
-        ty: Box<Augmented<TypeExpr>>,
+        ty: Box<Augmented<ValExpr>>,
         pat: Box<Augmented<ValPatExpr>>,
     },
     // assert pattern has some type
     Typed {
         pat: Box<Augmented<ValPatExpr>>,
-        ty: Box<Augmented<TypeExpr>>,
+        ty: Box<Augmented<ValExpr>>,
+    },
+    Kinded {
+        pat: Box<Augmented<ValPatExpr>>,
+        kind: Box<Augmented<KindExpr>>,
     },
 }
 
@@ -190,9 +142,9 @@ pub enum ValExpr {
         block: bool,
     },
     FnDef {
-        typarams: Option<Vec<Augmented<TypePatExpr>>>,
+        typarams: Option<Vec<Augmented<ValPatExpr>>>,
         params: Vec<Augmented<ValPatExpr>>,
-        returnty: Option<Box<Augmented<TypeExpr>>>,
+        returnty: Option<Box<Augmented<ValExpr>>>,
         body: Box<Augmented<ValExpr>>,
     },
     Ref(Box<Augmented<ValExpr>>),
@@ -201,7 +153,7 @@ pub enum ValExpr {
     StructLiteral(Vec<Augmented<StructItemExpr<ValExpr>>>),
     // Creates a new instance of a nominal type
     New {
-        ty: Box<Augmented<TypeExpr>>,
+        ty: Box<Augmented<ValExpr>>,
         val: Box<Augmented<ValExpr>>,
     },
     // Binary operation
@@ -223,11 +175,6 @@ pub enum ValExpr {
     Array(Vec<Augmented<ValExpr>>),
     // A reference to a previously defined variable
     Identifier(Identifier),
-    // Concretize
-    Concretize {
-        root: Box<Augmented<ValExpr>>,
-        tyargs: Vec<Augmented<TypeExpr>>,
-    },
     // Function application
     App {
         root: Box<Augmented<ValExpr>>,
@@ -243,6 +190,33 @@ pub enum ValExpr {
         root: Box<Augmented<ValExpr>>,
         field: String,
     },
+    // types
+    BoolTy,
+    RefConstructorTy,
+    ArrayConstructorTy,
+    SliceConstructorTy,
+    IntConstructorTy,
+    FloatConstructorTy,
+    // concretization
+    Concretization {
+        root: Box<Augmented<ValExpr>>,
+        tyargs: Vec<Augmented<ValExpr>>,
+    },
+    // structs and enums
+    StructTy(Vec<Augmented<StructItemExpr<ValExpr>>>),
+    EnumTy(Vec<Augmented<StructItemExpr<ValExpr>>>),
+    UnionTy(Vec<Augmented<StructItemExpr<ValExpr>>>),
+    // generic is the equivalent of a function on the type level
+    Generic {
+        params: Vec<Augmented<ValPatExpr>>,
+        returnkind: Option<Box<Augmented<KindExpr>>>,
+        body: Box<Augmented<ValExpr>>,
+    },
+    // type of a function
+    FnTy {
+        paramtys: Vec<Augmented<ValExpr>>,
+        returnty: Box<Augmented<ValExpr>>,
+    },
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -254,11 +228,7 @@ pub struct BlockExpr {
 #[derive(Serialize, Deserialize, Clone, Debug, AsRefStr)]
 pub enum BlockStatement {
     Error,
-    TypeDef {
-        typat: Box<Augmented<TypePatExpr>>,
-        value: Box<Augmented<TypeExpr>>,
-    },
-    ValDef {
+    Let {
         pat: Box<Augmented<ValPatExpr>>,
         value: Box<Augmented<ValExpr>>,
     },
@@ -290,11 +260,7 @@ pub enum BlockStatement {
 #[derive(Serialize, Deserialize, Clone, Debug, AsRefStr)]
 pub enum FileStatement {
     Error,
-    TypeDef {
-        typat: Box<Augmented<TypePatExpr>>,
-        value: Box<Augmented<TypeExpr>>,
-    },
-    ValDef {
+    Let {
         pat: Box<Augmented<ValPatExpr>>,
         value: Box<Augmented<ValExpr>>,
     },

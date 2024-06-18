@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::hash::Hash;
 
 use indexmap::IndexMap;
 use lsp_types::Range;
@@ -206,181 +205,6 @@ fn translate_kindexpr(
     }
 }
 
-fn translate_augtypepatexpr(
-    ast::Augmented { range, val, .. }: ast::Augmented<ast::TypePatExpr>,
-    env: &mut Environment,
-    dlogger: &mut DiagnosticLogger,
-) -> Augmented<TypePatExpr> {
-    match val {
-        ast::TypePatExpr::Error => Augmented {
-            range,
-            val: TypePatExpr::Error,
-        },
-        ast::TypePatExpr::Typed { identifier, kind } => Augmented {
-            range,
-            val: match env.introduce_identifier(identifier, dlogger) {
-                Some(id) => TypePatExpr::Typed {
-                    id,
-                    kind: Box::new(tr_aug(*kind, env, dlogger, translate_kindexpr)),
-                },
-                None => TypePatExpr::Error,
-            },
-        },
-        ast::TypePatExpr::Identifier(identifier) => Augmented {
-            range,
-            val: match env.introduce_identifier(identifier, dlogger) {
-                Some(id) => TypePatExpr::Identifier(id),
-                None => TypePatExpr::Error,
-            },
-        },
-    }
-}
-
-fn translate_augtypeexpr(
-    ast::Augmented {
-        range,
-        metadata,
-        val,
-    }: ast::Augmented<ast::TypeExpr>,
-    env: &mut Environment,
-    dlogger: &mut DiagnosticLogger,
-) -> Augmented<TypeExpr> {
-    match val {
-        ast::TypeExpr::Error => Augmented {
-            range,
-            val: TypeExpr::Error,
-        },
-        ast::TypeExpr::Identifier(identifier) => Augmented {
-            range,
-            val: match env.lookup_identifier(identifier, dlogger) {
-                Some(id) => TypeExpr::Identifier(id),
-                None => TypeExpr::Error,
-            },
-        },
-        ast::TypeExpr::BoolTy => Augmented {
-            range,
-            val: TypeExpr::BoolTy,
-        },
-        ast::TypeExpr::RefConstructorTy => Augmented {
-            range,
-            val: TypeExpr::RefConstructorTy,
-        },
-        ast::TypeExpr::ArrayConstructorTy => Augmented {
-            range,
-            val: TypeExpr::ArrayConstructorTy,
-        },
-        ast::TypeExpr::SliceConstructorTy => Augmented {
-            range,
-            val: TypeExpr::SliceConstructorTy,
-        },
-        ast::TypeExpr::IntConstructorTy => Augmented {
-            range,
-            val: TypeExpr::IntConstructorTy,
-        },
-        ast::TypeExpr::FloatConstructorTy => Augmented {
-            range,
-            val: TypeExpr::FloatConstructorTy,
-        },
-        ast::TypeExpr::Int(i) => Augmented {
-            range,
-            val: TypeExpr::Int(i),
-        },
-        ast::TypeExpr::Bool(b) => Augmented {
-            range,
-            val: TypeExpr::Bool(b),
-        },
-        ast::TypeExpr::Float(f) => Augmented {
-            range,
-            val: TypeExpr::Float(f),
-        },
-        ast::TypeExpr::Ref(t) => Augmented {
-            range,
-            val: TypeExpr::Concretization {
-                genericty: Box::new(Augmented {
-                    range,
-                    val: TypeExpr::RefConstructorTy,
-                }),
-                tyargs: vec![translate_augtypeexpr(*t, env, dlogger)],
-            },
-        },
-        ast::TypeExpr::Struct(items) => Augmented {
-            range,
-            val: TypeExpr::Struct(translate_augstructitemexpr(
-                translate_augtypeexpr,
-                |id, env, dlogger| match env.lookup_identifier(id, dlogger) {
-                    Some(id) => TypeExpr::Identifier(id),
-                    None => TypeExpr::Error,
-                },
-                env,
-                dlogger,
-                items,
-            )),
-        },
-        ast::TypeExpr::Enum(items) => Augmented {
-            range,
-            val: TypeExpr::Enum(translate_augstructitemexpr(
-                translate_augtypeexpr,
-                |id, env, dlogger| match env.lookup_identifier(id, dlogger) {
-                    Some(id) => TypeExpr::Identifier(id),
-                    None => TypeExpr::Error,
-                },
-                env,
-                dlogger,
-                items,
-            )),
-        },
-        ast::TypeExpr::Union(items) => Augmented {
-            range,
-            val: TypeExpr::Union(translate_augstructitemexpr(
-                translate_augtypeexpr,
-                |id, env, dlogger| match env.lookup_identifier(id, dlogger) {
-                    Some(id) => TypeExpr::Identifier(id),
-                    None => TypeExpr::Error,
-                },
-                env,
-                dlogger,
-                items,
-            )),
-        },
-        ast::TypeExpr::Group(t) => translate_augtypeexpr(*t, env, dlogger),
-        ast::TypeExpr::Generic {
-            params,
-            returnkind,
-            body,
-        } => Augmented {
-            range,
-            val: TypeExpr::Generic {
-                params: params
-                    .into_iter()
-                    .map(|x| translate_augtypepatexpr(x, env, dlogger))
-                    .collect(),
-                returnkind: returnkind.map(|rk| Box::new(translate_augkindexpr(*rk, env, dlogger))),
-                body: Box::new(translate_augtypeexpr(*body, env, dlogger)),
-            },
-        },
-        ast::TypeExpr::Concretization { root, tyargs } => Augmented {
-            range,
-            val: TypeExpr::Concretization {
-                genericty: Box::new(translate_augtypeexpr(*root, env, dlogger)),
-                tyargs: tyargs
-                    .into_iter()
-                    .map(|x| translate_augtypeexpr(x, env, dlogger))
-                    .collect(),
-            },
-        },
-        ast::TypeExpr::Fn { paramtys, returnty } => Augmented {
-            range,
-            val: TypeExpr::Fn {
-                paramtys: paramtys
-                    .into_iter()
-                    .map(|x| translate_augtypeexpr(x, env, dlogger))
-                    .collect(),
-                returnty: Box::new(translate_augtypeexpr(*returnty, env, dlogger)),
-            },
-        },
-    }
-}
-
 fn translate_augpatexpr(
     ast::Augmented { range, val, .. }: ast::Augmented<ast::ValPatExpr>,
     env: &mut Environment,
@@ -422,13 +246,20 @@ fn translate_augpatexpr(
             range,
             val: ValPatExpr::Typed {
                 pat: Box::new(translate_augpatexpr(*pat, env, dlogger)),
-                ty: Box::new(translate_augtypeexpr(*ty, env, dlogger)),
+                ty: Box::new(translate_augvalexpr(*ty, env, dlogger)),
+            },
+        },
+        ast::ValPatExpr::Kinded { pat, kind } => Augmented {
+            range,
+            val: ValPatExpr::Kinded {
+                pat: Box::new(translate_augpatexpr(*pat, env, dlogger)),
+                kind: Box::new(translate_augkindexpr(*kind, env, dlogger)),
             },
         },
         ast::ValPatExpr::New { ty, pat } => Augmented {
             range,
             val: ValPatExpr::New {
-                ty: Box::new(translate_augtypeexpr(*ty, env, dlogger)),
+                ty: Box::new(translate_augvalexpr(*ty, env, dlogger)),
                 pat: Box::new(translate_augpatexpr(*pat, env, dlogger)),
             },
         },
@@ -526,6 +357,30 @@ fn translate_augvalexpr(
         ast::ValExpr::Deref(v) => Augmented {
             range,
             val: ValExpr::Deref(Box::new(translate_augvalexpr(*v, env, dlogger))),
+        },
+        ast::ValExpr::BoolTy => Augmented {
+            range,
+            val: ValExpr::BoolTy,
+        },
+        ast::ValExpr::RefConstructorTy => Augmented {
+            range,
+            val: ValExpr::RefConstructorTy,
+        },
+        ast::ValExpr::ArrayConstructorTy => Augmented {
+            range,
+            val: ValExpr::ArrayConstructorTy,
+        },
+        ast::ValExpr::SliceConstructorTy => Augmented {
+            range,
+            val: ValExpr::SliceConstructorTy,
+        },
+        ast::ValExpr::IntConstructorTy => Augmented {
+            range,
+            val: ValExpr::IntConstructorTy,
+        },
+        ast::ValExpr::FloatConstructorTy => Augmented {
+            range,
+            val: ValExpr::FloatConstructorTy,
         },
         ast::ValExpr::StructLiteral(items) => Augmented {
             range,
@@ -665,7 +520,7 @@ fn translate_augvalexpr(
             // insert typarams into scope
             let typarams = typarams
                 .into_iter()
-                .map(|x| translate_augtypepatexpr(x, env, dlogger))
+                .map(|x| translate_augpatexpr(x, env, dlogger))
                 .collect();
 
             // insert params into scope
@@ -674,7 +529,7 @@ fn translate_augvalexpr(
                 .map(|x| translate_augpatexpr(x, env, dlogger))
                 .collect();
 
-            let returnty = returnty.map(|rt| Box::new(translate_augtypeexpr(*rt, env, dlogger)));
+            let returnty = returnty.map(|rt| Box::new(translate_augvalexpr(*rt, env, dlogger)));
 
             let body = Box::new(translate_augvalexpr(*body, env, dlogger));
 
@@ -685,6 +540,7 @@ fn translate_augvalexpr(
                 range,
                 val: ValExpr::Generic {
                     params: typarams,
+                    returnkind: None,
                     body: Box::new(Augmented {
                         range,
                         val: ValExpr::FnDef {
@@ -711,7 +567,7 @@ fn translate_augvalexpr(
                 .map(|x| translate_augpatexpr(x, env, dlogger))
                 .collect();
 
-            let returnty = returnty.map(|rt| Box::new(translate_augtypeexpr(*rt, env, dlogger)));
+            let returnty = returnty.map(|rt| Box::new(translate_augvalexpr(*rt, env, dlogger)));
 
             let body = Box::new(translate_augvalexpr(*body, env, dlogger));
 
@@ -726,13 +582,23 @@ fn translate_augvalexpr(
 
             Augmented { range, val }
         }
-        ast::ValExpr::Concretize { root, tyargs } => Augmented {
+        ast::ValExpr::FnTy { paramtys, returnty } => Augmented {
+            range,
+            val: ValExpr::FnTy {
+                paramtys: paramtys
+                    .into_iter()
+                    .map(|x| translate_augvalexpr(x, env, dlogger))
+                    .collect(),
+                returnty: Box::new(translate_augvalexpr(*returnty, env, dlogger)),
+            },
+        },
+        ast::ValExpr::Concretization { root, tyargs } => Augmented {
             range,
             val: ValExpr::Concretization {
                 generic: Box::new(translate_augvalexpr(*root, env, dlogger)),
                 tyargs: tyargs
                     .into_iter()
-                    .map(|x| translate_augtypeexpr(x, env, dlogger))
+                    .map(|x| translate_augvalexpr(x, env, dlogger))
                     .collect(),
             },
         },
@@ -761,13 +627,67 @@ fn translate_augvalexpr(
             },
         },
         ast::ValExpr::New { ty, val } => {
-            let ty = Box::new(translate_augtypeexpr(*ty, env, dlogger));
+            let ty = Box::new(translate_augvalexpr(*ty, env, dlogger));
             let val = Box::new(translate_augvalexpr(*val, env, dlogger));
             Augmented {
                 range,
                 val: ValExpr::New { ty, val },
             }
         }
+        ast::ValExpr::StructTy(items) => Augmented {
+            range,
+            val: ValExpr::Struct(translate_augstructitemexpr(
+                translate_augvalexpr,
+                |id, env, dlogger| match env.lookup_identifier(id, dlogger) {
+                    Some(id) => ValExpr::Identifier(id),
+                    None => ValExpr::Error,
+                },
+                env,
+                dlogger,
+                items,
+            )),
+        },
+        ast::ValExpr::EnumTy(items) => Augmented {
+            range,
+            val: ValExpr::Enum(translate_augstructitemexpr(
+                translate_augvalexpr,
+                |id, env, dlogger| match env.lookup_identifier(id, dlogger) {
+                    Some(id) => ValExpr::Identifier(id),
+                    None => ValExpr::Error,
+                },
+                env,
+                dlogger,
+                items,
+            )),
+        },
+        ast::ValExpr::UnionTy(items) => Augmented {
+            range,
+            val: ValExpr::Union(translate_augstructitemexpr(
+                translate_augvalexpr,
+                |id, env, dlogger| match env.lookup_identifier(id, dlogger) {
+                    Some(id) => ValExpr::Identifier(id),
+                    None => ValExpr::Error,
+                },
+                env,
+                dlogger,
+                items,
+            )),
+        },
+        ast::ValExpr::Generic {
+            params,
+            returnkind,
+            body,
+        } => Augmented {
+            range,
+            val: ValExpr::Generic {
+                params: params
+                    .into_iter()
+                    .map(|x| translate_augpatexpr(x, env, dlogger))
+                    .collect(),
+                returnkind: returnkind.map(|rk| Box::new(translate_augkindexpr(*rk, env, dlogger))),
+                body: Box::new(translate_augvalexpr(*body, env, dlogger)),
+            },
+        },
     }
 }
 
@@ -796,23 +716,14 @@ fn translate_blockstatement(
 ) -> BlockStatement {
     match bs {
         ast::BlockStatement::Error => BlockStatement::Error,
-        ast::BlockStatement::TypeDef { typat, value } => {
-            // first parse value so that we don't accidentally introduce the name of the type before the value
-            let value = Box::new(translate_augtypeexpr(*value, env, dlogger));
-
-            // now introduce name
-            let typat = Box::new(translate_augtypepatexpr(*typat, env, dlogger));
-
-            BlockStatement::TypeDef { typat, value }
-        }
-        ast::BlockStatement::ValDef { pat, value } => {
+        ast::BlockStatement::Let { pat, value } => {
             // first parse value so that we don't accidentally introduce the name of the val before the value
             let value = Box::new(translate_augvalexpr(*value, env, dlogger));
 
             // now introduce name
             let pat = Box::new(translate_augpatexpr(*pat, env, dlogger));
 
-            BlockStatement::ValDef { pat, value }
+            BlockStatement::Let { pat, value }
         }
         ast::BlockStatement::Use { namespace } => {
             env.use_namespace(namespace, dlogger);
@@ -916,19 +827,7 @@ fn translate_augfilestatement(
 ) -> Vec<Augmented<FileStatement>> {
     match val {
         ast::FileStatement::Error => vec![],
-        ast::FileStatement::TypeDef { typat, value } => {
-            // first parse value so that we don't accidentally introduce the name of the type before the value
-            let value = Box::new(translate_augtypeexpr(*value, env, dlogger));
-
-            // now introduce name
-            let typat = Box::new(translate_augtypepatexpr(*typat, env, dlogger));
-
-            vec![Augmented {
-                val: FileStatement::TypeDef { typat, value },
-                range: range.clone(),
-            }]
-        }
-        ast::FileStatement::ValDef { pat, value } => {
+        ast::FileStatement::Let { pat, value } => {
             // first parse value so that we don't accidentally introduce the name of the val before the value
             let value = Box::new(translate_augvalexpr(*value, env, dlogger));
 

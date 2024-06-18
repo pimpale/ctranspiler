@@ -8,26 +8,25 @@ pub enum TokenKind {
     // function, type, or variable
     Identifier(String),
     // Keywords
-    Case,     // case
-    Valdef,   // val
-    Typedef,  // type
-    Mut,      // mut
-    Set,      // set
-    In,       // in
-    Fn,       // fn
-    If,       // if
-    Else,     // else
-    By,       // by
-    While,    // while
-    For,      // for
-    Namespace,// namespace
-    Use,      // use
-    New,      // new
-    Struct,   // struct
-    Enum,     // enum
-    Union,    // union
-    Block,    // block
-    Generic,  // generic
+    Case,      // case
+    Let,       // let
+    Mut,       // mut
+    Set,       // set
+    In,        // in
+    Fn,        // fn
+    If,        // if
+    Else,      // else
+    By,        // by
+    While,     // while
+    For,       // for
+    Namespace, // namespace
+    Use,       // use
+    New,       // new
+    Struct,    // struct
+    Enum,      // enum
+    Union,     // union
+    Block,     // block
+    Generic,   // generic
     // Values
     Lifetime(Vec<u8>),                      // 'lifetime
     Inf,                                    // inf
@@ -37,6 +36,7 @@ pub enum TokenKind {
     Int(BigInt),                            // 7
     Float(BigRational),                     // 0.7
     // Types
+    FnTy,    // Fn
     NeverTy, // !
     ArrayTy, // Array
     SliceTy, // Slice
@@ -70,7 +70,7 @@ pub enum TokenKind {
     Greater,      // >
     GreaterEqual, // >=
     // Assignment
-    Assign,         // =
+    Assign, // =
     // Reference
     Ref,   // &
     Deref, // @
@@ -80,16 +80,17 @@ pub enum TokenKind {
     Pipe,  // |
     Defun, // ->
     // Other Miscellaneous Operator Things
-    ParenLeft,    // (
-    ParenRight,   // )
-    BracketLeft,  // [
-    BracketRight, // ]
-    BraceLeft,    // {
-    BraceRight,   // }
-    Constrain,    // :
-    ModuleAccess, // .
-    Semicolon,    // ;
-    Ignore,       // _
+    ParenLeft,     // (
+    ParenRight,    // )
+    BracketLeft,   // [
+    BracketRight,  // ]
+    BraceLeft,     // {
+    BraceRight,    // }
+    ConstrainType, // :
+    ConstrainKind, // ::
+    ModuleAccess,  // .
+    Semicolon,     // ;
+    Ignore,        // _
     // Comments, and Attributes
     Metadata { value: Vec<u8>, significant: bool }, // #!attribute and # comment
 }
