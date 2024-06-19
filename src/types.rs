@@ -1,5 +1,7 @@
 use std::collections::HashMap;
 
+use lsp_types::Range;
+
 use crate::hir;
 use crate::hir::Augmented;
 
@@ -22,10 +24,10 @@ impl std::fmt::Display for KindValue {
         match self {
             KindValue::Unknown => write!(f, "Unknown"),
             KindValue::Type => write!(f, "Type"),
-            KindValue::Val => write!(f, "Val"),
             KindValue::Int => write!(f, "Int"),
             KindValue::Float => write!(f, "Float"),
             KindValue::Bool => write!(f, "Bool"),
+            KindValue::Val => write!(f, "Val"),
             KindValue::Generic {
                 paramkinds,
                 returnkind,
@@ -172,19 +174,10 @@ impl std::fmt::Display for TypeValue {
     }
 }
 
-fn print_typaram(typaram: &Augmented<hir::TypePatExpr>) -> String {
-    match &typaram.val {
-        hir::TypePatExpr::Error => "Error".to_string(),
-        hir::TypePatExpr::Identifier(id) => {
-            format!("Identifier({})", id,)
-        }
-        hir::TypePatExpr::Typed { ref id, ref kind } => {
-            format!(
-                "Typed {{ id: {}, kind: {} }}",
-                id,
-                typecheck::evaluate_hir_kind(kind)
-            )
-        }
+pub fn print_typaram(typaram: &Option<TypeParam>) -> String {
+    match typaram {
+        Some(TypeParam { range, id }) => format!("Some({})", id),
+        None => "None".to_string(),
     }
 }
 
@@ -196,6 +189,12 @@ pub enum TypeValueConstructor {
     SliceConstructor,
     IntConstructor,
     FloatConstructor,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct TypeParam {
+    pub range: Range,
+    pub id: usize,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -228,7 +227,7 @@ pub enum TypeValue {
     // type of a generic value. Instantiated at every use point
     // type -> type
     Generic {
-        typarams: Vec<Augmented<hir::TypePatExpr>>,
+        typarams: Vec<Option<TypeParam>>,
         body: Box<TypeValue>,
     },
     // where the type constructor is symbolic

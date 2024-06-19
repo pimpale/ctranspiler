@@ -5,13 +5,14 @@ use num_bigint::{BigInt, TryFromBigIntError};
 use num_rational::{BigRational, Ratio};
 use num_traits::ToPrimitive;
 
+use crate::ast::IdentifierModifier;
 use crate::dlogger::DiagnosticLogger;
+use crate::hir;
 use crate::hir::{Augmented, Environment};
-use crate::types::{KindValue, TypeValue, TypeValueConstructor};
-use crate::{hir};
+use crate::types::{KindValue, TypeParam, TypeValue, TypeValueConstructor};
 
 // gets a hint but doesn't bind any free variables yet
-// doesn't thoroughly traverse the tree, so make sure to call typecheck_type_expr_and_patch on this node afterwards
+// doesn't thoroughly traverse the tree, so make sure to call typecheck_val_expr_and_patch on this node afterwards
 pub fn typehint_of_val_pat_and_patch(
     v: &mut Augmented<hir::ValPatExpr>,
     dlogger: &mut DiagnosticLogger,
@@ -20,7 +21,7 @@ pub fn typehint_of_val_pat_and_patch(
     match &mut v.val {
         hir::ValPatExpr::Error => TypeValue::Unknown,
         hir::ValPatExpr::Ignore => TypeValue::Unknown,
-        hir::ValPatExpr::Identifier { mutable, id } => TypeValue::Unknown,
+        hir::ValPatExpr::Identifier { .. } => TypeValue::Unknown,
         hir::ValPatExpr::StructLiteral(fields) => TypeValue::Struct(
             fields
                 .iter_mut()
@@ -32,8 +33,13 @@ pub fn typehint_of_val_pat_and_patch(
                 })
                 .collect(),
         ),
-        hir::ValPatExpr::New { ty, .. } => typecheck_type_expr_and_patch(ty, dlogger, checker),
-        hir::ValPatExpr::Typed { ty, .. } => typecheck_type_expr_and_patch(ty, dlogger, checker),
+        hir::ValPatExpr::New { ty, .. } => {
+            typecheck_val_expr_and_patch(ty, &TypeValue::Unknown, dlogger, checker)
+        }
+        hir::ValPatExpr::Typed { ty, .. } => {
+            typecheck_val_expr_and_patch(ty, &TypeValue::Unknown, dlogger, checker)
+        }
+        hir::ValPatExpr::Kinded { pat, .. } => typehint_of_val_pat_and_patch(pat, dlogger, checker),
     }
 }
 
@@ -55,25 +61,6 @@ where
             dlogger.log_type_mismatch(v.range, &actual.to_string(), &expected.to_string());
             v.val = T::default();
             TypeValue::Unknown
-        }
-    }
-}
-
-pub fn typecheck_type_pat_expr_and_patch(
-    v: &mut Augmented<hir::TypePatExpr>,
-    expected_type: &TypeValue,
-    _dlogger: &mut DiagnosticLogger,
-    checker: &mut Environment,
-) -> TypeValue {
-    match &mut v.val {
-        hir::TypePatExpr::Error => TypeValue::Unknown,
-        hir::TypePatExpr::Identifier(id) => {
-            checker.type_table[*id] = Some(expected_type.clone());
-            expected_type.clone()
-        }
-        hir::TypePatExpr::Typed { id, .. } => {
-            checker.type_table[*id] = Some(expected_type.clone());
-            expected_type.clone()
         }
     }
 }
@@ -192,116 +179,18 @@ fn concretize_type_expr(constructor: &TypeValue, tyargs: Vec<TypeValue>) -> Type
                 "wrong number of arguments; should be kindchecked"
             );
             let mut bindings = HashMap::new();
-            for (typat, tyarg) in std::iter::zip(typarams, tyargs) {
-                match &typat.val {
-                    hir::TypePatExpr::Typed { id, .. } => {
+            for (typaram, tyarg) in std::iter::zip(typarams, tyargs) {
+                match typaram {
+                    Some(TypeParam { id, .. }) => {
                         bindings.insert(*id, tyarg);
                     }
-                    hir::TypePatExpr::Identifier(id) => {
-                        bindings.insert(*id, tyarg);
-                    }
-                    hir::TypePatExpr::Error => {}
+                    None => {}
                 }
             }
             subst(body, &bindings)
         }
         _ => {
             unreachable!("concretization of a non-generic; should have been kindchecked");
-        }
-    }
-}
-
-// if we encounter an error, we log it
-// NOTE: we assume that all identifiers have already been resolved.
-pub fn typecheck_type_expr_and_patch(
-    v: &mut Augmented<hir::TypeExpr>,
-    dlogger: &mut DiagnosticLogger,
-    checker: &mut Environment,
-) -> TypeValue {
-    match &mut v.val {
-        hir::TypeExpr::Error => TypeValue::Unknown,
-        hir::TypeExpr::Identifier(id) => TypeValue::SymbolicVariable(*id),
-        hir::TypeExpr::BoolTy => TypeValue::Bool,
-        hir::TypeExpr::RefConstructorTy => TypeValue::RefConstructor,
-        hir::TypeExpr::ArrayConstructorTy => TypeValue::ArrayConstructor,
-        hir::TypeExpr::SliceConstructorTy => TypeValue::SliceConstructor,
-        hir::TypeExpr::IntConstructorTy => TypeValue::IntConstructor,
-        hir::TypeExpr::FloatConstructorTy => TypeValue::FloatConstructor,
-        hir::TypeExpr::Int(ref i) => match i64::try_from(i) {
-            Ok(i) => TypeValue::IntLit(i),
-            Err(e) => {
-                dlogger.log_int_too_large(v.range, 64);
-                v.val = hir::TypeExpr::Error;
-                TypeValue::Unknown
-            }
-        },
-        hir::TypeExpr::Bool(i) => TypeValue::BoolLit(*i),
-        hir::TypeExpr::Float(ref i) => {
-            let (n, d) = i.reduced().into_raw();
-            let n = ToPrimitive::to_f64(&n).unwrap();
-            let d = ToPrimitive::to_f64(&d).unwrap();
-            TypeValue::FloatLit(n / d)
-        }
-        hir::TypeExpr::Fn { paramtys, returnty } => TypeValue::Fn {
-            paramtys: paramtys
-                .iter_mut()
-                .map(|ty| typecheck_type_expr_and_patch(ty, dlogger, checker))
-                .collect(),
-            returntype: Box::new(typecheck_type_expr_and_patch(returnty, dlogger, checker)),
-        },
-        hir::TypeExpr::Struct(fields) => TypeValue::Struct(
-            fields
-                .iter_mut()
-                .map(|(name, expr)| {
-                    (
-                        name.val.clone(),
-                        typecheck_type_expr_and_patch(expr, dlogger, checker),
-                    )
-                })
-                .collect(),
-        ),
-        hir::TypeExpr::Enum(fields) => TypeValue::Enum(
-            fields
-                .iter_mut()
-                .map(|(name, expr)| {
-                    (
-                        name.val.clone(),
-                        typecheck_type_expr_and_patch(expr, dlogger, checker),
-                    )
-                })
-                .collect(),
-        ),
-        hir::TypeExpr::Union(fields) => TypeValue::Union(
-            fields
-                .iter_mut()
-                .map(|(name, expr)| {
-                    (
-                        name.val.clone(),
-                        typecheck_type_expr_and_patch(expr, dlogger, checker),
-                    )
-                })
-                .collect(),
-        ),
-        hir::TypeExpr::Concretization { genericty, tyargs } => {
-            // first we evaluate the type of the generic function
-            let generic_val = typecheck_type_expr_and_patch(genericty, dlogger, checker);
-            let tyargs = tyargs
-                .iter_mut()
-                .map(|x| typecheck_type_expr_and_patch(x, dlogger, checker))
-                .collect::<Vec<_>>();
-            // attempt to concretize the type (will only work if there are no symbolic variables in the type)
-            concretize_type_expr(&generic_val, tyargs)
-        }
-        hir::TypeExpr::Generic {
-            params,
-            returnkind: _,
-            body,
-        } => {
-            let body = Box::new(typecheck_type_expr_and_patch(body, dlogger, checker));
-            TypeValue::Generic {
-                typarams: params.clone(),
-                body,
-            }
         }
     }
 }
@@ -315,10 +204,16 @@ pub fn typecheck_val_pat_and_patch(
     match &mut v.val {
         hir::ValPatExpr::Error => TypeValue::Unknown,
         hir::ValPatExpr::Ignore => expected_type.clone(),
-        hir::ValPatExpr::Identifier { id, .. } => {
-            checker.type_table[*id] = Some(expected_type.clone());
-            expected_type.clone()
-        }
+        hir::ValPatExpr::Identifier { id, .. } => match expected_type {
+            TypeValue::Unknown => {
+                dlogger.log_cannot_infer_pattern_type(v.range);
+                TypeValue::Unknown
+            }
+            expected_type => {
+                checker.type_table[*id] = Some(expected_type.clone());
+                expected_type.clone()
+            }
+        },
         hir::ValPatExpr::StructLiteral(fields) => {
             let mut expected_fields = match expected_type {
                 TypeValue::Struct(fields) => fields.clone(),
@@ -359,7 +254,8 @@ pub fn typecheck_val_pat_and_patch(
         }
         hir::ValPatExpr::New { pat, ty } => {
             // the symbolic type we are deconstructing
-            let symbolic_type_to_construct = typecheck_type_expr_and_patch(ty, dlogger, checker);
+            let symbolic_type_to_construct =
+                typecheck_val_expr_and_patch(ty, &TypeValue::Unknown, dlogger, checker);
             let dereferenced_type = match symbolic_type_to_construct {
                 TypeValue::SymbolicVariable(id) => checker.type_table[id]
                     .clone()
@@ -379,9 +275,13 @@ pub fn typecheck_val_pat_and_patch(
             expect_type(v, expected_type, symbolic_type_to_construct, dlogger)
         }
         hir::ValPatExpr::Typed { pat, ty } => {
-            let asserted_type = typecheck_type_expr_and_patch(ty, dlogger, checker);
+            let asserted_type =
+                typecheck_val_expr_and_patch(ty, &TypeValue::Unknown, dlogger, checker);
             typecheck_val_pat_and_patch(pat, &asserted_type, dlogger, checker);
             expect_type(ty, expected_type, asserted_type, dlogger)
+        }
+        hir::ValPatExpr::Kinded { pat, .. } => {
+            typecheck_val_pat_and_patch(pat, expected_type, dlogger, checker)
         }
     }
 }
@@ -425,43 +325,48 @@ pub fn typecheck_val_expr_and_patch(
     match &mut v.val {
         hir::ValExpr::Error => TypeValue::Unknown,
         hir::ValExpr::Identifier(id) => {
-            let actual_type = checker.type_table[*id]
-                .clone()
-                .expect("type not initialized yet");
+            let actual_type = match checker.modifier_table[*id] {
+                IdentifierModifier::Nominal => TypeValue::SymbolicVariable(*id),
+                _ => checker.type_table[*id]
+                    .clone()
+                    .expect("type not initialized yet"),
+            };
             expect_type(v, expected_type, actual_type, dlogger)
         }
-        hir::ValExpr::Bool(_) => expect_type(v, expected_type, TypeValue::Bool, dlogger),
-        hir::ValExpr::Int(_) => match expected_type {
+        hir::ValExpr::Bool(i) => match expected_type {
+            TypeValue::Bool => TypeValue::Bool,
+            _ => expect_type(v, expected_type, TypeValue::BoolLit(*i), dlogger),
+        },
+        hir::ValExpr::Int(ref i) => match expected_type {
             // takes the shape of the expected type
             w @ TypeValue::Concretization {
                 constructor: TypeValueConstructor::IntConstructor,
                 tyargs,
             } => w.clone(),
-            _ => expect_type(
-                v,
-                expected_type,
-                TypeValue::Concretization {
-                    constructor: TypeValueConstructor::IntConstructor,
-                    tyargs: vec![TypeValue::Unknown, TypeValue::Unknown],
-                },
-                dlogger,
-            ),
+            // default to type variable
+            _ => match i64::try_from(i) {
+                Ok(i) => expect_type(v, expected_type, TypeValue::IntLit(i), dlogger),
+                Err(e) => {
+                    dlogger.log_int_too_large(v.range, 64);
+                    v.val = hir::ValExpr::Error;
+                    TypeValue::Unknown
+                }
+            },
         },
-        hir::ValExpr::Float(_) => match expected_type {
+        hir::ValExpr::Float(ref i) => match expected_type {
             // takes the shape of the expected type
             w @ TypeValue::Concretization {
                 constructor: TypeValueConstructor::FloatConstructor,
                 tyargs,
             } => w.clone(),
-            _ => expect_type(
-                v,
-                expected_type,
-                TypeValue::Concretization {
-                    constructor: TypeValueConstructor::FloatConstructor,
-                    tyargs: vec![TypeValue::Unknown],
-                },
-                dlogger,
-            ),
+            // default to type variable
+            _ => {
+                let (n, d) = i.reduced().into_raw();
+                let n = ToPrimitive::to_f64(&n).unwrap();
+                let d = ToPrimitive::to_f64(&d).unwrap();
+                let actual = TypeValue::FloatLit(n / d);
+                expect_type(v, expected_type, actual, dlogger)
+            }
         },
         hir::ValExpr::String(s) => {
             let l = s.len();
@@ -521,7 +426,8 @@ pub fn typecheck_val_expr_and_patch(
         }
         hir::ValExpr::New { ty, val } => {
             // the symbolic type we are constructing
-            let symbolic_type_to_construct = typecheck_type_expr_and_patch(ty, dlogger, checker);
+            let symbolic_type_to_construct =
+                typecheck_val_expr_and_patch(ty, &TypeValue::Unknown, dlogger, checker);
             let dereferenced_type = match symbolic_type_to_construct {
                 TypeValue::SymbolicVariable(id) => checker.type_table[id]
                     .clone()
@@ -569,7 +475,7 @@ pub fn typecheck_val_expr_and_patch(
                 typecheck_val_expr_and_patch(inner, &expected_inner, dlogger, checker);
             expect_type(v, expected_type, actual_type, dlogger)
         }
-        hir::ValExpr::Generic { params, body } => match expected_type {
+        hir::ValExpr::Generic { params, body, .. } => match expected_type {
             TypeValue::Generic {
                 typarams: expected_params,
                 body: expected_body,
@@ -625,7 +531,12 @@ pub fn typecheck_val_expr_and_patch(
 
             let actual_returnty = match returnty {
                 Some(returnty) => {
-                    let actual_returnty = typecheck_type_expr_and_patch(returnty, dlogger, checker);
+                    let actual_returnty = typecheck_val_expr_and_patch(
+                        returnty,
+                        &TypeValue::Unknown,
+                        dlogger,
+                        checker,
+                    );
                     // typecheck the returnty with the expected returnty
                     expect_type(returnty, expected_returnty, actual_returnty, dlogger)
                 }
@@ -924,7 +835,7 @@ pub fn typecheck_val_expr_and_patch(
                 typecheck_val_expr_and_patch(generic, &TypeValue::Unknown, dlogger, checker);
             let tyargs = tyargs
                 .iter_mut()
-                .map(|x| typecheck_type_expr_and_patch(x, dlogger, checker))
+                .map(|x| typecheck_val_expr_and_patch(x, &TypeValue::Unknown, dlogger, checker))
                 .collect::<Vec<_>>();
             // attempt to concretize the type (will only work if there are no symbolic variables in the type)
             concretize_type_expr(&generic_val, tyargs)
@@ -960,6 +871,57 @@ pub fn typecheck_val_expr_and_patch(
             // type of the function application
             expect_type(v, expected_type, *returnty, dlogger)
         }
+        hir::ValExpr::BoolTy => TypeValue::Bool,
+        hir::ValExpr::RefConstructorTy => TypeValue::RefConstructor,
+        hir::ValExpr::ArrayConstructorTy => TypeValue::ArrayConstructor,
+        hir::ValExpr::SliceConstructorTy => TypeValue::SliceConstructor,
+        hir::ValExpr::IntConstructorTy => TypeValue::IntConstructor,
+        hir::ValExpr::FloatConstructorTy => TypeValue::FloatConstructor,
+        hir::ValExpr::FnTy { paramtys, returnty } => TypeValue::Fn {
+            paramtys: paramtys
+                .iter_mut()
+                .map(|ty| typecheck_val_expr_and_patch(ty, &TypeValue::Unknown, dlogger, checker))
+                .collect(),
+            returntype: Box::new(typecheck_val_expr_and_patch(
+                returnty,
+                &TypeValue::Unknown,
+                dlogger,
+                checker,
+            )),
+        },
+        hir::ValExpr::Struct(fields) => TypeValue::Struct(
+            fields
+                .iter_mut()
+                .map(|(name, expr)| {
+                    (
+                        name.val.clone(),
+                        typecheck_val_expr_and_patch(expr, &TypeValue::Unknown, dlogger, checker),
+                    )
+                })
+                .collect(),
+        ),
+        hir::ValExpr::Enum(fields) => TypeValue::Enum(
+            fields
+                .iter_mut()
+                .map(|(name, expr)| {
+                    (
+                        name.val.clone(),
+                        typecheck_val_expr_and_patch(expr, &TypeValue::Unknown, dlogger, checker),
+                    )
+                })
+                .collect(),
+        ),
+        hir::ValExpr::Union(fields) => TypeValue::Union(
+            fields
+                .iter_mut()
+                .map(|(name, expr)| {
+                    (
+                        name.val.clone(),
+                        typecheck_val_expr_and_patch(expr, &TypeValue::Unknown, dlogger, checker),
+                    )
+                })
+                .collect(),
+        ),
     }
 }
 
@@ -971,12 +933,6 @@ pub fn typecheck_block_statement_and_patch(
     match &mut v.val {
         hir::BlockStatement::Error => {}
         hir::BlockStatement::NoOp => {}
-        hir::BlockStatement::TypeDef { value, typat } => {
-            // try calculating the kind of the type expression
-            let ty = typecheck_type_expr_and_patch(value, dlogger, checker);
-            // bind the resolved kind to all the identifiers in type pattern
-            typecheck_type_pat_expr_and_patch(typat, &ty, dlogger, checker);
-        }
         hir::BlockStatement::Let { pat, value } => {
             // get hint from the value pattern
             let type_hint = typehint_of_val_pat_and_patch(pat, dlogger, checker);
@@ -1021,7 +977,7 @@ pub fn typecheck_block_statement_and_patch(
             if let Some(by) = by {
                 typecheck_val_expr_and_patch(by, &ty, dlogger, checker);
             }
-            
+
             typecheck_val_pat_and_patch(pattern, &ty, dlogger, checker);
 
             for statement in body {
@@ -1041,13 +997,7 @@ pub fn typecheck_file_statement_and_patch(
 ) {
     match &mut v.val {
         hir::FileStatement::Error => {}
-        hir::FileStatement::TypeDef { value, typat } => {
-            // try calculating the type of the type expression
-            let ty = typecheck_type_expr_and_patch(value, dlogger, checker);
-            // bind the resolved type to all the identifiers in type pattern
-            typecheck_type_pat_expr_and_patch(typat, &ty, dlogger, checker);
-        }
-        hir::FileStatement::ValDef { pat, value } => {
+        hir::FileStatement::Let { pat, value } => {
             // get hint from the value pattern
             let ty_hint = typehint_of_val_pat_and_patch(pat, dlogger, checker);
             let ty = typecheck_val_expr_and_patch(value, &ty_hint, dlogger, checker);

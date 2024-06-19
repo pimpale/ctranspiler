@@ -7,97 +7,6 @@ use crate::ast;
 use crate::dlogger::DiagnosticLogger;
 use crate::hir::*;
 
-impl Environment {
-    fn introduce_identifier(
-        &mut self,
-        ast::Identifier { identifier, range }: ast::Identifier,
-        dlogger: &mut DiagnosticLogger,
-    ) -> Option<usize> {
-        match identifier {
-            Some(identifier) => {
-                if let Some(previous_range) = self
-                    .names_in_scope
-                    .iter()
-                    .rev()
-                    .flat_map(|scope| match scope.get(&identifier) {
-                        Some(Name::Value(id)) => Some(self.range_table[*id]),
-                        _ => None,
-                    })
-                    .next()
-                {
-                    dlogger.log_duplicate_identifier(range, previous_range, &identifier);
-                    None
-                } else {
-                    let id = self.name_table.len();
-                    self.names_in_scope
-                        .last_mut()
-                        .unwrap()
-                        .insert(identifier.clone(), Name::Value(id));
-                    self.name_table.push(
-                        [
-                            self.namespaces.last().unwrap(),
-                            [identifier.clone()].as_slice(),
-                        ]
-                        .concat(),
-                    );
-                    self.range_table.push(range);
-                    self.kind_table.push(None);
-                    self.type_table.push(None);
-                    Some(id)
-                }
-            }
-            None => None,
-        }
-    }
-
-    fn use_namespace(&mut self, identifier: ast::Identifier, dlogger: &mut DiagnosticLogger) {
-        match &identifier.identifier {
-            Some(identifier_name) => match self
-                .names_in_scope
-                .iter()
-                .rev()
-                .flat_map(|scope| match scope.get(identifier_name).cloned() {
-                    Some(Name::Namespace(v)) => Some(v),
-                    _ => None,
-                })
-                .next()
-            {
-                Some(id) => self.names_in_scope.last_mut().unwrap().extend(id),
-                None => {
-                    dlogger.log_unknown_identifier(identifier.range, identifier_name);
-                }
-            },
-            None => {}
-        }
-    }
-
-    fn lookup_identifier(
-        &self,
-        identifier: ast::Identifier,
-        dlogger: &mut DiagnosticLogger,
-    ) -> Option<usize> {
-        match &identifier.identifier {
-            Some(identifier_name) => match self
-                .names_in_scope
-                .iter()
-                .rev()
-                .flat_map(|scope| match scope.get(identifier_name) {
-                    Some(Name::Value(id)) => Some(id),
-                    _ => None,
-                })
-                .next()
-            {
-                Some(id) => Some(*id),
-                None => {
-                    dlogger.log_unknown_identifier(identifier.range, identifier_name);
-                    None
-                }
-            },
-            None => None,
-        }
-    }
-}
-
 fn tr_aug<T, U>(
     x: ast::Augmented<T>,
     env: &mut Environment,
@@ -221,11 +130,11 @@ fn translate_augpatexpr(
         },
         ast::ValPatExpr::Identifier {
             identifier,
-            mutable,
+            modifier,
         } => Augmented {
             range,
             val: match env.introduce_identifier(identifier, dlogger) {
-                Some(id) => ValPatExpr::Identifier { id, mutable },
+                Some(id) => ValPatExpr::Identifier { id, modifier },
                 None => ValPatExpr::Error,
             },
         },
@@ -234,7 +143,10 @@ fn translate_augpatexpr(
             val: ValPatExpr::StructLiteral(translate_augstructitemexpr(
                 |x, env, dlogger| translate_augpatexpr(x, env, dlogger),
                 |id, env, dlogger| match env.introduce_identifier(id, dlogger) {
-                    Some(id) => ValPatExpr::Identifier { mutable: false, id },
+                    Some(id) => ValPatExpr::Identifier {
+                        modifier: ast::IdentifierModifier::None,
+                        id,
+                    },
                     None => ValPatExpr::Error,
                 },
                 env,
@@ -820,7 +732,7 @@ fn translate_blockexpr_val(
     }
 }
 
-fn translate_augfilestatement(
+pub fn translate_augfilestatement(
     ast::Augmented { range, val, .. }: ast::Augmented<ast::FileStatement>,
     env: &mut Environment,
     dlogger: &mut DiagnosticLogger,
@@ -835,7 +747,7 @@ fn translate_augfilestatement(
             let pat = Box::new(translate_augpatexpr(*pat, env, dlogger));
 
             vec![Augmented {
-                val: FileStatement::ValDef { pat, value },
+                val: FileStatement::Let { pat, value },
                 range: range.clone(),
             }]
         }
@@ -844,47 +756,29 @@ fn translate_augfilestatement(
             vec![]
         }
         ast::FileStatement::Namespace {
-            namespace:
-                ast::Identifier {
-                    identifier,
-                    range: identifier_range,
-                },
+            namespace: ast::Identifier { identifier, .. },
             items,
         } => {
             let mut out_items = vec![];
             if let Some(identifier) = identifier {
-                // push prefix
-                env.namespaces.push(identifier.clone());
                 // new scope
                 env.names_in_scope.push(HashMap::new());
+                // push prefix to the last prefix scope
+                env.namespaces.last_mut().unwrap().push(identifier.clone());
                 // translate items
                 for item in items {
                     out_items.extend(translate_augfilestatement(item, env, dlogger));
                 }
+                // pop prefix
+                env.namespaces.last_mut().unwrap().pop();
                 // pop scope and insert into the parent scope
                 let namespace_scope = env.names_in_scope.pop().unwrap();
                 env.names_in_scope
                     .last_mut()
                     .unwrap()
                     .insert(identifier.clone(), Name::Namespace(namespace_scope));
-                // pop prefix
-                env.namespaces.pop();
             }
             out_items
         }
     }
-}
-
-pub fn init_env(dlogger: DiagnosticLogger) -> Environment {
-    return Environment {
-        type_names_in_scope: vec![HashMap::new()],
-        val_names_in_scope: vec![HashMap::new()],
-        prefixes: vec![],
-        use_prefixes: vec![IndexMap::new()],
-        dlogger,
-        type_name_table: vec![],
-        type_range_table: vec![],
-        val_name_table: vec![],
-        val_range_table: vec![],
-    };
 }

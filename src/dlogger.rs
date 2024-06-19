@@ -968,4 +968,32 @@ impl DiagnosticLogger {
             data: None,
         })
     }
+
+    pub fn log_cannot_get_kind_of_member(&mut self, range: Range, member: &str) {
+        self.log(Diagnostic {
+            range,
+            severity: Some(DiagnosticSeverity::ERROR),
+            code: Some(NumberOrString::Number(74)),
+            code_description: None,
+            source: self.source.clone(),
+            message: format!("cannot get kind of member `{}`", member),
+            related_information: None,
+            tags: None,
+            data: None,
+        })
+    }
+
+    pub fn log_cannot_get_kind_of_type(&mut self, range: Range, found_type: &str) {
+        self.log(Diagnostic {
+            range,
+            severity: Some(DiagnosticSeverity::ERROR),
+            code: Some(NumberOrString::Number(75)),
+            code_description: None,
+            source: self.source.clone(),
+            message: format!("cannot get kind of type `{}`", found_type),
+            related_information: None,
+            tags: None,
+            data: None,
+        })
+    }
 }

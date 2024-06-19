@@ -17,10 +17,8 @@ use std::io::Read;
 
 use astbuilder::construct_ast;
 use dlogger::DiagnosticLog;
-use hir_construct::construct_hir;
+use hir::Environment;
 use tokenize::tokenize;
-use typecheck::TypeChecker;
-
 
 fn main() {
     let mut log = DiagnosticLog::new();
@@ -29,49 +27,30 @@ fn main() {
     // lex input
     let tokenstream = tokenize(charstream, log.get_logger(Some(String::from("acnc-lex"))));
     // parse tokens
-    let ast_filestatement_stream = construct_ast(tokenstream, log.get_logger(Some(String::from("acnc-ast"))));
-    
-    
-    // resolve variables and desugar
-    let (
-        hir,
-        type_name_table,
-        type_range_table,
-        val_name_table,
-        val_range_table,
-    ) = construct_hir(
-        ast,
-        log.get_logger(Some(String::from("acnc-hir (construct)"))),
-    );
+    let ast_filestatement_stream =
+        construct_ast(tokenstream, log.get_logger(Some(String::from("acnc-ast"))));
 
-    // construct typechecking data
-    let typechecker = TypeChecker {
-        type_name_table: &type_name_table,
-        type_range_table: &type_range_table,
-        val_name_table: &val_name_table,
-        val_range_table: &val_range_table,
-        type_kind_table: todo!(),
-        type_type_table: todo!(),
-        val_kind_table: todo!(),
-        val_type_table: todo!(),
+    // create environment
+    let mut env = Environment::new();
+    // create diagnostic logger
+    let mut dlogger = log.get_logger(Some(String::from("acnc-hir")));
+
+    for filestatement in ast_filestatement_stream {
+        // desugar
+        let hir_filestatement =
+            hir_construct::translate_augfilestatement(filestatement, &mut env, &mut dlogger);
+        for mut filestatement in hir_filestatement {
+            // kindcheck and typecheck
+            hir_kindcheck::kindcheck_file_statement_and_patch(
+                &mut filestatement,
+                &mut dlogger,
+                &mut env,
+            );
+            hir_typecheck::typecheck_file_statement_and_patch(
+                &mut filestatement,
+                &mut dlogger,
+                &mut env,
+            );
+        }
     }
-
-    // kindcheck
-    let type_kind_table = hir_kindcheck::do_kindcheck(
-        &mut hir,
-        &type_range_table,
-        &type_name_table,
-        log.get_logger(Some(String::from("acnc-hir (kindcheck)"))),
-    );
-
-    // typecheck
-    let val_kind_table = hir_typecheck::do_typecheck(
-        &mut hir,
-        &type_range_table,
-        &type_name_table,
-        &type_kind_table,
-        &val_range_table,
-        &val_name_table,
-        log.get_logger(Some(String::from("acnc-hir (typecheck)"))),
-    );
 }

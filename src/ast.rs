@@ -85,11 +85,18 @@ pub struct CaseExpr {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, AsRefStr)]
+pub enum IdentifierModifier {
+    Mutable,
+    Nominal,
+    None,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, AsRefStr)]
 pub enum ValPatExpr {
     Error,
     Ignore,
     Identifier {
-        mutable: bool,
+        modifier: IdentifierModifier,
         identifier: Identifier,
     },
     // destructure anonymous struct

@@ -1,3 +1,5 @@
+use crate::dlogger;
+
 use super::ast::*;
 use super::codereader::union_of;
 use super::dlogger::DiagnosticLogger;
@@ -1004,6 +1006,19 @@ fn parse_patexpr_term<TkIter: Iterator<Item = Token>>(
                 val: ValPatExpr::Ignore,
             }
         }
+        Some(TokenKind::Nominal) => {
+            let mut_tk = tkiter.next().unwrap();
+            assert!(mut_tk.kind == Some(TokenKind::Nominal));
+            let identifier = expect_identifier(tkiter, dlogger, "nominal identifier pattern");
+            Augmented {
+                range: union_of(mut_tk.range, identifier.range),
+                metadata,
+                val: ValPatExpr::Identifier {
+                    identifier,
+                    modifier: IdentifierModifier::Nominal,
+                },
+            }
+        }
         Some(TokenKind::Mut) => {
             let mut_tk = tkiter.next().unwrap();
             assert!(mut_tk.kind == Some(TokenKind::Mut));
@@ -1013,7 +1028,7 @@ fn parse_patexpr_term<TkIter: Iterator<Item = Token>>(
                 metadata,
                 val: ValPatExpr::Identifier {
                     identifier,
-                    mutable: true,
+                    modifier: IdentifierModifier::Mutable,
                 },
             }
         }
@@ -1028,7 +1043,7 @@ fn parse_patexpr_term<TkIter: Iterator<Item = Token>>(
                         identifier: Some(identifier),
                         range: tk.range,
                     },
-                    mutable: false,
+                    modifier: IdentifierModifier::None,
                 },
             }
         }
@@ -1719,18 +1734,16 @@ pub fn parse_filestatement<TkIter: Iterator<Item = Token>>(
     }
 }
 
-struct StatementIterator<'a, 'b, Source: Iterator<Item = Token>, Statement> {
-    source: &'a mut PeekMoreIterator<Source>,
-    dlogger: &'b mut DiagnosticLogger,
+struct StatementIterator<Source: Iterator<Item = Token>, Statement> {
+    source: PeekMoreIterator<Source>,
+    dlogger: DiagnosticLogger,
     parse_fn: fn(&mut PeekMoreIterator<Source>, &mut DiagnosticLogger) -> Augmented<Statement>,
 }
 
-impl<'a, 'b, Source: Iterator<Item = Token>, Statement>
-    StatementIterator<'a, 'b, Source, Statement>
-{
+impl<Source: Iterator<Item = Token>, Statement> StatementIterator<Source, Statement> {
     fn new(
-        source: &'a mut PeekMoreIterator<Source>,
-        dlogger: &'b mut DiagnosticLogger,
+        source: PeekMoreIterator<Source>,
+        dlogger: DiagnosticLogger,
         parse_fn: fn(&mut PeekMoreIterator<Source>, &mut DiagnosticLogger) -> Augmented<Statement>,
     ) -> Self {
         Self {
@@ -1741,9 +1754,7 @@ impl<'a, 'b, Source: Iterator<Item = Token>, Statement>
     }
 }
 
-impl<'a, 'b, Source: Iterator<Item = Token>, Statement> Iterator
-    for StatementIterator<'a, 'b, Source, Statement>
-{
+impl<Source: Iterator<Item = Token>, Statement> Iterator for StatementIterator<Source, Statement> {
     type Item = Augmented<Statement>;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -1762,4 +1773,11 @@ impl<'a, 'b, Source: Iterator<Item = Token>, Statement> Iterator
 
         Some(statement)
     }
+}
+
+pub fn construct_ast<Source: IntoIterator<Item = Token>>(
+    source: Source,
+    dlogger: DiagnosticLogger,
+) -> impl Iterator<Item = Augmented<FileStatement>> {
+    StatementIterator::new(source.into_iter().peekmore(), dlogger, parse_filestatement)
 }

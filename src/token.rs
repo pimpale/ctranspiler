@@ -10,6 +10,7 @@ pub enum TokenKind {
     // Keywords
     Case,      // case
     Let,       // let
+    Rec,       // rec
     Mut,       // mut
     Set,       // set
     In,        // in
@@ -27,6 +28,7 @@ pub enum TokenKind {
     Union,     // union
     Block,     // block
     Generic,   // generic
+    Nominal,   // nominal
     // Values
     Lifetime(Vec<u8>),                      // 'lifetime
     Inf,                                    // inf

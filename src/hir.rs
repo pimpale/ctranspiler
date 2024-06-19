@@ -6,7 +6,7 @@ use num_bigint::BigInt;
 use num_rational::BigRational;
 use strum::AsRefStr;
 
-use crate::types::{KindValue, TypeValue};
+use crate::{ast, dlogger::DiagnosticLogger, types::{KindValue, TypeValue}};
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Augmented<T> {
@@ -52,7 +52,7 @@ pub enum ValPatExpr {
     Error,
     Ignore,
     Identifier {
-        mutable: bool,
+        modifier: ast::IdentifierModifier,
         id: usize,
     },
     StructLiteral(Vec<(Augmented<String>, Augmented<ValPatExpr>)>),
@@ -223,11 +223,7 @@ pub enum BlockStatement {
 #[derive(Clone, Debug)]
 pub enum FileStatement {
     Error,
-    TypeDef {
-        typat: Box<Augmented<ValPatExpr>>,
-        value: Box<Augmented<ValExpr>>,
-    },
-    ValDef {
+    Let {
         pat: Box<Augmented<ValPatExpr>>,
         value: Box<Augmented<ValExpr>>,
     },
@@ -239,11 +235,6 @@ pub enum Name {
     Namespace(HashMap<String, Name>),
 }
 
-pub struct Scope {
-    pub names: IndexMap<String, Name>,
-    pub namespaces: Vec<String>,
-}
-
 pub struct Environment {
     // namespaces that we are nested in
     pub namespaces: Vec<Vec<String>>,
@@ -253,6 +244,114 @@ pub struct Environment {
     // the identifier table
     pub name_table: Vec<Vec<String>>,
     pub range_table: Vec<Range>,
+    pub modifier_table: Vec<ast::IdentifierModifier>,
+
+    // contains x for type variables, and type(x) for val variables
+    pub type_table: Vec<Option<TypeValue>>,    
+    // contains type(x) for type variables, and kind(x) for val variables
     pub kind_table: Vec<Option<KindValue>>,
-    pub type_table: Vec<Option<TypeValue>>,
+}
+
+
+impl Environment {
+    pub fn introduce_identifier(
+        &mut self,
+        ast::Identifier { identifier, range }: ast::Identifier,
+        dlogger: &mut DiagnosticLogger,
+    ) -> Option<usize> {
+        match identifier {
+            Some(identifier) => {
+                if let Some(previous_range) = self
+                    .names_in_scope
+                    .iter()
+                    .rev()
+                    .flat_map(|scope| match scope.get(&identifier) {
+                        Some(Name::Value(id)) => Some(self.range_table[*id]),
+                        _ => None,
+                    })
+                    .next()
+                {
+                    dlogger.log_duplicate_identifier(range, previous_range, &identifier);
+                    None
+                } else {
+                    let id = self.name_table.len();
+                    self.names_in_scope
+                        .last_mut()
+                        .unwrap()
+                        .insert(identifier.clone(), Name::Value(id));
+                    self.name_table.push(
+                        [
+                            self.namespaces.last().unwrap(),
+                            [identifier.clone()].as_slice(),
+                        ]
+                        .concat(),
+                    );
+                    self.range_table.push(range);
+                    self.kind_table.push(None);
+                    self.type_table.push(None);
+                    Some(id)
+                }
+            }
+            None => None,
+        }
+    }
+
+    pub fn use_namespace(&mut self, identifier: ast::Identifier, dlogger: &mut DiagnosticLogger) {
+        match &identifier.identifier {
+            Some(identifier_name) => match self
+                .names_in_scope
+                .iter()
+                .rev()
+                .flat_map(|scope| match scope.get(identifier_name).cloned() {
+                    Some(Name::Namespace(v)) => Some(v),
+                    _ => None,
+                })
+                .next()
+            {
+                Some(id) => self.names_in_scope.last_mut().unwrap().extend(id),
+                None => {
+                    dlogger.log_unknown_identifier(identifier.range, identifier_name);
+                }
+            },
+            None => {}
+        }
+    }
+
+    pub fn lookup_identifier(
+        &self,
+        identifier: ast::Identifier,
+        dlogger: &mut DiagnosticLogger,
+    ) -> Option<usize> {
+        match &identifier.identifier {
+            Some(identifier_name) => match self
+                .names_in_scope
+                .iter()
+                .rev()
+                .flat_map(|scope| match scope.get(identifier_name) {
+                    Some(Name::Value(id)) => Some(id),
+                    _ => None,
+                })
+                .next()
+            {
+                Some(id) => Some(*id),
+                None => {
+                    dlogger.log_unknown_identifier(identifier.range, identifier_name);
+                    None
+                }
+            },
+            None => None,
+        }
+    }
+
+    pub fn new() -> Self {
+        Environment {
+            namespaces: vec![vec![]],
+            names_in_scope: vec![HashMap::new()],
+            name_table: vec![],
+            modifier_table: vec![],
+            range_table: vec![],
+            type_table: vec![],
+            kind_table: vec![],
+        }
+    }
 }
