@@ -1,12 +1,15 @@
 use std::collections::HashMap;
 
-use indexmap::IndexMap;
 use lsp_types::Range;
 use num_bigint::BigInt;
 use num_rational::BigRational;
 use strum::AsRefStr;
 
-use crate::{ast, dlogger::DiagnosticLogger, types::{KindValue, TypeValue}};
+use crate::{
+    ast,
+    dlogger::DiagnosticLogger,
+    types::{KindValue, TypeValue},
+};
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Augmented<T> {
@@ -52,6 +55,7 @@ pub enum ValPatExpr {
     Error,
     Ignore,
     Identifier {
+        original: String,
         modifier: ast::IdentifierModifier,
         id: usize,
     },
@@ -95,6 +99,12 @@ pub enum ValBinaryOpKind {
     // Equality
     Eq,
     Neq,
+    // Assignment
+    Assign,
+    AssignAdd,
+    AssignSub,
+    AssignMul,
+    AssignDiv,
 }
 
 #[derive(Clone, Debug)]
@@ -154,13 +164,6 @@ pub enum ValExpr {
         fun: Box<Augmented<ValExpr>>,
         args: Vec<Augmented<ValExpr>>,
     },
-    // types
-    BoolTy,
-    RefConstructorTy,
-    ArrayConstructorTy,
-    SliceConstructorTy,
-    IntConstructorTy,
-    FloatConstructorTy,
     // type of a function
     FnTy {
         paramtys: Vec<Augmented<ValExpr>>,
@@ -180,6 +183,49 @@ pub enum ValExpr {
         returnkind: Option<Box<Augmented<KindExpr>>>,
         body: Box<Augmented<ValExpr>>,
     },
+    // builtins
+    // builtin types
+    BoolTy,
+    RefConstructorTy,
+    ArrayConstructorTy,
+    SliceConstructorTy,
+    IntConstructorTy,
+    FloatConstructorTy,
+    // builtin operators
+    // boolean operators
+    BoolNot, // bool -> bool
+    // integer operators
+    IntAddGen,         // [U](u, u) -> u
+    IntSubGen,         // [U](u, u) -> u
+    IntMulGen,         // [U](u, u) -> u
+    IntDivGen,         // [U](u, u) -> u
+    IntRemGen,         // [U](u, u) -> u
+    IntShlLGen,        // [U](u, u) -> u
+    IntShrLGen,        // [U](u, u) -> u
+    IntShrAGen,        // [U](u, u) -> u
+    IntRolGen,         // [U](u, u) -> u
+    IntRorGen,         // [U](u, u) -> u
+    IntAndGen,         // [U](u, u) -> u
+    IntOrGen,          // [U](u, u) -> u
+    IntXorGen,         // [U](u, u) -> u
+    IntInvGen,         // [U]u -> u
+    IntNegGen,         // [U]u -> u
+    // float operators
+    FloatAddGen,    // [F](f, f) -> f
+    FloatSubGen,    // [F](f, f) -> f
+    FloatMulGen,    // [F](f, f) -> f
+    FloatDivGen,    // [F](f, f) -> f
+    FloatRemGen,    // [F](f, f) -> f
+    FloatNegGen,    // [F]f -> f
+    // conversion operators
+    // convert int to int
+    ConvIntIntGen, // [T, U] t -> u
+    // convert float to float
+    ConvFloatFloatGen, // [T, U] f -> f
+    // convert int to float
+    ConvIntFloatGen, // [T, U] u -> f
+    // convert float to int
+    ConvFloatIntGen, // [T, U] f -> u
 }
 
 impl std::default::Default for ValExpr {
@@ -194,10 +240,6 @@ pub enum BlockStatement {
     NoOp,
     Let {
         pat: Box<Augmented<ValPatExpr>>,
-        value: Box<Augmented<ValExpr>>,
-    },
-    Set {
-        place: Box<Augmented<ValExpr>>,
         value: Box<Augmented<ValExpr>>,
     },
     IfThen {
@@ -247,18 +289,17 @@ pub struct Environment {
     pub modifier_table: Vec<ast::IdentifierModifier>,
 
     // contains x for type variables, and type(x) for val variables
-    pub type_table: Vec<Option<TypeValue>>,    
+    pub type_table: Vec<Option<TypeValue>>,
     // contains type(x) for type variables, and kind(x) for val variables
     pub kind_table: Vec<Option<KindValue>>,
 }
-
 
 impl Environment {
     pub fn introduce_identifier(
         &mut self,
         ast::Identifier { identifier, range }: ast::Identifier,
         dlogger: &mut DiagnosticLogger,
-    ) -> Option<usize> {
+    ) -> Option<(usize, String)> {
         match identifier {
             Some(identifier) => {
                 if let Some(previous_range) = self
@@ -289,7 +330,8 @@ impl Environment {
                     self.range_table.push(range);
                     self.kind_table.push(None);
                     self.type_table.push(None);
-                    Some(id)
+                    self.modifier_table.push(ast::IdentifierModifier::None);
+                    Some((id, identifier))
                 }
             }
             None => None,

@@ -134,7 +134,11 @@ fn translate_augpatexpr(
         } => Augmented {
             range,
             val: match env.introduce_identifier(identifier, dlogger) {
-                Some(id) => ValPatExpr::Identifier { id, modifier },
+                Some((id, original)) => ValPatExpr::Identifier {
+                    id,
+                    modifier,
+                    original,
+                },
                 None => ValPatExpr::Error,
             },
         },
@@ -143,9 +147,10 @@ fn translate_augpatexpr(
             val: ValPatExpr::StructLiteral(translate_augstructitemexpr(
                 |x, env, dlogger| translate_augpatexpr(x, env, dlogger),
                 |id, env, dlogger| match env.introduce_identifier(id, dlogger) {
-                    Some(id) => ValPatExpr::Identifier {
+                    Some((id, original)) => ValPatExpr::Identifier {
                         modifier: ast::IdentifierModifier::None,
                         id,
+                        original,
                     },
                     None => ValPatExpr::Error,
                 },
@@ -270,30 +275,6 @@ fn translate_augvalexpr(
             range,
             val: ValExpr::Deref(Box::new(translate_augvalexpr(*v, env, dlogger))),
         },
-        ast::ValExpr::BoolTy => Augmented {
-            range,
-            val: ValExpr::BoolTy,
-        },
-        ast::ValExpr::RefConstructorTy => Augmented {
-            range,
-            val: ValExpr::RefConstructorTy,
-        },
-        ast::ValExpr::ArrayConstructorTy => Augmented {
-            range,
-            val: ValExpr::ArrayConstructorTy,
-        },
-        ast::ValExpr::SliceConstructorTy => Augmented {
-            range,
-            val: ValExpr::SliceConstructorTy,
-        },
-        ast::ValExpr::IntConstructorTy => Augmented {
-            range,
-            val: ValExpr::IntConstructorTy,
-        },
-        ast::ValExpr::FloatConstructorTy => Augmented {
-            range,
-            val: ValExpr::FloatConstructorTy,
-        },
         ast::ValExpr::StructLiteral(items) => Augmented {
             range,
             val: ValExpr::StructLiteral(translate_augstructitemexpr(
@@ -312,77 +293,100 @@ fn translate_augvalexpr(
             left_operand,
             right_operand,
         } => {
-            let left_operand = Box::new(translate_augvalexpr(*left_operand, env, dlogger));
-            let right_operand = Box::new(translate_augvalexpr(*right_operand, env, dlogger));
             let val = match op {
                 ast::ValBinaryOpKind::Pipe => ValExpr::App {
-                    fun: right_operand,
-                    args: vec![*left_operand],
+                    fun: Box::new(translate_augvalexpr(*right_operand, env, dlogger)),
+                    args: vec![translate_augvalexpr(*left_operand, env, dlogger)],
+                },
+                ast::ValBinaryOpKind::Assign => ValExpr::BinaryOp {
+                    op: ValBinaryOpKind::Assign,
+                    left_operand: Box::new(translate_augvalexpr(*left_operand, env, dlogger)),
+                    right_operand: Box::new(translate_augvalexpr(*right_operand, env, dlogger)),
+                },
+                ast::ValBinaryOpKind::AssignAdd => ValExpr::BinaryOp {
+                    op: ValBinaryOpKind::AssignAdd,
+                    left_operand: Box::new(translate_augvalexpr(*left_operand, env, dlogger)),
+                    right_operand: Box::new(translate_augvalexpr(*right_operand, env, dlogger)),
+                },
+                ast::ValBinaryOpKind::AssignSub => ValExpr::BinaryOp {
+                    op: ValBinaryOpKind::AssignSub,
+                    left_operand: Box::new(translate_augvalexpr(*left_operand, env, dlogger)),
+                    right_operand: Box::new(translate_augvalexpr(*right_operand, env, dlogger)),
+                },
+                ast::ValBinaryOpKind::AssignMul => ValExpr::BinaryOp {
+                    op: ValBinaryOpKind::AssignMul,
+                    left_operand: Box::new(translate_augvalexpr(*left_operand, env, dlogger)),
+                    right_operand: Box::new(translate_augvalexpr(*right_operand, env, dlogger)),
+                },
+                ast::ValBinaryOpKind::AssignDiv => ValExpr::BinaryOp {
+                    op: ValBinaryOpKind::AssignDiv,
+                    left_operand: Box::new(translate_augvalexpr(*left_operand, env, dlogger)),
+                    right_operand: Box::new(translate_augvalexpr(*right_operand, env, dlogger)),
                 },
                 ast::ValBinaryOpKind::Add => ValExpr::BinaryOp {
                     op: ValBinaryOpKind::Add,
-                    left_operand,
-                    right_operand,
+                    left_operand: Box::new(translate_augvalexpr(*left_operand, env, dlogger)),
+                    right_operand: Box::new(translate_augvalexpr(*right_operand, env, dlogger)),
                 },
                 ast::ValBinaryOpKind::Sub => ValExpr::BinaryOp {
                     op: ValBinaryOpKind::Sub,
-                    left_operand,
-                    right_operand,
+                    left_operand: Box::new(translate_augvalexpr(*left_operand, env, dlogger)),
+                    right_operand: Box::new(translate_augvalexpr(*right_operand, env, dlogger)),
                 },
                 ast::ValBinaryOpKind::Mul => ValExpr::BinaryOp {
                     op: ValBinaryOpKind::Mul,
-                    left_operand,
-                    right_operand,
+                    left_operand: Box::new(translate_augvalexpr(*left_operand, env, dlogger)),
+                    right_operand: Box::new(translate_augvalexpr(*right_operand, env, dlogger)),
                 },
                 ast::ValBinaryOpKind::Div => ValExpr::BinaryOp {
                     op: ValBinaryOpKind::Div,
-                    left_operand,
-                    right_operand,
+                    left_operand: Box::new(translate_augvalexpr(*left_operand, env, dlogger)),
+                    right_operand: Box::new(translate_augvalexpr(*right_operand, env, dlogger)),
                 },
                 ast::ValBinaryOpKind::Rem => ValExpr::BinaryOp {
                     op: ValBinaryOpKind::Rem,
-                    left_operand,
-                    right_operand,
+                    left_operand: Box::new(translate_augvalexpr(*left_operand, env, dlogger)),
+                    right_operand: Box::new(translate_augvalexpr(*right_operand, env, dlogger)),
                 },
                 ast::ValBinaryOpKind::And => ValExpr::BinaryOp {
                     op: ValBinaryOpKind::And,
-                    left_operand,
-                    right_operand,
+                    left_operand: Box::new(translate_augvalexpr(*left_operand, env, dlogger)),
+                    right_operand: Box::new(translate_augvalexpr(*right_operand, env, dlogger)),
                 },
                 ast::ValBinaryOpKind::Or => ValExpr::BinaryOp {
                     op: ValBinaryOpKind::Or,
-                    left_operand,
-                    right_operand,
+                    left_operand: Box::new(translate_augvalexpr(*left_operand, env, dlogger)),
+                    right_operand: Box::new(translate_augvalexpr(*right_operand, env, dlogger)),
                 },
                 ast::ValBinaryOpKind::Equal => ValExpr::BinaryOp {
                     op: ValBinaryOpKind::Eq,
-                    left_operand,
-                    right_operand,
+                    left_operand: Box::new(translate_augvalexpr(*left_operand, env, dlogger)),
+                    right_operand: Box::new(translate_augvalexpr(*right_operand, env, dlogger)),
                 },
                 ast::ValBinaryOpKind::NotEqual => ValExpr::BinaryOp {
                     op: ValBinaryOpKind::Neq,
-                    left_operand,
-                    right_operand,
+                    left_operand: Box::new(translate_augvalexpr(*left_operand, env, dlogger)),
+                    right_operand: Box::new(translate_augvalexpr(*right_operand, env, dlogger)),
                 },
                 ast::ValBinaryOpKind::Less => ValExpr::BinaryOp {
                     op: ValBinaryOpKind::Lt,
-                    left_operand,
-                    right_operand,
+                    left_operand: Box::new(translate_augvalexpr(*left_operand, env, dlogger)),
+                    right_operand: Box::new(translate_augvalexpr(*right_operand, env, dlogger)),
                 },
                 ast::ValBinaryOpKind::Greater => ValExpr::BinaryOp {
                     op: ValBinaryOpKind::Gt,
-                    left_operand,
-                    right_operand,
+                    left_operand: Box::new(translate_augvalexpr(*left_operand, env, dlogger)),
+                    right_operand: Box::new(translate_augvalexpr(*right_operand, env, dlogger)),
                 },
                 ast::ValBinaryOpKind::LessEqual => ValExpr::BinaryOp {
                     op: ValBinaryOpKind::Leq,
-                    left_operand,
-                    right_operand,
+                    left_operand: Box::new(translate_augvalexpr(*left_operand, env, dlogger)),
+                    right_operand: Box::new(translate_augvalexpr(*right_operand, env, dlogger)),
                 },
                 ast::ValBinaryOpKind::GreaterEqual => ValExpr::BinaryOp {
                     op: ValBinaryOpKind::Geq,
-                    left_operand,
-                    right_operand,
+                    left_operand: Box::new(translate_augvalexpr(*left_operand, env, dlogger)),
+                    right_operand: Box::new(translate_augvalexpr(*right_operand, env, dlogger)),
                 },
             };
 
@@ -641,10 +645,6 @@ fn translate_blockstatement(
             env.use_namespace(namespace, dlogger);
             BlockStatement::NoOp
         }
-        ast::BlockStatement::Set { place, value } => BlockStatement::Set {
-            place: Box::new(translate_augvalexpr(*place, env, dlogger)),
-            value: Box::new(translate_augvalexpr(*value, env, dlogger)),
-        },
         ast::BlockStatement::IfThen {
             cond,
             then_branch,

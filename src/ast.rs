@@ -68,6 +68,12 @@ pub enum ValBinaryOpKind {
     LessEqual,
     Greater,
     GreaterEqual,
+    // Assign
+    Assign,
+    AssignAdd,
+    AssignSub,
+    AssignMul,
+    AssignDiv,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -197,13 +203,6 @@ pub enum ValExpr {
         root: Box<Augmented<ValExpr>>,
         field: String,
     },
-    // types
-    BoolTy,
-    RefConstructorTy,
-    ArrayConstructorTy,
-    SliceConstructorTy,
-    IntConstructorTy,
-    FloatConstructorTy,
     // concretization
     Concretization {
         root: Box<Augmented<ValExpr>>,
@@ -241,10 +240,6 @@ pub enum BlockStatement {
     },
     Use {
         namespace: Identifier,
-    },
-    Set {
-        place: Box<Augmented<ValExpr>>,
-        value: Box<Augmented<ValExpr>>,
     },
     IfThen {
         cond: Box<Augmented<ValExpr>>,

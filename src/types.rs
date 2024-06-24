@@ -2,9 +2,6 @@ use std::collections::HashMap;
 
 use lsp_types::Range;
 
-use crate::hir;
-use crate::hir::Augmented;
-
 #[derive(Clone, Debug, PartialEq)]
 pub enum KindValue {
     Unknown,
@@ -49,6 +46,7 @@ impl KindValue {
             (KindValue::Int, KindValue::Int) => true,
             (KindValue::Float, KindValue::Float) => true,
             (KindValue::Bool, KindValue::Bool) => true,
+            (KindValue::Val, KindValue::Val) => true,
             (KindValue::Type, KindValue::Type) => true,
             (
                 KindValue::Generic {
@@ -97,7 +95,6 @@ impl std::fmt::Display for TypeValue {
             TypeValue::SymbolicVariable(id) => {
                 write!(f, "SymbolicVariable({})", id)
             }
-            TypeValue::Unit => write!(f, "Unit"),
             TypeValue::Bool => write!(f, "Bool"),
             TypeValue::RefConstructor => write!(f, "RefConstructor"),
             TypeValue::ArrayConstructor => write!(f, "ArrayConstructor"),
@@ -176,7 +173,7 @@ impl std::fmt::Display for TypeValue {
 
 pub fn print_typaram(typaram: &Option<TypeParam>) -> String {
     match typaram {
-        Some(TypeParam { range, id }) => format!("Some({})", id),
+        Some(TypeParam { id, .. }) => format!("Some({})", id),
         None => "None".to_string(),
     }
 }
@@ -203,7 +200,6 @@ pub enum TypeValue {
     Unknown,
     SymbolicVariable(usize),
     // types
-    Unit,
     Bool,
     // constructors
     RefConstructor,

@@ -141,7 +141,8 @@ pub fn kindcheck_valpatexpr_and_patch(
                 expected_kind.clone()
             }
         }
-        hir::ValPatExpr::Identifier { id, modifier } => {
+        hir::ValPatExpr::Identifier { id, modifier, original } => {
+            let id = *id;
             // if expected kind is unknown, we throw an error
             if expected_kind == &KindValue::Unknown {
                 dlogger.log_cannot_infer_val_kind(v.range);
@@ -150,17 +151,17 @@ pub fn kindcheck_valpatexpr_and_patch(
             } else {
                 match (modifier, kind_is_val(expected_kind)) {
                     (ast::IdentifierModifier::Mutable, Some(false)) => {
-                        dlogger.log_mutable_type(v.range);
+                        dlogger.log_mutable_type(v.range, &original);
                         v.val = hir::ValPatExpr::Error;
                     }
                     (ast::IdentifierModifier::Nominal, Some(true)) => {
-                        dlogger.log_nominal_value(v.range);
+                        dlogger.log_nominal_value(v.range, &original);
                         v.val = hir::ValPatExpr::Error;
                     }
                     _ => {}
                 }
                 // otherwise we assign the expected kind to the identifier
-                checker.kind_table[*id] = Some(expected_kind.clone());
+                checker.kind_table[id] = Some(expected_kind.clone());
                 expected_kind.clone()
             }
         }
@@ -516,16 +517,12 @@ pub fn kindcheck_block_statement_and_patch(
             let kind = kindcheck_val_expr_and_patch(value, &kind_hint, dlogger, checker);
             kindcheck_valpatexpr_and_patch(pat, &kind, dlogger, checker);
         }
-        hir::BlockStatement::Set { place, value } => {
-            kindcheck_val_expr_and_patch(place, &KindValue::Type, dlogger, checker);
-            kindcheck_val_expr_and_patch(value, &KindValue::Type, dlogger, checker);
-        }
         hir::BlockStatement::IfThen {
             cond,
             then_branch,
             else_branch,
         } => {
-            kindcheck_val_expr_and_patch(cond, &KindValue::Type, dlogger, checker);
+            kindcheck_val_expr_and_patch(cond, &KindValue::Val, dlogger, checker);
             for statement in then_branch {
                 kindcheck_block_statement_and_patch(statement, dlogger, checker);
             }
@@ -534,7 +531,7 @@ pub fn kindcheck_block_statement_and_patch(
             }
         }
         hir::BlockStatement::While { cond, body } => {
-            kindcheck_val_expr_and_patch(cond, &KindValue::Type, dlogger, checker);
+            kindcheck_val_expr_and_patch(cond, &KindValue::Val, dlogger, checker);
             for statement in body {
                 kindcheck_block_statement_and_patch(statement, dlogger, checker);
             }
@@ -547,18 +544,18 @@ pub fn kindcheck_block_statement_and_patch(
             by,
             body,
         } => {
-            kindcheck_valpatexpr_and_patch(pattern, &KindValue::Type, dlogger, checker);
-            kindcheck_val_expr_and_patch(start, &KindValue::Type, dlogger, checker);
-            kindcheck_val_expr_and_patch(end, &KindValue::Type, dlogger, checker);
+            kindcheck_valpatexpr_and_patch(pattern, &KindValue::Val, dlogger, checker);
+            kindcheck_val_expr_and_patch(start, &KindValue::Val, dlogger, checker);
+            kindcheck_val_expr_and_patch(end, &KindValue::Val, dlogger, checker);
             if let Some(by) = by {
-                kindcheck_val_expr_and_patch(by, &KindValue::Type, dlogger, checker);
+                kindcheck_val_expr_and_patch(by, &KindValue::Val, dlogger, checker);
             }
             for statement in body {
                 kindcheck_block_statement_and_patch(statement, dlogger, checker);
             }
         }
         hir::BlockStatement::Do(val) => {
-            kindcheck_val_expr_and_patch(val, &KindValue::Type, dlogger, checker);
+            kindcheck_val_expr_and_patch(val, &KindValue::Unknown, dlogger, checker);
         }
     }
 }

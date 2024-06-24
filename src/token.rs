@@ -12,7 +12,6 @@ pub enum TokenKind {
     Let,       // let
     Rec,       // rec
     Mut,       // mut
-    Set,       // set
     In,        // in
     Fn,        // fn
     If,        // if
@@ -29,22 +28,16 @@ pub enum TokenKind {
     Block,     // block
     Generic,   // generic
     Nominal,   // nominal
+    Extern,    // extern
     // Values
     Lifetime(Vec<u8>),                      // 'lifetime
-    Inf,                                    // inf
-    Nan,                                    // nan
-    Bool(bool),                             // true, false
+    Bool(bool),                             // true
     String { value: Vec<u8>, block: bool }, // "string"
     Int(BigInt),                            // 7
     Float(BigRational),                     // 0.7
-    // Types
+    // Types with special syntax
     FnTy,    // Fn
     NeverTy, // !
-    ArrayTy, // Array
-    SliceTy, // Slice
-    IntTy,   // Int
-    FloatTy, // Float
-    BoolTy,  // Bool
     // Kinds
     TypeKind,  // TYPE
     BoolKind,  // BOOL
@@ -72,16 +65,19 @@ pub enum TokenKind {
     Greater,      // >
     GreaterEqual, // >=
     // Assignment
-    Assign, // =
+    Assign,    // :=
+    AddAssign, // +=
+    SubAssign, // -=
+    MulAssign, // *=
+    DivAssign, // /=
     // Reference
     Ref,   // &
     Deref, // @
-    // Splat
-    Splat, // **
     // Arrows
     Pipe,  // |
     Defun, // ->
     // Other Miscellaneous Operator Things
+    Define,        // =
     ParenLeft,     // (
     ParenRight,    // )
     BracketLeft,   // [

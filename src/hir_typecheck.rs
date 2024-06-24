@@ -1,15 +1,12 @@
 use std::collections::HashMap;
 
-use indexmap::IndexMap;
-use num_bigint::{BigInt, TryFromBigIntError};
-use num_rational::{BigRational, Ratio};
 use num_traits::ToPrimitive;
 
 use crate::ast::IdentifierModifier;
 use crate::dlogger::DiagnosticLogger;
 use crate::hir;
 use crate::hir::{Augmented, Environment};
-use crate::types::{KindValue, TypeParam, TypeValue, TypeValueConstructor};
+use crate::types::{TypeParam, TypeValue, TypeValueConstructor};
 
 // gets a hint but doesn't bind any free variables yet
 // doesn't thoroughly traverse the tree, so make sure to call typecheck_val_expr_and_patch on this node afterwards
@@ -316,6 +313,21 @@ pub fn typecheck_case_target_expr_and_patch(
     }
 }
 
+// We assume that the val pat is already kindchecked
+pub fn val_pat_expr_to_typeparam(v: &Augmented<hir::ValPatExpr>) -> Option<TypeParam> {
+    match &v.val {
+        hir::ValPatExpr::Identifier { id, .. } => Some(TypeParam {
+            range: v.range.clone(),
+            id: *id,
+        }),
+        hir::ValPatExpr::Kinded { pat, .. } => val_pat_expr_to_typeparam(pat),
+        hir::ValPatExpr::Error => None,
+        _ => {
+            unreachable!("should have been kindchecked")
+        }
+    }
+}
+
 pub fn typecheck_val_expr_and_patch(
     v: &mut Augmented<hir::ValExpr>,
     expected_type: &TypeValue,
@@ -335,18 +347,21 @@ pub fn typecheck_val_expr_and_patch(
         }
         hir::ValExpr::Bool(i) => match expected_type {
             TypeValue::Bool => TypeValue::Bool,
-            _ => expect_type(v, expected_type, TypeValue::BoolLit(*i), dlogger),
+            _ => {
+                let actual = TypeValue::BoolLit(*i);
+                expect_type(v, expected_type, actual, dlogger)
+            }
         },
         hir::ValExpr::Int(ref i) => match expected_type {
             // takes the shape of the expected type
             w @ TypeValue::Concretization {
                 constructor: TypeValueConstructor::IntConstructor,
-                tyargs,
+                ..
             } => w.clone(),
             // default to type variable
             _ => match i64::try_from(i) {
                 Ok(i) => expect_type(v, expected_type, TypeValue::IntLit(i), dlogger),
-                Err(e) => {
+                Err(_) => {
                     dlogger.log_int_too_large(v.range, 64);
                     v.val = hir::ValExpr::Error;
                     TypeValue::Unknown
@@ -357,7 +372,7 @@ pub fn typecheck_val_expr_and_patch(
             // takes the shape of the expected type
             w @ TypeValue::Concretization {
                 constructor: TypeValueConstructor::FloatConstructor,
-                tyargs,
+                ..
             } => w.clone(),
             // default to type variable
             _ => {
@@ -413,7 +428,7 @@ pub fn typecheck_val_expr_and_patch(
                 }
             }
 
-            for (name, expected_type) in expected_fields {
+            for (name, _) in expected_fields {
                 dlogger.log_missing_field(v.range, &name);
                 has_error = true;
             }
@@ -489,7 +504,7 @@ pub fn typecheck_val_expr_and_patch(
                 // we can actually check the body though
                 let body = typecheck_val_expr_and_patch(body, expected_body, dlogger, checker);
                 TypeValue::Generic {
-                    typarams: params.clone(),
+                    typarams: params.iter().map(val_pat_expr_to_typeparam).collect(),
                     body: Box::new(body),
                 }
             }
@@ -498,7 +513,7 @@ pub fn typecheck_val_expr_and_patch(
                 let body =
                     typecheck_val_expr_and_patch(body, &TypeValue::Unknown, dlogger, checker);
                 let actual = TypeValue::Generic {
-                    typarams: params.clone(),
+                    typarams: params.iter().map(val_pat_expr_to_typeparam).collect(),
                     body: Box::new(body),
                 };
                 expect_type(v, expected_type, actual, dlogger)
@@ -643,6 +658,18 @@ pub fn typecheck_val_expr_and_patch(
             left_operand,
             right_operand,
         } => match op {
+            // T x T -> unit
+            hir::ValBinaryOpKind::Assign => {
+                let left_type = typecheck_val_expr_and_patch(
+                    left_operand,
+                    &TypeValue::Unknown,
+                    dlogger,
+                    checker,
+                );
+                // check right type
+                typecheck_val_expr_and_patch(right_operand, &left_type, dlogger, checker);
+                expect_type(v, expected_type, TypeValue::Struct(HashMap::new()), dlogger)
+            }
             // number x number -> number
             hir::ValBinaryOpKind::Add
             | hir::ValBinaryOpKind::Sub
@@ -686,6 +713,53 @@ pub fn typecheck_val_expr_and_patch(
                     }
                 }
                 expect_type(v, expected_type, left_type, dlogger)
+            }
+            // nummber x number -> unit
+            hir::ValBinaryOpKind::AssignAdd
+            | hir::ValBinaryOpKind::AssignSub
+            | hir::ValBinaryOpKind::AssignMul
+            | hir::ValBinaryOpKind::AssignDiv => {
+                let left_type = typecheck_val_expr_and_patch(
+                    left_operand,
+                    &TypeValue::Unknown,
+                    dlogger,
+                    checker,
+                );
+                let right_type =
+                    typecheck_val_expr_and_patch(right_operand, &left_type, dlogger, checker);
+                match (&left_type, &right_type) {
+                    (
+                        TypeValue::Concretization {
+                            constructor: TypeValueConstructor::IntConstructor,
+                            tyargs: l_tyargs,
+                        },
+                        TypeValue::Concretization {
+                            constructor: TypeValueConstructor::IntConstructor,
+                            tyargs: r_tyargs,
+                        },
+                    ) if l_tyargs == r_tyargs => {}
+                    (
+                        TypeValue::Concretization {
+                            constructor: TypeValueConstructor::FloatConstructor,
+                            tyargs: l_tyargs,
+                        },
+                        TypeValue::Concretization {
+                            constructor: TypeValueConstructor::FloatConstructor,
+                            tyargs: r_tyargs,
+                        },
+                    ) if l_tyargs == r_tyargs => {}
+                    _ => {
+                        dlogger.log_invalid_binary_op(
+                            v.range,
+                            op.as_ref(),
+                            &left_type.to_string(),
+                            &right_type.to_string(),
+                        );
+                        v.val = hir::ValExpr::Error;
+                    }
+                }
+
+                expect_type(v, expected_type, TypeValue::Struct(HashMap::new()), dlogger)
             }
             // number x number -> bool
             hir::ValBinaryOpKind::Lt
@@ -793,19 +867,33 @@ pub fn typecheck_val_expr_and_patch(
         },
 
         hir::ValExpr::ArrayAccess { root, index } => {
-            let expected_inner_type = TypeValue::Concretization {
-                constructor: TypeValueConstructor::ArrayConstructor,
-                tyargs: vec![expected_type.clone(), TypeValue::Unknown],
-            };
+            let actual_inner_type =
+                typecheck_val_expr_and_patch(root, &TypeValue::Unknown, dlogger, checker);
 
             let usize_type = TypeValue::Concretization {
                 constructor: TypeValueConstructor::IntConstructor,
                 tyargs: vec![TypeValue::BoolLit(false), TypeValue::IntLit(64)],
             };
-
-            let actual_type =
-                typecheck_val_expr_and_patch(root, &expected_inner_type, dlogger, checker);
             typecheck_val_expr_and_patch(index, &usize_type, dlogger, checker);
+
+            let actual_type = match actual_inner_type {
+                TypeValue::Concretization {
+                    constructor: TypeValueConstructor::ArrayConstructor,
+                    tyargs,
+                } => tyargs[0].clone(),
+                TypeValue::Concretization {
+                    constructor: TypeValueConstructor::SliceConstructor,
+                    tyargs,
+                } => tyargs[0].clone(),
+                _ => {
+                    dlogger.log_cannot_access_index_of_non_array(
+                        v.range,
+                        &actual_inner_type.to_string(),
+                    );
+                    v.val = hir::ValExpr::Error;
+                    TypeValue::Unknown
+                }
+            };
 
             expect_type(v, expected_type, actual_type, dlogger)
         }
@@ -939,11 +1027,6 @@ pub fn typecheck_block_statement_and_patch(
             let ty = typecheck_val_expr_and_patch(value, &type_hint, dlogger, checker);
             typecheck_val_pat_and_patch(pat, &ty, dlogger, checker);
         }
-        hir::BlockStatement::Set { place, value } => {
-            let dest_ty =
-                typecheck_val_expr_and_patch(place, &TypeValue::Unknown, dlogger, checker);
-            typecheck_val_expr_and_patch(value, &dest_ty, dlogger, checker);
-        }
         hir::BlockStatement::IfThen {
             cond,
             then_branch,
@@ -985,7 +1068,7 @@ pub fn typecheck_block_statement_and_patch(
             }
         }
         hir::BlockStatement::Do(val) => {
-            typecheck_val_expr_and_patch(val, &TypeValue::Unit, dlogger, checker);
+            typecheck_val_expr_and_patch(val, &TypeValue::Struct(HashMap::new()), dlogger, checker);
         }
     }
 }
