@@ -35,9 +35,8 @@ pub enum TokenKind {
     String { value: Vec<u8>, block: bool }, // "string"
     Int(BigInt),                            // 7
     Float(BigRational),                     // 0.7
-    // Types with special syntax
-    FnTy,    // Fn
-    NeverTy, // !
+    // Types
+    FnTy,               // Fn
     // Kinds
     TypeKind,  // TYPE
     BoolKind,  // BOOL
@@ -50,6 +49,7 @@ pub enum TokenKind {
     Div,   // /
     Rem,   // %
     // Boolean Operators
+    Not, // !
     And, // and
     Or,  // or
     // Type operators

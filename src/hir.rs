@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use lsp_types::Range;
+use lsp_types::{GenericParams, Range};
 use num_bigint::BigInt;
 use num_rational::BigRational;
 use strum::AsRefStr;
@@ -8,7 +8,7 @@ use strum::AsRefStr;
 use crate::{
     ast,
     dlogger::DiagnosticLogger,
-    types::{KindValue, TypeValue},
+    types::{typevalue_kind, KindValue, TypeParam, TypeValue, TypeValueConstructor},
 };
 
 #[derive(Clone, Debug, PartialEq)]
@@ -183,49 +183,10 @@ pub enum ValExpr {
         returnkind: Option<Box<Augmented<KindExpr>>>,
         body: Box<Augmented<ValExpr>>,
     },
-    // builtins
-    // builtin types
-    BoolTy,
-    RefConstructorTy,
-    ArrayConstructorTy,
-    SliceConstructorTy,
-    IntConstructorTy,
-    FloatConstructorTy,
-    // builtin operators
-    // boolean operators
-    BoolNot, // bool -> bool
-    // integer operators
-    IntAddGen,         // [U](u, u) -> u
-    IntSubGen,         // [U](u, u) -> u
-    IntMulGen,         // [U](u, u) -> u
-    IntDivGen,         // [U](u, u) -> u
-    IntRemGen,         // [U](u, u) -> u
-    IntShlLGen,        // [U](u, u) -> u
-    IntShrLGen,        // [U](u, u) -> u
-    IntShrAGen,        // [U](u, u) -> u
-    IntRolGen,         // [U](u, u) -> u
-    IntRorGen,         // [U](u, u) -> u
-    IntAndGen,         // [U](u, u) -> u
-    IntOrGen,          // [U](u, u) -> u
-    IntXorGen,         // [U](u, u) -> u
-    IntInvGen,         // [U]u -> u
-    IntNegGen,         // [U]u -> u
-    // float operators
-    FloatAddGen,    // [F](f, f) -> f
-    FloatSubGen,    // [F](f, f) -> f
-    FloatMulGen,    // [F](f, f) -> f
-    FloatDivGen,    // [F](f, f) -> f
-    FloatRemGen,    // [F](f, f) -> f
-    FloatNegGen,    // [F]f -> f
-    // conversion operators
-    // convert int to int
-    ConvIntIntGen, // [T, U] t -> u
-    // convert float to float
-    ConvFloatFloatGen, // [T, U] f -> f
-    // convert int to float
-    ConvIntFloatGen, // [T, U] u -> f
-    // convert float to int
-    ConvFloatIntGen, // [T, U] f -> u
+    Extern {
+        name: Vec<u8>,
+        ty: Box<Augmented<ValExpr>>,
+    },
 }
 
 impl std::default::Default for ValExpr {
@@ -385,8 +346,55 @@ impl Environment {
         }
     }
 
+    fn unconditional_insert_identifier(
+        &mut self,
+        identifier: &str,
+        kind: KindValue,
+        ty: Option<TypeValue>,
+    ) -> usize {
+        let id = self.name_table.len();
+        self.names_in_scope
+            .last_mut()
+            .unwrap()
+            .insert(identifier.to_string(), Name::Value(id));
+        self.name_table.push(
+            [
+                self.namespaces.last().unwrap(),
+                [identifier.to_string()].as_slice(),
+            ]
+            .concat(),
+        );
+        self.range_table.push(Range::default());
+        self.kind_table.push(Some(kind));
+        self.type_table.push(ty);
+        self.modifier_table.push(ast::IdentifierModifier::None);
+        return id;
+    }
+
+    fn intro_typarams(
+        &mut self,
+        params: Vec<(&str, KindValue)>,
+    ) -> (Vec<Option<TypeParam>>, Vec<TypeValue>) {
+        let mut typarams = vec![];
+        let mut tyvars = vec![];
+        for (name, kind) in params {
+            let id = self.unconditional_insert_identifier(name, kind, None);
+            typarams.push(Some(TypeParam {
+                id,
+                range: Range::default(),
+            }));
+            tyvars.push(TypeValue::SymbolicVariable(id));
+        }
+        (typarams, tyvars)
+    }
+
+    fn insert_builtin(&mut self, identifier: &str, ty: TypeValue) {
+        let kind = typevalue_kind(&ty, self);
+        self.unconditional_insert_identifier(identifier, kind, Some(ty));
+    }
+
     pub fn new() -> Self {
-        Environment {
+        let mut env = Environment {
             namespaces: vec![vec![]],
             names_in_scope: vec![HashMap::new()],
             name_table: vec![],
@@ -394,6 +402,222 @@ impl Environment {
             range_table: vec![],
             type_table: vec![],
             kind_table: vec![],
-        }
+        };
+
+        // insert builtins into the environment
+        env.insert_builtin("Never", TypeValue::Never);
+        env.insert_builtin("Bool", TypeValue::Bool);
+        env.insert_builtin("Ref", TypeValue::RefConstructor);
+        env.insert_builtin("Array", TypeValue::ArrayConstructor);
+        env.insert_builtin("Slice", TypeValue::SliceConstructor);
+        env.insert_builtin("Int", TypeValue::IntConstructor);
+        env.insert_builtin("Float", TypeValue::FloatConstructor);
+
+        // type of a generic function that takes two integers of the same sign and size and returns an integer of the same sign and size
+        let arg_IntX_IntX_ret_IntX_ty = {
+            let (typarams, tyvars) =
+                env.intro_typarams(vec![("sgn", KindValue::Bool), ("sz", KindValue::Int)]);
+
+            TypeValue::Generic {
+                typarams,
+                body: Box::new(TypeValue::Fn {
+                    paramtys: vec![
+                        TypeValue::Concretization {
+                            constructor: TypeValueConstructor::IntConstructor,
+                            tyargs: vec![tyvars[0].clone(), tyvars[1].clone()],
+                        },
+                        TypeValue::Concretization {
+                            constructor: TypeValueConstructor::IntConstructor,
+                            tyargs: vec![tyvars[0].clone(), tyvars[1].clone()],
+                        },
+                    ],
+                    returntype: Box::new(TypeValue::Concretization {
+                        constructor: TypeValueConstructor::IntConstructor,
+                        tyargs: vec![tyvars[0].clone(), tyvars[1].clone()],
+                    }),
+                }),
+            }
+        };
+        env.insert_builtin("__builtin_addi", arg_IntX_IntX_ret_IntX_ty.clone());
+        env.insert_builtin("__builtin_subi", arg_IntX_IntX_ret_IntX_ty.clone());
+        env.insert_builtin("__builtin_muli", arg_IntX_IntX_ret_IntX_ty.clone());
+        env.insert_builtin("__builtin_divi", arg_IntX_IntX_ret_IntX_ty.clone());
+        env.insert_builtin("__builtin_remi", arg_IntX_IntX_ret_IntX_ty.clone());
+        env.insert_builtin("__builtin_shli", arg_IntX_IntX_ret_IntX_ty.clone());
+        env.insert_builtin("__builtin_shrli", arg_IntX_IntX_ret_IntX_ty.clone());
+        env.insert_builtin("__builtin_shrai", arg_IntX_IntX_ret_IntX_ty.clone());
+        env.insert_builtin("__builtin_roli", arg_IntX_IntX_ret_IntX_ty.clone());
+        env.insert_builtin("__builtin_rori", arg_IntX_IntX_ret_IntX_ty.clone());
+        env.insert_builtin("__builtin_andi", arg_IntX_IntX_ret_IntX_ty.clone());
+        env.insert_builtin("__builtin_ori", arg_IntX_IntX_ret_IntX_ty.clone());
+        env.insert_builtin("__builtin_xori", arg_IntX_IntX_ret_IntX_ty.clone());
+
+        // type of a generic function that takes an integer of the any sign and size and returns an integer of the same sign and size
+        let arg_IntX_ret_IntX_ty = {
+            let (typarams, tyvars) =
+                env.intro_typarams(vec![("sgn", KindValue::Bool), ("sz", KindValue::Int)]);
+
+            TypeValue::Generic {
+                typarams,
+                body: Box::new(TypeValue::Fn {
+                    paramtys: vec![TypeValue::Concretization {
+                        constructor: TypeValueConstructor::IntConstructor,
+                        tyargs: vec![tyvars[0].clone(), tyvars[1].clone()],
+                    }],
+                    returntype: Box::new(TypeValue::Concretization {
+                        constructor: TypeValueConstructor::IntConstructor,
+                        tyargs: vec![tyvars[0].clone(), tyvars[1].clone()],
+                    }),
+                }),
+            }
+        };
+        env.insert_builtin("__builtin_invi", arg_IntX_ret_IntX_ty.clone());
+        env.insert_builtin("__builtin_negi", arg_IntX_ret_IntX_ty.clone());
+
+        // type of a generic function that takes two floats of the same size and returns a float of the same size
+        let arg_FloatX_FloatX_ret_FloatX_ty = {
+            let (typarams, tyvars) = env.intro_typarams(vec![("sz", KindValue::Int)]);
+
+            TypeValue::Generic {
+                typarams,
+                body: Box::new(TypeValue::Fn {
+                    paramtys: vec![
+                        TypeValue::Concretization {
+                            constructor: TypeValueConstructor::FloatConstructor,
+                            tyargs: vec![tyvars[0].clone()],
+                        },
+                        TypeValue::Concretization {
+                            constructor: TypeValueConstructor::FloatConstructor,
+                            tyargs: vec![tyvars[0].clone()],
+                        },
+                    ],
+                    returntype: Box::new(TypeValue::Concretization {
+                        constructor: TypeValueConstructor::FloatConstructor,
+                        tyargs: vec![tyvars[0].clone()],
+                    }),
+                }),
+            }
+        };
+
+        env.insert_builtin("__builtin_addf", arg_FloatX_FloatX_ret_FloatX_ty.clone());
+        env.insert_builtin("__builtin_subf", arg_FloatX_FloatX_ret_FloatX_ty.clone());
+        env.insert_builtin("__builtin_mulf", arg_FloatX_FloatX_ret_FloatX_ty.clone());
+        env.insert_builtin("__builtin_divf", arg_FloatX_FloatX_ret_FloatX_ty.clone());
+        env.insert_builtin("__builtin_remf", arg_FloatX_FloatX_ret_FloatX_ty.clone());
+
+        // type of a generic function that takes a float of any size and returns a float of the same size
+        let arg_FloatX_ret_FloatX_ty = {
+            let (typarams, tyvars) = env.intro_typarams(vec![("sz", KindValue::Int)]);
+
+            TypeValue::Generic {
+                typarams,
+                body: Box::new(TypeValue::Fn {
+                    paramtys: vec![TypeValue::Concretization {
+                        constructor: TypeValueConstructor::FloatConstructor,
+                        tyargs: vec![tyvars[0].clone()],
+                    }],
+                    returntype: Box::new(TypeValue::Concretization {
+                        constructor: TypeValueConstructor::FloatConstructor,
+                        tyargs: vec![tyvars[0].clone()],
+                    }),
+                }),
+            }
+        };
+
+        env.insert_builtin("__builtin_negf", arg_FloatX_FloatX_ret_FloatX_ty);
+
+        // type of a function that takes an integer and returns an integer
+        let arg_IntX_ret_IntY_ty = {
+            let (typarams, tyvars) = env.intro_typarams(vec![
+                ("sgn1", KindValue::Bool),
+                ("sz1", KindValue::Int),
+                ("sgn2", KindValue::Bool),
+                ("sz2", KindValue::Int),
+            ]);
+
+            TypeValue::Generic {
+                typarams,
+                body: Box::new(TypeValue::Fn {
+                    paramtys: vec![TypeValue::Concretization {
+                        constructor: TypeValueConstructor::IntConstructor,
+                        tyargs: vec![tyvars[0].clone(), tyvars[1].clone()],
+                    }],
+                    returntype: Box::new(TypeValue::Concretization {
+                        constructor: TypeValueConstructor::IntConstructor,
+                        tyargs: vec![tyvars[2].clone(), tyvars[3].clone()],
+                    }),
+                }),
+            }
+        };
+
+        env.insert_builtin("__builtin_itoi", arg_IntX_ret_IntY_ty);
+
+        // type of a function that takes a float and returns a float
+        let arg_FloatX_ret_FloatY_ty = {
+            let (typarams, tyvars) =
+                env.intro_typarams(vec![("sz1", KindValue::Int), ("sz2", KindValue::Int)]);
+
+            TypeValue::Generic {
+                typarams,
+                body: Box::new(TypeValue::Fn {
+                    paramtys: vec![TypeValue::Concretization {
+                        constructor: TypeValueConstructor::FloatConstructor,
+                        tyargs: vec![tyvars[0].clone()],
+                    }],
+                    returntype: Box::new(TypeValue::Concretization {
+                        constructor: TypeValueConstructor::FloatConstructor,
+                        tyargs: vec![tyvars[1].clone()],
+                    }),
+                }),
+            }
+        };
+
+        env.insert_builtin("__builtin_ftof", arg_FloatX_ret_FloatY_ty);
+
+        // type of a function that takes a signed integer and returns a float
+        let arg_IntX_ret_FloatY_ty = {
+            let (typarams, tyvars) =
+                env.intro_typarams(vec![("isz", KindValue::Bool), ("fsz", KindValue::Int)]);
+
+            TypeValue::Generic {
+                typarams,
+                body: Box::new(TypeValue::Fn {
+                    paramtys: vec![TypeValue::Concretization {
+                        constructor: TypeValueConstructor::IntConstructor,
+                        tyargs: vec![TypeValue::BoolLit(true), tyvars[0].clone()],
+                    }],
+                    returntype: Box::new(TypeValue::Concretization {
+                        constructor: TypeValueConstructor::FloatConstructor,
+                        tyargs: vec![tyvars[1].clone()],
+                    }),
+                }),
+            }
+        };
+
+        env.insert_builtin("__builtin_itof", arg_IntX_ret_FloatY_ty);
+
+        // type of a function that takes a float and returns a signed integer
+        let arg_FloatX_ret_IntY_ty = {
+            let (typarams, tyvars) =
+                env.intro_typarams(vec![("fsz", KindValue::Int), ("isz", KindValue::Int)]);
+
+            TypeValue::Generic {
+                typarams,
+                body: Box::new(TypeValue::Fn {
+                    paramtys: vec![TypeValue::Concretization {
+                        constructor: TypeValueConstructor::FloatConstructor,
+                        tyargs: vec![tyvars[0].clone()],
+                    }],
+                    returntype: Box::new(TypeValue::Concretization {
+                        constructor: TypeValueConstructor::IntConstructor,
+                        tyargs: vec![TypeValue::BoolLit(true), tyvars[1].clone()],
+                    }),
+                }),
+            }
+        };
+
+        env.insert_builtin("__builtin_ftoi", arg_FloatX_ret_IntY_ty);
+
+        env
     }
 }

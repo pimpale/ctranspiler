@@ -4,7 +4,7 @@ use crate::ast;
 use crate::dlogger::DiagnosticLogger;
 use crate::hir::Augmented;
 use crate::hir::{self, Environment};
-use crate::types::{KindValue, TypeValue};
+use crate::types::{get_kind_of_member, get_kind_of_type, kind_is_val, KindValue, TypeValue};
 
 pub fn evaluate_hir_kind(kind: &Augmented<hir::KindExpr>) -> KindValue {
     match &kind.val {
@@ -26,61 +26,6 @@ pub fn evaluate_hir_kind(kind: &Augmented<hir::KindExpr>) -> KindValue {
                 returnkind: Box::new(evaluate_hir_kind(&returnkind)),
             }
         }
-    }
-}
-
-// gets the kind of a value that could be assignable to a variable with this type
-pub fn get_kind_of_member(
-    kind: KindValue,
-    range: Range,
-    dlogger: &mut DiagnosticLogger,
-) -> KindValue {
-    match kind {
-        KindValue::Unknown => KindValue::Unknown,
-        KindValue::Type => KindValue::Val,
-        KindValue::Generic {
-            paramkinds,
-            returnkind,
-        } => KindValue::Generic {
-            paramkinds,
-            returnkind: Box::new(get_kind_of_member(*returnkind, range, dlogger)),
-        },
-        _ => {
-            dlogger.log_cannot_get_kind_of_member(range, &kind.to_string());
-            KindValue::Unknown
-        }
-    }
-}
-
-// gets the kind of the type of this variable
-pub fn get_kind_of_type(
-    kind: KindValue,
-    range: Range,
-    dlogger: &mut DiagnosticLogger,
-) -> KindValue {
-    match kind {
-        KindValue::Unknown => KindValue::Unknown,
-        KindValue::Val => KindValue::Type,
-        KindValue::Generic {
-            paramkinds,
-            returnkind,
-        } => KindValue::Generic {
-            paramkinds,
-            returnkind: Box::new(get_kind_of_type(*returnkind, range, dlogger)),
-        },
-        _ => {
-            dlogger.log_cannot_get_kind_of_type(range, &kind.to_string());
-            KindValue::Unknown
-        }
-    }
-}
-
-fn kind_is_val(kind: &KindValue) -> Option<bool> {
-    match kind {
-        KindValue::Unknown => None,
-        KindValue::Val => Some(true),
-        KindValue::Generic { returnkind, .. } => kind_is_val(returnkind),
-        _ => Some(false),
     }
 }
 
@@ -141,7 +86,11 @@ pub fn kindcheck_valpatexpr_and_patch(
                 expected_kind.clone()
             }
         }
-        hir::ValPatExpr::Identifier { id, modifier, original } => {
+        hir::ValPatExpr::Identifier {
+            id,
+            modifier,
+            original,
+        } => {
             let id = *id;
             // if expected kind is unknown, we throw an error
             if expected_kind == &KindValue::Unknown {
@@ -323,52 +272,6 @@ pub fn kindcheck_val_expr_and_patch(
             }
             expect_kind(v, expected_kind, KindValue::Val, dlogger)
         }
-        hir::ValExpr::BoolTy => expect_kind(v, expected_kind, KindValue::Type, dlogger),
-        hir::ValExpr::RefConstructorTy => expect_kind(
-            v,
-            expected_kind,
-            KindValue::Generic {
-                paramkinds: vec![KindValue::Type],
-                returnkind: Box::new(KindValue::Type),
-            },
-            dlogger,
-        ),
-        hir::ValExpr::ArrayConstructorTy => expect_kind(
-            v,
-            expected_kind,
-            KindValue::Generic {
-                paramkinds: vec![KindValue::Type, KindValue::Int],
-                returnkind: Box::new(KindValue::Type),
-            },
-            dlogger,
-        ),
-        hir::ValExpr::SliceConstructorTy => expect_kind(
-            v,
-            expected_kind,
-            KindValue::Generic {
-                paramkinds: vec![KindValue::Type],
-                returnkind: Box::new(KindValue::Type),
-            },
-            dlogger,
-        ),
-        hir::ValExpr::IntConstructorTy => expect_kind(
-            v,
-            expected_kind,
-            KindValue::Generic {
-                paramkinds: vec![KindValue::Bool, KindValue::Int],
-                returnkind: Box::new(KindValue::Type),
-            },
-            dlogger,
-        ),
-        hir::ValExpr::FloatConstructorTy => expect_kind(
-            v,
-            expected_kind,
-            KindValue::Generic {
-                paramkinds: vec![KindValue::Int],
-                returnkind: Box::new(KindValue::Type),
-            },
-            dlogger,
-        ),
         hir::ValExpr::FnTy { paramtys, returnty } => {
             for arg in paramtys {
                 kindcheck_val_expr_and_patch(arg, &KindValue::Type, dlogger, checker);
@@ -499,6 +402,10 @@ pub fn kindcheck_val_expr_and_patch(
                 v.val = hir::ValExpr::Error;
                 KindValue::Unknown
             }
+        }
+        hir::ValExpr::Extern { ty, .. } => {
+            kindcheck_val_expr_and_patch(ty, &KindValue::Type, dlogger, checker);
+            expect_kind(v, expected_kind, KindValue::Val, dlogger)
         }
     }
 }

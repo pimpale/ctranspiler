@@ -81,13 +81,13 @@ pub enum CaseTargetExpr {
     Error,
     Bool(bool),
     Int(BigInt),
-    PatExpr(Box<Augmented<ValPatExpr>>),
+    PatExpr(Box<Augmented<PatExpr>>),
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct CaseExpr {
     pub target: Box<Augmented<CaseTargetExpr>>,
-    pub body: Box<Augmented<ValExpr>>,
+    pub body: Box<Augmented<Expr>>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, AsRefStr)]
@@ -98,7 +98,7 @@ pub enum IdentifierModifier {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, AsRefStr)]
-pub enum ValPatExpr {
+pub enum PatExpr {
     Error,
     Ignore,
     Identifier {
@@ -106,28 +106,28 @@ pub enum ValPatExpr {
         identifier: Identifier,
     },
     // destructure anonymous struct
-    StructLiteral(Vec<Augmented<StructItemExpr<ValPatExpr>>>),
+    StructLiteral(Vec<Augmented<StructItemExpr<PatExpr>>>),
 
     // destructure nominal type
     New {
-        ty: Box<Augmented<ValExpr>>,
-        pat: Box<Augmented<ValPatExpr>>,
+        ty: Box<Augmented<Expr>>,
+        pat: Box<Augmented<PatExpr>>,
     },
     // assert pattern has some type
     Typed {
-        pat: Box<Augmented<ValPatExpr>>,
-        ty: Box<Augmented<ValExpr>>,
+        pat: Box<Augmented<PatExpr>>,
+        ty: Box<Augmented<Expr>>,
     },
     Kinded {
-        pat: Box<Augmented<ValPatExpr>>,
+        pat: Box<Augmented<PatExpr>>,
         kind: Box<Augmented<KindExpr>>,
     },
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct RangeExpr {
-    pub start: Box<Augmented<ValExpr>>,
-    pub end: Box<Augmented<ValExpr>>,
+    pub start: Box<Augmented<Expr>>,
+    pub end: Box<Augmented<Expr>>,
     pub inclusive: bool,
 }
 
@@ -137,14 +137,14 @@ pub enum ElseExpr {
     Error,
     Else(Box<Augmented<BlockExpr>>),
     Elif {
-        cond: Box<Augmented<ValExpr>>,
+        cond: Box<Augmented<Expr>>,
         then_branch: Box<Augmented<BlockExpr>>,
         else_branch: Option<Box<Augmented<ElseExpr>>>,
     },
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, AsRefStr)]
-pub enum ValExpr {
+pub enum Expr {
     // An error when parsing
     Error,
     Int(BigInt),
@@ -155,73 +155,78 @@ pub enum ValExpr {
         block: bool,
     },
     FnDef {
-        typarams: Option<Vec<Augmented<ValPatExpr>>>,
-        params: Vec<Augmented<ValPatExpr>>,
-        returnty: Option<Box<Augmented<ValExpr>>>,
-        body: Box<Augmented<ValExpr>>,
+        typarams: Option<Vec<Augmented<PatExpr>>>,
+        params: Vec<Augmented<PatExpr>>,
+        returnty: Option<Box<Augmented<Expr>>>,
+        body: Box<Augmented<Expr>>,
     },
-    Ref(Box<Augmented<ValExpr>>),
-    Deref(Box<Augmented<ValExpr>>),
+    Ref(Box<Augmented<Expr>>),
+    Deref(Box<Augmented<Expr>>),
     // Constructs a new anonymous struct type
-    StructLiteral(Vec<Augmented<StructItemExpr<ValExpr>>>),
+    StructLiteral(Vec<Augmented<StructItemExpr<Expr>>>),
     // Creates a new instance of a nominal type
     New {
-        ty: Box<Augmented<ValExpr>>,
-        val: Box<Augmented<ValExpr>>,
+        ty: Box<Augmented<Expr>>,
+        val: Box<Augmented<Expr>>,
     },
     // Binary operation
     BinaryOp {
         op: ValBinaryOpKind,
-        left_operand: Box<Augmented<ValExpr>>,
-        right_operand: Box<Augmented<ValExpr>>,
+        left_operand: Box<Augmented<Expr>>,
+        right_operand: Box<Augmented<Expr>>,
     },
     // Matches an expression to the first matching pattern and destructures it
     CaseOf {
-        expr: Box<Augmented<ValExpr>>,
+        expr: Box<Augmented<Expr>>,
         cases: Vec<Augmented<CaseExpr>>,
     },
     // Block
     Block(Box<Augmented<BlockExpr>>),
     // Group
-    Group(Box<Augmented<ValExpr>>),
+    Group(Box<Augmented<Expr>>),
     // Inline array
-    Array(Vec<Augmented<ValExpr>>),
+    Array(Vec<Augmented<Expr>>),
     // A reference to a previously defined variable
     Identifier(Identifier),
     // Function application
     App {
-        root: Box<Augmented<ValExpr>>,
-        args: Vec<Augmented<ValExpr>>,
+        root: Box<Augmented<Expr>>,
+        args: Vec<Augmented<Expr>>,
     },
     // index into an array
     ArrayAccess {
-        root: Box<Augmented<ValExpr>>,
-        index: Box<Augmented<ValExpr>>,
+        root: Box<Augmented<Expr>>,
+        index: Box<Augmented<Expr>>,
     },
     // FieldAccess
     FieldAccess {
-        root: Box<Augmented<ValExpr>>,
+        root: Box<Augmented<Expr>>,
         field: String,
     },
     // concretization
     Concretization {
-        root: Box<Augmented<ValExpr>>,
-        tyargs: Vec<Augmented<ValExpr>>,
+        root: Box<Augmented<Expr>>,
+        tyargs: Vec<Augmented<Expr>>,
     },
     // structs and enums
-    StructTy(Vec<Augmented<StructItemExpr<ValExpr>>>),
-    EnumTy(Vec<Augmented<StructItemExpr<ValExpr>>>),
-    UnionTy(Vec<Augmented<StructItemExpr<ValExpr>>>),
+    StructTy(Vec<Augmented<StructItemExpr<Expr>>>),
+    EnumTy(Vec<Augmented<StructItemExpr<Expr>>>),
+    UnionTy(Vec<Augmented<StructItemExpr<Expr>>>),
     // generic is the equivalent of a function on the type level
     Generic {
-        params: Vec<Augmented<ValPatExpr>>,
+        params: Vec<Augmented<PatExpr>>,
         returnkind: Option<Box<Augmented<KindExpr>>>,
-        body: Box<Augmented<ValExpr>>,
+        body: Box<Augmented<Expr>>,
     },
     // type of a function
     FnTy {
-        paramtys: Vec<Augmented<ValExpr>>,
-        returnty: Box<Augmented<ValExpr>>,
+        paramtys: Vec<Augmented<Expr>>,
+        returnty: Box<Augmented<Expr>>,
+    },
+    // External function/value
+    Extern {
+        name: Vec<u8>,
+        ty: Box<Augmented<Expr>>,
     },
 }
 
@@ -235,36 +240,36 @@ pub struct BlockExpr {
 pub enum BlockStatement {
     Error,
     Let {
-        pat: Box<Augmented<ValPatExpr>>,
-        value: Box<Augmented<ValExpr>>,
+        pat: Box<Augmented<PatExpr>>,
+        value: Box<Augmented<Expr>>,
     },
     Use {
         namespace: Identifier,
     },
     IfThen {
-        cond: Box<Augmented<ValExpr>>,
+        cond: Box<Augmented<Expr>>,
         then_branch: Box<Augmented<BlockExpr>>,
         else_branch: Option<Box<Augmented<ElseExpr>>>,
     },
     While {
-        cond: Box<Augmented<ValExpr>>,
+        cond: Box<Augmented<Expr>>,
         body: Box<Augmented<BlockExpr>>,
     },
     For {
-        pattern: Box<Augmented<ValPatExpr>>,
+        pattern: Box<Augmented<PatExpr>>,
         range: Box<Augmented<RangeExpr>>,
-        by: Option<Box<Augmented<ValExpr>>>,
+        by: Option<Box<Augmented<Expr>>>,
         body: Box<Augmented<BlockExpr>>,
     },
-    Do(Box<Augmented<ValExpr>>),
+    Do(Box<Augmented<Expr>>),
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, AsRefStr)]
 pub enum FileStatement {
     Error,
     Let {
-        pat: Box<Augmented<ValPatExpr>>,
-        value: Box<Augmented<ValExpr>>,
+        pat: Box<Augmented<PatExpr>>,
+        value: Box<Augmented<Expr>>,
     },
     Use {
         namespace: Identifier,

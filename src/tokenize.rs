@@ -386,7 +386,10 @@ impl<Source: Iterator<Item = u8>> Tokenizer<Source> {
 
     fn lex_strop(&mut self) -> Token {
         let (ident, range) = self.internal_lex_delimited_string(b'`');
-        Token::new(TokenKind::Identifier(String::from_utf8_lossy(&ident).into()), range)
+        Token::new(
+            TokenKind::Identifier(String::from_utf8_lossy(&ident).into()),
+            range,
+        )
     }
 
     fn lex_string(&mut self) -> Token {
@@ -524,7 +527,7 @@ impl<Source: Iterator<Item = u8>> Iterator for Tokenizer<Source> {
                 Some(b',') => return Some(self.lex_simple_token(TokenKind::Comma, 1)),
                 Some(b'!') => match self.source.peek_nth(1).unwrap().0 {
                     Some(b'=') => return Some(self.lex_simple_token(TokenKind::NotEqual, 2)),
-                    _ => return Some(self.lex_simple_token(TokenKind::NeverTy, 1)),
+                    _ => return Some(self.lex_simple_token(TokenKind::Not, 1)),
                 },
                 Some(b'=') => match self.source.peek_nth(1).unwrap().0 {
                     Some(b'=') => return Some(self.lex_simple_token(TokenKind::Equal, 2)),

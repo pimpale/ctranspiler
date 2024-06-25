@@ -53,6 +53,35 @@ where
     match (actual, expected_hint) {
         (actual @ TypeValue::Unknown, _) => actual,
         (actual, TypeValue::Unknown) => actual,
+        (
+            TypeValue::Concretization {
+                constructor: actual_constructor,
+                tyargs: actual_tyargs,
+            },
+            TypeValue::Concretization {
+                constructor,
+                tyargs,
+            },
+        ) => {
+            if actual_constructor == *constructor {
+                let mut new_tyargs = Vec::new();
+                for (actual_tyarg, expected_tyarg) in actual_tyargs.into_iter().zip(tyargs) {
+                    new_tyargs.push(expect_type(v, expected_tyarg, actual_tyarg, dlogger));
+                }
+                TypeValue::Concretization {
+                    constructor: actual_constructor,
+                    tyargs: new_tyargs,
+                }
+            } else {
+                dlogger.log_type_mismatch(
+                    v.range,
+                    &actual_constructor.to_string(),
+                    &constructor.to_string(),
+                );
+                v.val = T::default();
+                TypeValue::Unknown
+            }
+        }
         (actual, expected) if &actual == expected => actual,
         (actual, expected) => {
             dlogger.log_type_mismatch(v.range, &actual.to_string(), &expected.to_string());
@@ -393,7 +422,7 @@ pub fn typecheck_val_expr_and_patch(
                     tyargs: vec![
                         TypeValue::Concretization {
                             constructor: TypeValueConstructor::IntConstructor,
-                            tyargs: vec![TypeValue::Bool, TypeValue::Unknown],
+                            tyargs: vec![TypeValue::BoolLit(false), TypeValue::Unknown],
                         },
                         TypeValue::IntLit(l as i64),
                     ],
@@ -959,12 +988,6 @@ pub fn typecheck_val_expr_and_patch(
             // type of the function application
             expect_type(v, expected_type, *returnty, dlogger)
         }
-        hir::ValExpr::BoolTy => TypeValue::Bool,
-        hir::ValExpr::RefConstructorTy => TypeValue::RefConstructor,
-        hir::ValExpr::ArrayConstructorTy => TypeValue::ArrayConstructor,
-        hir::ValExpr::SliceConstructorTy => TypeValue::SliceConstructor,
-        hir::ValExpr::IntConstructorTy => TypeValue::IntConstructor,
-        hir::ValExpr::FloatConstructorTy => TypeValue::FloatConstructor,
         hir::ValExpr::FnTy { paramtys, returnty } => TypeValue::Fn {
             paramtys: paramtys
                 .iter_mut()
@@ -1010,6 +1033,9 @@ pub fn typecheck_val_expr_and_patch(
                 })
                 .collect(),
         ),
+        hir::ValExpr::Extern { ty, .. } => {
+            typecheck_val_expr_and_patch(ty, expected_type, dlogger, checker)
+        }
     }
 }
 
