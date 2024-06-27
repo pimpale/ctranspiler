@@ -1,0 +1,29 @@
+# declare the types
+let U64 = Int[false, 64];
+let Char = Int[false, 8];
+let CString = Slice[Char];
+
+# declare the external functions
+let putchar = extern "putchar" Fn(Char) -> struct {};
+
+let main = fn(argc: U64, argv: Slice[CString]): U64 -> '{
+    let mut i: U64 = 0;
+    loop 'over_arg '{
+        if i == argc '{
+            ret 'over_arg {};
+        }
+        let arg = argv.[i];
+        let mut j: U64 = 0;
+        loop 'in_arg '{
+            if arg.[j] != 0 '{
+                ret 'in_arg {};
+            }
+            putchar(arg.[j]);
+            j += 1;
+        }
+        putchar("\n".[0]);
+        i += 1;
+    }
+    
+    0
+};

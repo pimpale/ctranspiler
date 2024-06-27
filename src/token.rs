@@ -17,20 +17,19 @@ pub enum TokenKind {
     If,        // if
     Else,      // else
     By,        // by
-    While,     // while
-    For,       // for
+    Loop,      // loop
+    Ret,       // ret
     Namespace, // namespace
     Use,       // use
     New,       // new
     Struct,    // struct
     Enum,      // enum
     Union,     // union
-    Block,     // block
     Generic,   // generic
     Nominal,   // nominal
     Extern,    // extern
     // Values
-    Lifetime(Vec<u8>),                      // 'lifetime
+    Label(String),                         // 'label
     Bool(bool),                             // true
     String { value: Vec<u8>, block: bool }, // "string"
     Int(BigInt),                            // 7

@@ -51,6 +51,8 @@ where
     T: std::default::Default,
 {
     match (actual, expected_hint) {
+        (actual @ TypeValue::Never, _) => actual,
+        (actual, TypeValue::Never) => actual,
         (actual @ TypeValue::Unknown, _) => actual,
         (actual, TypeValue::Unknown) => actual,
         (
@@ -75,8 +77,8 @@ where
             } else {
                 dlogger.log_type_mismatch(
                     v.range,
-                    &actual_constructor.to_string(),
                     &constructor.to_string(),
+                    &actual_constructor.to_string(),
                 );
                 v.val = T::default();
                 TypeValue::Unknown
@@ -84,7 +86,7 @@ where
         }
         (actual, expected) if &actual == expected => actual,
         (actual, expected) => {
-            dlogger.log_type_mismatch(v.range, &actual.to_string(), &expected.to_string());
+            dlogger.log_type_mismatch(v.range, &expected.to_string(), &actual.to_string());
             v.val = T::default();
             TypeValue::Unknown
         }
@@ -236,7 +238,7 @@ pub fn typecheck_val_pat_and_patch(
                 TypeValue::Unknown
             }
             expected_type => {
-                checker.type_table[*id] = Some(expected_type.clone());
+                checker.id_type_table[*id] = expected_type.clone();
                 expected_type.clone()
             }
         },
@@ -283,9 +285,7 @@ pub fn typecheck_val_pat_and_patch(
             let symbolic_type_to_construct =
                 typecheck_val_expr_and_patch(ty, &TypeValue::Unknown, dlogger, checker);
             let dereferenced_type = match symbolic_type_to_construct {
-                TypeValue::SymbolicVariable(id) => checker.type_table[id]
-                    .clone()
-                    .expect("type not initialized yet (should be kindchecked)"),
+                TypeValue::SymbolicVariable(id) => checker.id_type_table[id].clone(),
                 _ => {
                     dlogger.log_cannot_destructure_non_struct(
                         v.range,
@@ -366,11 +366,9 @@ pub fn typecheck_val_expr_and_patch(
     match &mut v.val {
         hir::ValExpr::Error => TypeValue::Unknown,
         hir::ValExpr::Identifier(id) => {
-            let actual_type = match checker.modifier_table[*id] {
+            let actual_type = match checker.id_modifier_table[*id] {
                 IdentifierModifier::Nominal => TypeValue::SymbolicVariable(*id),
-                _ => checker.type_table[*id]
-                    .clone()
-                    .expect("type not initialized yet"),
+                _ => checker.id_type_table[*id].clone(),
             };
             expect_type(v, expected_type, actual_type, dlogger)
         }
@@ -473,9 +471,7 @@ pub fn typecheck_val_expr_and_patch(
             let symbolic_type_to_construct =
                 typecheck_val_expr_and_patch(ty, &TypeValue::Unknown, dlogger, checker);
             let dereferenced_type = match symbolic_type_to_construct {
-                TypeValue::SymbolicVariable(id) => checker.type_table[id]
-                    .clone()
-                    .expect("type not initialized yet (should be kindchecked)"),
+                TypeValue::SymbolicVariable(id) => checker.id_type_table[id].clone(),
                 _ => {
                     dlogger.log_cannot_new_type(v.range, &symbolic_type_to_construct.to_string());
                     v.val = hir::ValExpr::Error;
@@ -626,20 +622,84 @@ pub fn typecheck_val_expr_and_patch(
                 None => expect_type(v, expected_type, TypeValue::Unknown, dlogger),
             }
         }
-        hir::ValExpr::Block {
-            statements,
-            last_expression,
-        } => {
-            // check all statements
+        hir::ValExpr::Block { statements, label } => {
+            // add the type hint to the label
+            checker.lb_type_hint_table[*label] = expected_type.clone();
+
+            // check all statements with this context
             for statement in statements {
                 typecheck_block_statement_and_patch(statement, dlogger, checker);
             }
 
-            // the type of the last expression is the type of the block
-            match last_expression {
-                Some(expr) => typecheck_val_expr_and_patch(expr, expected_type, dlogger, checker),
-                None => expect_type(v, expected_type, TypeValue::Struct(HashMap::new()), dlogger),
+            // the type of the block is the type of the label, if it exists
+            // if it doesn't exist, then it's unit
+            let actual_type = match checker.lb_type_table[*label] {
+                TypeValue::Unknown => TypeValue::Struct(HashMap::new()),
+                ref ty => ty.clone(),
+            };
+
+            expect_type(v, expected_type, actual_type, dlogger)
+        }
+        hir::ValExpr::Loop { label, body } => {
+            // add the type hint to the label
+            checker.lb_type_hint_table[*label] = expected_type.clone();
+
+            // body must have unit type
+            typecheck_val_expr_and_patch(
+                body,
+                &TypeValue::Struct(HashMap::new()),
+                dlogger,
+                checker,
+            );
+
+            // the type of the loop is the type of the label, if it exists
+            // if it doesn't exist, then it's Never (since it never returns)
+            let actual_type = match checker.lb_type_table[*label] {
+                TypeValue::Unknown => TypeValue::Never,
+                ref ty => ty.clone(),
+            };
+
+            expect_type(v, expected_type, actual_type, dlogger)
+        }
+        hir::ValExpr::If {
+            cond,
+            then_branch,
+            else_branch: None,
+        } => {
+            typecheck_val_expr_and_patch(cond, &TypeValue::Bool, dlogger, checker);
+            typecheck_val_expr_and_patch(
+                then_branch,
+                &TypeValue::Struct(HashMap::new()),
+                dlogger,
+                checker,
+            );
+            expect_type(v, expected_type, TypeValue::Struct(HashMap::new()), dlogger)
+        }
+        hir::ValExpr::If {
+            cond,
+            then_branch,
+            else_branch: Some(else_branch),
+        } => {
+            typecheck_val_expr_and_patch(cond, &TypeValue::Bool, dlogger, checker);
+            let then_type =
+                typecheck_val_expr_and_patch(then_branch, expected_type, dlogger, checker);
+            typecheck_val_expr_and_patch(else_branch, &then_type, dlogger, checker);
+            expect_type(v, expected_type, then_type, dlogger)
+        }
+        hir::ValExpr::Ret { label, value } => {
+            // get label type or label type hint
+            let expected_ret_type = match checker.lb_type_table[*label] {
+                TypeValue::Unknown => checker.lb_type_hint_table[*label].clone(),
+                ref ty => ty.clone(),
+            };
+            let actual_type =
+                typecheck_val_expr_and_patch(value, &expected_ret_type, dlogger, checker);
+            // set the label type
+            if actual_type != TypeValue::Unknown {
+                checker.lb_type_table[*label] = actual_type.clone();
             }
+            // ret never returns
+            expect_type(v, expected_type, TypeValue::Never, dlogger)
         }
         hir::ValExpr::ArrayLiteral(vals) => {
             let expected_inner_ty = match expected_type {
@@ -1052,46 +1112,6 @@ pub fn typecheck_block_statement_and_patch(
             let type_hint = typehint_of_val_pat_and_patch(pat, dlogger, checker);
             let ty = typecheck_val_expr_and_patch(value, &type_hint, dlogger, checker);
             typecheck_val_pat_and_patch(pat, &ty, dlogger, checker);
-        }
-        hir::BlockStatement::IfThen {
-            cond,
-            then_branch,
-            else_branch,
-        } => {
-            typecheck_val_expr_and_patch(cond, &TypeValue::Bool, dlogger, checker);
-            for statement in then_branch {
-                typecheck_block_statement_and_patch(statement, dlogger, checker);
-            }
-            for statement in else_branch {
-                typecheck_block_statement_and_patch(statement, dlogger, checker);
-            }
-        }
-        hir::BlockStatement::While { cond, body } => {
-            typecheck_val_expr_and_patch(cond, &TypeValue::Bool, dlogger, checker);
-            for statement in body {
-                typecheck_block_statement_and_patch(statement, dlogger, checker);
-            }
-        }
-        hir::BlockStatement::For {
-            pattern,
-            start,
-            end,
-            inclusive: _,
-            by,
-            body,
-        } => {
-            let ty_hint = typehint_of_val_pat_and_patch(pattern, dlogger, checker);
-            let ty = typecheck_val_expr_and_patch(start, &ty_hint, dlogger, checker);
-            typecheck_val_expr_and_patch(end, &ty, dlogger, checker);
-            if let Some(by) = by {
-                typecheck_val_expr_and_patch(by, &ty, dlogger, checker);
-            }
-
-            typecheck_val_pat_and_patch(pattern, &ty, dlogger, checker);
-
-            for statement in body {
-                typecheck_block_statement_and_patch(statement, dlogger, checker);
-            }
         }
         hir::BlockStatement::Do(val) => {
             typecheck_val_expr_and_patch(val, &TypeValue::Struct(HashMap::new()), dlogger, checker);

@@ -1,4 +1,5 @@
 #![feature(allocator_api)]
+#![feature(let_chains)]
 mod ast;
 mod astbuilder;
 mod codereader;

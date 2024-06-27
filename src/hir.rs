@@ -137,8 +137,8 @@ pub enum ValExpr {
     },
     // Block
     Block {
+        label: usize,
         statements: Vec<Augmented<BlockStatement>>,
-        last_expression: Option<Box<Augmented<ValExpr>>>,
     },
     // Inline array
     ArrayLiteral(Vec<Augmented<ValExpr>>),
@@ -187,6 +187,19 @@ pub enum ValExpr {
         name: Vec<u8>,
         ty: Box<Augmented<ValExpr>>,
     },
+    If {
+        cond: Box<Augmented<ValExpr>>,
+        then_branch: Box<Augmented<ValExpr>>,
+        else_branch: Option<Box<Augmented<ValExpr>>>,
+    },
+    Loop {
+        label: usize,
+        body: Box<Augmented<ValExpr>>,
+    },
+    Ret {
+        label: usize,
+        value: Box<Augmented<ValExpr>>,
+    },
 }
 
 impl std::default::Default for ValExpr {
@@ -202,23 +215,6 @@ pub enum BlockStatement {
     Let {
         pat: Box<Augmented<ValPatExpr>>,
         value: Box<Augmented<ValExpr>>,
-    },
-    IfThen {
-        cond: Box<Augmented<ValExpr>>,
-        then_branch: Vec<Augmented<BlockStatement>>,
-        else_branch: Vec<Augmented<BlockStatement>>,
-    },
-    While {
-        cond: Box<Augmented<ValExpr>>,
-        body: Vec<Augmented<BlockStatement>>,
-    },
-    For {
-        pattern: Box<Augmented<ValPatExpr>>,
-        start: Box<Augmented<ValExpr>>,
-        end: Box<Augmented<ValExpr>>,
-        inclusive: bool,
-        by: Option<Box<Augmented<ValExpr>>>,
-        body: Vec<Augmented<BlockStatement>>,
     },
     Do(Box<Augmented<ValExpr>>),
 }
@@ -245,14 +241,24 @@ pub struct Environment {
     pub names_in_scope: Vec<HashMap<String, Name>>,
 
     // the identifier table
-    pub name_table: Vec<Vec<String>>,
-    pub range_table: Vec<Range>,
-    pub modifier_table: Vec<ast::IdentifierModifier>,
+    pub id_name_table: Vec<Vec<String>>,
+    pub id_range_table: Vec<Range>,
+    pub id_modifier_table: Vec<ast::IdentifierModifier>,
 
     // contains x for type variables, and type(x) for val variables
-    pub type_table: Vec<Option<TypeValue>>,
+    pub id_type_table: Vec<TypeValue>,
     // contains type(x) for type variables, and kind(x) for val variables
-    pub kind_table: Vec<Option<KindValue>>,
+    pub id_kind_table: Vec<KindValue>,
+
+    // these are the labels that are in scope
+    pub labels_in_scope: Vec<Vec<(String, usize)>>,
+
+    // the label table
+    pub lb_name_table: Vec<String>,
+    pub lb_range_table: Vec<Range>,
+    pub lb_type_table: Vec<TypeValue>,
+    pub lb_type_hint_table: Vec<TypeValue>,
+    pub lb_kind_table: Vec<KindValue>,
 }
 
 impl Environment {
@@ -268,7 +274,7 @@ impl Environment {
                     .iter()
                     .rev()
                     .flat_map(|scope| match scope.get(&identifier) {
-                        Some(Name::Value(id)) => Some(self.range_table[*id]),
+                        Some(Name::Value(id)) => Some(self.id_range_table[*id]),
                         _ => None,
                     })
                     .next()
@@ -276,27 +282,54 @@ impl Environment {
                     dlogger.log_duplicate_identifier(range, previous_range, &identifier);
                     None
                 } else {
-                    let id = self.name_table.len();
+                    let id = self.id_name_table.len();
                     self.names_in_scope
                         .last_mut()
                         .unwrap()
                         .insert(identifier.clone(), Name::Value(id));
-                    self.name_table.push(
+                    self.id_name_table.push(
                         [
                             self.namespaces.last().unwrap(),
                             [identifier.clone()].as_slice(),
                         ]
                         .concat(),
                     );
-                    self.range_table.push(range);
-                    self.kind_table.push(None);
-                    self.type_table.push(None);
-                    self.modifier_table.push(ast::IdentifierModifier::None);
+                    self.id_range_table.push(range);
+                    self.id_kind_table.push(KindValue::Unknown);
+                    self.id_type_table.push(TypeValue::Unknown);
+                    self.id_modifier_table.push(ast::IdentifierModifier::None);
                     Some((id, identifier))
                 }
             }
             None => None,
         }
+    }
+
+    pub fn introduce_label(
+        &mut self,
+        ast::Label { label, range }: ast::Label,
+        _dlogger: &mut DiagnosticLogger,
+    ) -> Option<(usize, String)> {
+        match label {
+            Some(label) => {
+                let id = self.lb_name_table.len();
+                self.labels_in_scope
+                    .last_mut()
+                    .unwrap()
+                    .push((label.clone(), id));
+                self.lb_name_table.push(label.clone());
+                self.lb_range_table.push(range);
+                self.lb_kind_table.push(KindValue::Unknown);
+                self.lb_type_table.push(TypeValue::Unknown);
+                self.lb_type_hint_table.push(TypeValue::Unknown);
+                Some((id, label))
+            }
+            None => None,
+        }
+    }
+
+    pub fn unintroduce_label(&mut self) {
+        self.labels_in_scope.last_mut().unwrap().pop();
     }
 
     pub fn use_namespace(&mut self, identifier: ast::Identifier, dlogger: &mut DiagnosticLogger) {
@@ -346,28 +379,67 @@ impl Environment {
         }
     }
 
+    pub fn lookup_label(&self, label: ast::Label, dlogger: &mut DiagnosticLogger) -> Option<usize> {
+        match &label.label {
+            Some(label_name) => match self
+                .labels_in_scope
+                .last()
+                .iter()
+                .flat_map(|scope| scope.iter().rev())
+                .filter(|(name, _)| name == label_name)
+                .next()
+            {
+                Some((_, id)) => Some(*id),
+                None => {
+                    dlogger.log_unknown_label(label.range, label_name);
+                    None
+                }
+            },
+            None => None,
+        }
+    }
+
+    pub fn push_block_scope(&mut self) {
+        self.names_in_scope.push(HashMap::new());
+    }
+
+    pub fn pop_block_scope(&mut self) {
+        self.names_in_scope.pop();
+    }
+
+    pub fn push_fn_scope(&mut self) {
+        self.names_in_scope.push(HashMap::new());
+        self.labels_in_scope.push(vec![]);
+    }
+
+    pub fn pop_fn_scope(&mut self) {
+        self.names_in_scope.pop();
+        assert_eq!(self.labels_in_scope.last().unwrap().len(), 0);
+        self.labels_in_scope.pop();
+    }
+
     fn unconditional_insert_identifier(
         &mut self,
         identifier: &str,
         kind: KindValue,
-        ty: Option<TypeValue>,
+        ty: TypeValue,
     ) -> usize {
-        let id = self.name_table.len();
+        let id = self.id_name_table.len();
         self.names_in_scope
             .last_mut()
             .unwrap()
             .insert(identifier.to_string(), Name::Value(id));
-        self.name_table.push(
+        self.id_name_table.push(
             [
                 self.namespaces.last().unwrap(),
                 [identifier.to_string()].as_slice(),
             ]
             .concat(),
         );
-        self.range_table.push(Range::default());
-        self.kind_table.push(Some(kind));
-        self.type_table.push(ty);
-        self.modifier_table.push(ast::IdentifierModifier::None);
+        self.id_range_table.push(Range::default());
+        self.id_kind_table.push(kind);
+        self.id_type_table.push(ty);
+        self.id_modifier_table.push(ast::IdentifierModifier::None);
         return id;
     }
 
@@ -378,7 +450,7 @@ impl Environment {
         let mut typarams = vec![];
         let mut tyvars = vec![];
         for (name, kind) in params {
-            let id = self.unconditional_insert_identifier(name, kind, None);
+            let id = self.unconditional_insert_identifier(name, kind, TypeValue::Unknown);
             typarams.push(Some(TypeParam {
                 id,
                 range: Range::default(),
@@ -390,18 +462,24 @@ impl Environment {
 
     fn insert_builtin(&mut self, identifier: &str, ty: TypeValue) {
         let kind = typevalue_kind(&ty, self);
-        self.unconditional_insert_identifier(identifier, kind, Some(ty));
+        self.unconditional_insert_identifier(identifier, kind, ty);
     }
 
     pub fn new() -> Self {
         let mut env = Environment {
             namespaces: vec![vec![]],
             names_in_scope: vec![HashMap::new()],
-            name_table: vec![],
-            modifier_table: vec![],
-            range_table: vec![],
-            type_table: vec![],
-            kind_table: vec![],
+            id_name_table: vec![],
+            id_modifier_table: vec![],
+            id_range_table: vec![],
+            id_type_table: vec![],
+            id_kind_table: vec![],
+            labels_in_scope: vec![vec![]],
+            lb_name_table: vec![],
+            lb_range_table: vec![],
+            lb_type_table: vec![],
+            lb_type_hint_table: vec![],
+            lb_kind_table: vec![],
         };
 
         // insert builtins into the environment
@@ -412,6 +490,27 @@ impl Environment {
         env.insert_builtin("Slice", TypeValue::SliceConstructor);
         env.insert_builtin("Int", TypeValue::IntConstructor);
         env.insert_builtin("Float", TypeValue::FloatConstructor);
+
+        let arg_ArrayX_ret_SliceX_ty = {
+            let (typarams, tyvars) =
+                env.intro_typarams(vec![("T", KindValue::Type), ("N", KindValue::Int)]);
+
+            TypeValue::Generic {
+                typarams,
+                body: Box::new(TypeValue::Fn {
+                    paramtys: vec![TypeValue::Concretization {
+                        constructor: TypeValueConstructor::ArrayConstructor,
+                        tyargs: vec![tyvars[0].clone(), tyvars[1].clone()],
+                    }],
+                    returntype: Box::new(TypeValue::Concretization {
+                        constructor: TypeValueConstructor::SliceConstructor,
+                        tyargs: vec![tyvars[0].clone()],
+                    }),
+                }),
+            }
+        };
+
+        env.insert_builtin("__builtin_array_to_slice", arg_ArrayX_ret_SliceX_ty);
 
         // type of a generic function that takes two integers of the same sign and size and returns an integer of the same sign and size
         let arg_IntX_IntX_ret_IntX_ty = {

@@ -4,20 +4,10 @@ let Char = Int[false, 8];
 let CString = Slice[Char];
 
 # declare the external functions
-let putchar = extern "putchar" Fn(Char) -> struct {};
+let puts = extern "puts" Fn(CString) -> struct {};
 
-let main = fn(argc: U64, argv: Slice[CString]): U64 -> block {
-    let mut i: U64 = 0;
-    while i < argc {
-        let arg = argv.[i];
-        let mut j: U64 = 0;
-        while arg.[j] != 0 {
-            putchar(arg.[j]);
-            j += 1;
-        }
-        putchar("\n".[0]);
-        i += 1;
-    }
-    
+let main = fn(argc: U64, argv: Slice[CString]): U64 -> '{
+    puts(__builtin_array_to_slice[Char, 14]("Hello, world!\n"));
     0
 };
+    

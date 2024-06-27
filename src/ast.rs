@@ -48,6 +48,12 @@ pub struct Identifier {
     pub range: Range,
 }
 
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct Label {
+    pub label: Option<String>,
+    pub range: Range,
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug, AsRefStr)]
 pub enum ValBinaryOpKind {
     // Function call
@@ -132,18 +138,6 @@ pub struct RangeExpr {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, AsRefStr)]
-pub enum ElseExpr {
-    // An error when parsing
-    Error,
-    Else(Box<Augmented<BlockExpr>>),
-    Elif {
-        cond: Box<Augmented<Expr>>,
-        then_branch: Box<Augmented<BlockExpr>>,
-        else_branch: Option<Box<Augmented<ElseExpr>>>,
-    },
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug, AsRefStr)]
 pub enum Expr {
     // An error when parsing
     Error,
@@ -181,7 +175,11 @@ pub enum Expr {
         cases: Vec<Augmented<CaseExpr>>,
     },
     // Block
-    Block(Box<Augmented<BlockExpr>>),
+    Block {
+        label: Label,
+        statements: Vec<Augmented<BlockStatement>>,
+        trailing_semicolon: bool,
+    },
     // Group
     Group(Box<Augmented<Expr>>),
     // Inline array
@@ -228,12 +226,22 @@ pub enum Expr {
         name: Vec<u8>,
         ty: Box<Augmented<Expr>>,
     },
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug)]
-pub struct BlockExpr {
-    pub statements: Vec<Augmented<BlockStatement>>,
-    pub trailing_semicolon: bool,
+    // Loop
+    Loop {
+        label: Label,
+        body: Box<Augmented<Expr>>,
+    },
+    // Return
+    Ret {
+        label: Label,
+        value: Box<Augmented<Expr>>,
+    },
+    // If
+    If {
+        cond: Box<Augmented<Expr>>,
+        then_branch: Box<Augmented<Expr>>,
+        else_branch: Option<Box<Augmented<Expr>>>,
+    },
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, AsRefStr)]
@@ -245,21 +253,6 @@ pub enum BlockStatement {
     },
     Use {
         namespace: Identifier,
-    },
-    IfThen {
-        cond: Box<Augmented<Expr>>,
-        then_branch: Box<Augmented<BlockExpr>>,
-        else_branch: Option<Box<Augmented<ElseExpr>>>,
-    },
-    While {
-        cond: Box<Augmented<Expr>>,
-        body: Box<Augmented<BlockExpr>>,
-    },
-    For {
-        pattern: Box<Augmented<PatExpr>>,
-        range: Box<Augmented<RangeExpr>>,
-        by: Option<Box<Augmented<Expr>>>,
-        body: Box<Augmented<BlockExpr>>,
     },
     Do(Box<Augmented<Expr>>),
 }

@@ -1,0 +1,32 @@
+let U64 = Int[false, 64];
+
+let main = fn(): U64 -> '{
+    # demo showing how you can return a value from a loop
+    let mut i: U64 = 0;
+    let from_loop = loop 'over '{
+        if i == 10 '{
+            ret 'over i + 1;
+        }
+        i += 1;
+    }
+
+    # check that from loop is U64
+    let _:U64 = from_loop;
+
+    # also you can return a value from a block
+    let j: U64 = '{
+        # explicit return
+        ret' 10;
+    };
+
+    let _:U64 = j;
+
+    let k: U64 = '{
+        # implicit return
+        10
+    };
+
+    let _:U64 = k;
+
+    from_loop
+}; 

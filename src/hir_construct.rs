@@ -209,38 +209,6 @@ fn translate_caseexpr(
     )
 }
 
-fn translate_augelseexpr(
-    ast::Augmented { val, range, .. }: ast::Augmented<ast::ElseExpr>,
-    env: &mut Environment,
-    dlogger: &mut DiagnosticLogger,
-) -> Vec<Augmented<BlockStatement>> {
-    match val {
-        ast::ElseExpr::Error => vec![],
-        ast::ElseExpr::Else(body) => translate_blockexpr_statement(body.val, env, dlogger),
-        ast::ElseExpr::Elif {
-            cond,
-            then_branch,
-            else_branch,
-        } => {
-            let cond = Box::new(translate_augvalexpr(*cond, env, dlogger));
-            let then_branch = translate_blockexpr_statement(then_branch.val, env, dlogger);
-            let else_branch = match else_branch {
-                Some(else_branch) => translate_augelseexpr(*else_branch, env, dlogger),
-                None => vec![],
-            };
-
-            vec![Augmented {
-                range,
-                val: BlockStatement::IfThen {
-                    cond,
-                    then_branch,
-                    else_branch,
-                },
-            }]
-        }
-    }
-}
-
 fn translate_augvalexpr(
     ast::Augmented { range, val, .. }: ast::Augmented<ast::Expr>,
     env: &mut Environment,
@@ -403,10 +371,111 @@ fn translate_augvalexpr(
                 val: ValExpr::CaseOf { expr, cases },
             }
         }
-        ast::Expr::Block(b) => Augmented {
+        ast::Expr::If {
+            cond,
+            then_branch,
+            else_branch,
+        } => Augmented {
             range,
-            val: translate_blockexpr_val(b.val, env, dlogger),
+            val: ValExpr::If {
+                cond: Box::new(translate_augvalexpr(*cond, env, dlogger)),
+                then_branch: Box::new(translate_augvalexpr(*then_branch, env, dlogger)),
+                else_branch: else_branch.map(|e| Box::new(translate_augvalexpr(*e, env, dlogger))),
+            },
         },
+        ast::Expr::Loop { label, body } => {
+            let label = match env.introduce_label(label, dlogger) {
+                Some((i, _)) => i,
+                _ => {
+                    return Augmented {
+                        range,
+                        val: ValExpr::Error,
+                    }
+                }
+            };
+
+            let body = Box::new(translate_augvalexpr(*body, env, dlogger));
+
+            env.unintroduce_label();
+
+            Augmented {
+                range,
+                val: ValExpr::Loop { label, body },
+            }
+        }
+        ast::Expr::Ret { label, value } => {
+            let label = match env.lookup_label(label, dlogger) {
+                Some(i) => i,
+                None => {
+                    return Augmented {
+                        range,
+                        val: ValExpr::Error,
+                    }
+                }
+            };
+
+            Augmented {
+                range,
+                val: ValExpr::Ret {
+                    value: Box::new(translate_augvalexpr(*value, env, dlogger)),
+                    label,
+                },
+            }
+        }
+        ast::Expr::Block {
+            label,
+            statements,
+            trailing_semicolon,
+        } => {
+            let label = match env.introduce_label(label, dlogger) {
+                Some((i, _)) => i,
+                _ => {
+                    return Augmented {
+                        range,
+                        val: ValExpr::Error,
+                    }
+                }
+            };
+
+            // introduce new scope
+            env.push_block_scope();
+            let mut statements: Vec<Augmented<BlockStatement>> = statements
+                .into_iter()
+                .map(|x| tr_aug(x, env, dlogger, translate_blockstatement))
+                .collect();
+            // end scope
+            env.pop_block_scope();
+
+            env.unintroduce_label();
+
+            // if the last statement is a do statement, and there is no trailing semicolon, then it is an implicit return
+            // here we turn it into an explicit return
+            if let Some(mut last_statement) = statements.pop() {
+                if let Augmented {
+                    range: do_range,
+                    val: BlockStatement::Do(ref value),
+                } = last_statement
+                    && !trailing_semicolon
+                {
+                    last_statement = Augmented {
+                        range: do_range.clone(),
+                        val: BlockStatement::Do(Box::new(Augmented {
+                            range: do_range,
+                            val: ValExpr::Ret {
+                                value: value.clone(),
+                                label,
+                            },
+                        })),
+                    };
+                }
+                statements.push(last_statement);
+            }
+
+            Augmented {
+                range,
+                val: ValExpr::Block { label, statements },
+            }
+        }
         ast::Expr::Group(v) => translate_augvalexpr(*v, env, dlogger),
         ast::Expr::Array(items) => Augmented {
             range,
@@ -430,8 +499,8 @@ fn translate_augvalexpr(
             returnty,
             body,
         } => {
-            // introduce new type and val scope
-            env.names_in_scope.push(HashMap::new());
+            // introduce scope
+            env.push_fn_scope();
 
             // insert typarams into scope
             let typarams = typarams
@@ -450,7 +519,7 @@ fn translate_augvalexpr(
             let body = Box::new(translate_augvalexpr(*body, env, dlogger));
 
             // end type and val scope
-            env.names_in_scope.pop();
+            env.pop_fn_scope();
 
             Augmented {
                 range,
@@ -475,7 +544,7 @@ fn translate_augvalexpr(
             body,
         } => {
             // introduce new type and val scope
-            env.names_in_scope.push(HashMap::new());
+            env.push_fn_scope();
 
             // insert params into scope
             let params = params
@@ -488,7 +557,7 @@ fn translate_augvalexpr(
             let body = Box::new(translate_augvalexpr(*body, env, dlogger));
 
             // end type and val scope
-            env.names_in_scope.pop();
+            env.pop_fn_scope();
 
             let val = ValExpr::FnDef {
                 params,
@@ -610,26 +679,8 @@ fn translate_augvalexpr(
                 name: name.clone(),
                 ty: Box::new(translate_augvalexpr(*ty, env, dlogger)),
             },
-        }
+        },
     }
-}
-
-fn translate_blockexpr_statement(
-    b: ast::BlockExpr,
-    env: &mut Environment,
-    dlogger: &mut DiagnosticLogger,
-) -> Vec<Augmented<BlockStatement>> {
-    // introduce new scope
-    env.names_in_scope.push(HashMap::new());
-    let statements: Vec<Augmented<BlockStatement>> = b
-        .statements
-        .into_iter()
-        .map(|x| tr_aug(x, env, dlogger, translate_blockstatement))
-        .collect();
-    // end scope
-    env.names_in_scope.pop();
-
-    statements
 }
 
 fn translate_blockstatement(
@@ -652,90 +703,9 @@ fn translate_blockstatement(
             env.use_namespace(namespace, dlogger);
             BlockStatement::NoOp
         }
-        ast::BlockStatement::IfThen {
-            cond,
-            then_branch,
-            else_branch,
-        } => BlockStatement::IfThen {
-            cond: Box::new(translate_augvalexpr(*cond, env, dlogger)),
-            then_branch: translate_blockexpr_statement(then_branch.val, env, dlogger),
-            else_branch: match else_branch {
-                Some(else_branch) => translate_augelseexpr(*else_branch, env, dlogger),
-                None => vec![],
-            },
-        },
-        ast::BlockStatement::While { cond, body } => BlockStatement::While {
-            cond: Box::new(translate_augvalexpr(*cond, env, dlogger)),
-            body: translate_blockexpr_statement(body.val, env, dlogger),
-        },
-        ast::BlockStatement::For {
-            pattern,
-            range,
-            by,
-            body,
-        } => {
-            // evaluate start, end, and by outside the scope
-            let start = Box::new(translate_augvalexpr(*range.val.start, env, dlogger));
-            let end = Box::new(translate_augvalexpr(*range.val.end, env, dlogger));
-            let by = by.map(|x| Box::new(translate_augvalexpr(*x, env, dlogger)));
-            // push val scope
-            env.names_in_scope.push(HashMap::new());
-            let pattern = Box::new(translate_augpatexpr(*pattern, env, dlogger));
-            // parse body
-            let body = translate_blockexpr_statement(body.val, env, dlogger);
-            // pop val scope
-            env.names_in_scope.pop();
-            // return
-            BlockStatement::For {
-                pattern,
-                body,
-                start,
-                end,
-                by,
-                inclusive: range.val.inclusive,
-            }
-        }
         ast::BlockStatement::Do(v) => {
             BlockStatement::Do(Box::new(translate_augvalexpr(*v, env, dlogger)))
         }
-    }
-}
-
-fn translate_blockexpr_val(
-    b: ast::BlockExpr,
-    env: &mut Environment,
-    dlogger: &mut DiagnosticLogger,
-) -> ValExpr {
-    // introduce new scope
-    env.names_in_scope.push(HashMap::new());
-    let mut statements: Vec<Augmented<BlockStatement>> = b
-        .statements
-        .into_iter()
-        .map(|x| tr_aug(x, env, dlogger, translate_blockstatement))
-        .collect();
-    // end scope
-    env.names_in_scope.pop();
-
-    // if the last statement is a do statement, then we need to make it the last expression
-    match statements.pop() {
-        Some(Augmented {
-            range,
-            val: BlockStatement::Do(v),
-        }) if !b.trailing_semicolon => ValExpr::Block {
-            statements,
-            last_expression: Some(v),
-        },
-        Some(s) => {
-            statements.push(s);
-            ValExpr::Block {
-                statements,
-                last_expression: None,
-            }
-        }
-        None => ValExpr::Block {
-            statements,
-            last_expression: None,
-        },
     }
 }
 

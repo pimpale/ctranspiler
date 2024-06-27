@@ -1,0 +1,19 @@
+let U64 = Int[false, 64];
+let U32 = Int[false, 32];
+let Unit = struct {};
+
+let main = fn():Unit -> 'f {
+    let q = 'q {
+        let z: U32 = 10;
+        ret 'q z;
+        ret 'q 10;
+    };
+    let _:U32 = q;
+
+    # This example actually is TODO because 
+    # the compiler uses the wrong kind for 10, but it should be a Value, not an constant
+    let r = 'r {
+        ret 'r 10;
+        ret 'r 10;
+    };
+} 

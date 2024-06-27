@@ -205,6 +205,7 @@ impl DiagnosticLogger {
 
     fn log(&self, d: Diagnostic) {
         dbg!(d.clone());
+        todo!();
         self.sender.send(d).unwrap();
     }
 
@@ -1032,6 +1033,20 @@ impl DiagnosticLogger {
             code_description: None,
             source: self.source.clone(),
             message: format!("cannot access index of non-array `{}`", found_type),
+            related_information: None,
+            tags: None,
+            data: None,
+        })
+    }
+
+    pub fn log_unknown_label(&mut self, range: Range, label: &str) {
+        self.log(Diagnostic {
+            range,
+            severity: Some(DiagnosticSeverity::ERROR),
+            code: Some(NumberOrString::Number(37)),
+            code_description: None,
+            source: self.source.clone(),
+            message: format!("unknown label `'{}`", label),
             related_information: None,
             tags: None,
             data: None,

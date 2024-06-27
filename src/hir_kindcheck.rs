@@ -110,7 +110,7 @@ pub fn kindcheck_valpatexpr_and_patch(
                     _ => {}
                 }
                 // otherwise we assign the expected kind to the identifier
-                checker.kind_table[id] = Some(expected_kind.clone());
+                checker.id_kind_table[id] = expected_kind.clone();
                 expected_kind.clone()
             }
         }
@@ -167,9 +167,7 @@ pub fn kindcheck_val_expr_and_patch(
     match &mut v.val {
         hir::ValExpr::Error => KindValue::Unknown,
         hir::ValExpr::Identifier(id) => {
-            let actual_kind = checker.kind_table[*id]
-                .clone()
-                .expect("kind not initialized yet");
+            let actual_kind = checker.id_kind_table[*id].clone();
             expect_kind(v, expected_kind, actual_kind, dlogger)
         }
         // depending on context can either be a type or a value
@@ -229,15 +227,32 @@ pub fn kindcheck_val_expr_and_patch(
             }
             expect_kind(v, expected_kind, KindValue::Type, dlogger)
         }
-        hir::ValExpr::Block {
-            statements,
-            last_expression,
+        hir::ValExpr::If {
+            cond,
+            then_branch,
+            else_branch,
         } => {
+            kindcheck_val_expr_and_patch(cond, &KindValue::Val, dlogger, checker);
+            kindcheck_val_expr_and_patch(then_branch, &KindValue::Val, dlogger, checker);
+            if let Some(else_branch) = else_branch {
+                kindcheck_val_expr_and_patch(else_branch, &KindValue::Val, dlogger, checker);
+            }
+            expect_kind(v, expected_kind, KindValue::Val, dlogger)
+        }
+        hir::ValExpr::Loop { label, body } => {
+            checker.lb_kind_table[*label] = KindValue::Val;
+            kindcheck_val_expr_and_patch(body, &KindValue::Val, dlogger, checker);
+            expect_kind(v, expected_kind, KindValue::Val, dlogger)
+        }
+        hir::ValExpr::Ret { label, value } => {
+            let expected_val_kind = checker.lb_kind_table[*label].clone();
+            kindcheck_val_expr_and_patch(value, &expected_val_kind, dlogger, checker);
+            expect_kind(v, expected_kind, KindValue::Never, dlogger)
+        }
+        hir::ValExpr::Block { statements, label } => {
+            checker.lb_kind_table[*label] = KindValue::Val;
             for statement in statements {
                 kindcheck_block_statement_and_patch(statement, dlogger, checker);
-            }
-            if let Some(expr) = last_expression {
-                kindcheck_val_expr_and_patch(expr, &KindValue::Val, dlogger, checker);
             }
             expect_kind(v, expected_kind, KindValue::Val, dlogger)
         }
@@ -423,43 +438,6 @@ pub fn kindcheck_block_statement_and_patch(
             let kind_hint = kindhint_of_val_pat_and_patch(pat, dlogger, checker);
             let kind = kindcheck_val_expr_and_patch(value, &kind_hint, dlogger, checker);
             kindcheck_valpatexpr_and_patch(pat, &kind, dlogger, checker);
-        }
-        hir::BlockStatement::IfThen {
-            cond,
-            then_branch,
-            else_branch,
-        } => {
-            kindcheck_val_expr_and_patch(cond, &KindValue::Val, dlogger, checker);
-            for statement in then_branch {
-                kindcheck_block_statement_and_patch(statement, dlogger, checker);
-            }
-            for statement in else_branch {
-                kindcheck_block_statement_and_patch(statement, dlogger, checker);
-            }
-        }
-        hir::BlockStatement::While { cond, body } => {
-            kindcheck_val_expr_and_patch(cond, &KindValue::Val, dlogger, checker);
-            for statement in body {
-                kindcheck_block_statement_and_patch(statement, dlogger, checker);
-            }
-        }
-        hir::BlockStatement::For {
-            pattern,
-            start,
-            end,
-            inclusive: _,
-            by,
-            body,
-        } => {
-            kindcheck_valpatexpr_and_patch(pattern, &KindValue::Val, dlogger, checker);
-            kindcheck_val_expr_and_patch(start, &KindValue::Val, dlogger, checker);
-            kindcheck_val_expr_and_patch(end, &KindValue::Val, dlogger, checker);
-            if let Some(by) = by {
-                kindcheck_val_expr_and_patch(by, &KindValue::Val, dlogger, checker);
-            }
-            for statement in body {
-                kindcheck_block_statement_and_patch(statement, dlogger, checker);
-            }
         }
         hir::BlockStatement::Do(val) => {
             kindcheck_val_expr_and_patch(val, &KindValue::Unknown, dlogger, checker);

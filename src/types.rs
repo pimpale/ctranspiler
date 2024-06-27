@@ -7,6 +7,7 @@ use crate::{dlogger::DiagnosticLogger, hir::Environment};
 #[derive(Clone, Debug, PartialEq)]
 pub enum KindValue {
     Unknown,
+    Never,
     Int,
     Float,
     Bool,
@@ -22,6 +23,7 @@ impl std::fmt::Display for KindValue {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
             KindValue::Unknown => write!(f, "Unknown"),
+            KindValue::Never => write!(f, "Never"),
             KindValue::Type => write!(f, "Type"),
             KindValue::Int => write!(f, "Int"),
             KindValue::Float => write!(f, "Float"),
@@ -241,7 +243,7 @@ pub fn typevalue_kind(ty: &TypeValue, env: &mut Environment) -> KindValue {
     match ty {
         TypeValue::Unknown => KindValue::Unknown,
         TypeValue::Never => KindValue::Type,
-        TypeValue::SymbolicVariable(id) => env.kind_table[*id].clone().unwrap(),
+        TypeValue::SymbolicVariable(id) => env.id_kind_table[*id].clone(),
         TypeValue::Bool => KindValue::Type,
         TypeValue::RefConstructor => KindValue::Generic {
             paramkinds: vec![KindValue::Type],
@@ -274,19 +276,17 @@ pub fn typevalue_kind(ty: &TypeValue, env: &mut Environment) -> KindValue {
             paramkinds: typarams
                 .iter()
                 .map(|x| match x {
-                    Some(TypeParam { id, .. }) => env.kind_table[*id].clone().unwrap(),
+                    Some(TypeParam { id, .. }) => env.id_kind_table[*id].clone(),
                     None => KindValue::Unknown,
                 })
                 .collect(),
             returnkind: Box::new(typevalue_kind(body, env)),
         },
         TypeValue::Concretization { constructor, .. } => match constructor {
-            TypeValueConstructor::SymbolicVariable(id) => {
-                match env.kind_table[*id].clone().unwrap() {
-                    KindValue::Generic { returnkind, .. } => *returnkind,
-                    _ => KindValue::Unknown,
-                }
-            }
+            TypeValueConstructor::SymbolicVariable(id) => match env.id_kind_table[*id].clone() {
+                KindValue::Generic { returnkind, .. } => *returnkind,
+                _ => KindValue::Unknown,
+            },
             TypeValueConstructor::RefConstructor => KindValue::Type,
             TypeValueConstructor::ArrayConstructor => KindValue::Type,
             TypeValueConstructor::SliceConstructor => KindValue::Type,

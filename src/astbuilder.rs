@@ -99,6 +99,30 @@ fn expect_identifier<TkIter: Iterator<Item = Token>>(
     };
 }
 
+fn expect_label<TkIter: Iterator<Item = Token>>(
+    tkiter: &mut PeekMoreIterator<TkIter>,
+    dlogger: &mut DiagnosticLogger,
+    structure: &str,
+) -> Label {
+    let tk = tkiter.next().unwrap();
+    if let Some(TokenKind::Label(id)) = tk.kind {
+        return Label {
+            label: Some(id),
+            range: tk.range,
+        };
+    }
+    dlogger.log_unexpected_token_specific(
+        tk.range,
+        structure,
+        vec![TokenKind::Label(String::new())],
+        &tk.kind,
+    );
+    return Label {
+        label: None,
+        range: tk.range,
+    };
+}
+
 fn parse_l_binary_op<TkIter: Iterator<Item = Token>>(
     tkiter: &mut PeekMoreIterator<TkIter>,
     dlogger: &mut DiagnosticLogger,
@@ -439,16 +463,17 @@ fn parse_exact_expr_group<TkIter: Iterator<Item = Token>>(
     }
 }
 
-fn parse_blockexpr<TkIter: Iterator<Item = Token>>(
+fn parse_exact_expr_block<TkIter: Iterator<Item = Token>>(
     tkiter: &mut PeekMoreIterator<TkIter>,
     dlogger: &mut DiagnosticLogger,
-) -> Augmented<BlockExpr> {
+) -> Augmented<Expr> {
     let metadata = get_metadata(tkiter);
+    let label = expect_label(tkiter, dlogger, "block expression");
 
-    let (range, statements, trailing_semicolon) = parse_delimited_statement_seq_opt_sep(
+    let (block_range, statements, trailing_semicolon) = parse_delimited_statement_seq_opt_sep(
         tkiter,
         dlogger,
-        "group expression",
+        "block expression",
         parse_blockstatement,
         TokenKind::BraceLeft,
         TokenKind::BraceRight,
@@ -456,26 +481,13 @@ fn parse_blockexpr<TkIter: Iterator<Item = Token>>(
     );
 
     Augmented {
-        range,
+        range: union_of(label.range, block_range),
         metadata,
-        val: BlockExpr {
+        val: Expr::Block {
+            label,
             statements,
             trailing_semicolon,
         },
-    }
-}
-
-fn parse_exact_expr_block<TkIter: Iterator<Item = Token>>(
-    tkiter: &mut PeekMoreIterator<TkIter>,
-    dlogger: &mut DiagnosticLogger,
-) -> Augmented<Expr> {
-    let metadata = get_metadata(tkiter);
-    let block_tk = exact_token(tkiter, TokenKind::Block);
-    let block = Box::new(parse_blockexpr(tkiter, dlogger));
-    Augmented {
-        range: union_of(block_tk.range, block.range),
-        metadata,
-        val: Expr::Block(block),
     }
 }
 
@@ -594,25 +606,20 @@ fn parse_exact_expr_extern<TkIter: Iterator<Item = Token>>(
     }
 }
 
-fn parse_exact_if<TkIter: Iterator<Item = Token>>(
+fn parse_exact_expr_if<TkIter: Iterator<Item = Token>>(
     tkiter: &mut PeekMoreIterator<TkIter>,
     dlogger: &mut DiagnosticLogger,
-) -> (
-    Range,
-    Vec<Metadata>,
-    Box<Augmented<Expr>>,
-    Box<Augmented<BlockExpr>>,
-    Option<Box<Augmented<ElseExpr>>>,
-) {
+) -> Augmented<Expr> {
     let metadata = get_metadata(tkiter);
     let Token { range: lrange, .. } = exact_token(tkiter, TokenKind::If);
 
     let cond = Box::new(parse_expr(tkiter, dlogger));
-    let then_branch = Box::new(parse_blockexpr(tkiter, dlogger));
+    let then_branch = Box::new(parse_expr(tkiter, dlogger));
 
     // add else branch if it exists
     let else_branch = if let Some(TokenKind::Else) = tkiter.peek_nth(0).unwrap().kind {
-        Some(Box::new(parse_exact_elseexpr(tkiter, dlogger)))
+        tkiter.next();
+        Some(Box::new(parse_expr(tkiter, dlogger)))
     } else {
         None
     };
@@ -623,44 +630,50 @@ fn parse_exact_if<TkIter: Iterator<Item = Token>>(
         None => lrange,
     };
 
-    (
-        union_of(lrange, rrange),
+    Augmented {
+        range: union_of(lrange, rrange),
         metadata,
-        cond,
-        then_branch,
-        else_branch,
-    )
+        val: Expr::If {
+            cond,
+            then_branch,
+            else_branch,
+        },
+    }
 }
 
-// parses an else expression
-fn parse_exact_elseexpr<TkIter: Iterator<Item = Token>>(
+fn parse_exact_expr_loop<TkIter: Iterator<Item = Token>>(
     tkiter: &mut PeekMoreIterator<TkIter>,
     dlogger: &mut DiagnosticLogger,
-) -> Augmented<ElseExpr> {
+) -> Augmented<Expr> {
     let metadata = get_metadata(tkiter);
-    let Token { range: lrange, .. } = exact_token(tkiter, TokenKind::Else);
+    let Token { range: lrange, .. } = exact_token(tkiter, TokenKind::Loop);
 
-    match tkiter.peek_nth(0).unwrap().kind {
-        Some(TokenKind::If) => {
-            let (rrange, _, cond, then_branch, else_branch) = parse_exact_if(tkiter, dlogger);
-            Augmented {
-                metadata,
-                range: union_of(lrange, rrange),
-                val: ElseExpr::Elif {
-                    cond,
-                    then_branch,
-                    else_branch,
-                },
-            }
-        }
-        _ => {
-            let block = Box::new(parse_blockexpr(tkiter, dlogger));
-            Augmented {
-                metadata,
-                range: union_of(lrange, block.range),
-                val: ElseExpr::Else(block),
-            }
-        }
+    let label = expect_label(tkiter, dlogger, "loop expression");
+
+    let body = Box::new(parse_expr(tkiter, dlogger));
+
+    Augmented {
+        range: union_of(lrange, body.range),
+        metadata,
+        val: Expr::Loop { label, body },
+    }
+}
+
+fn parse_exact_expr_ret<TkIter: Iterator<Item = Token>>(
+    tkiter: &mut PeekMoreIterator<TkIter>,
+    dlogger: &mut DiagnosticLogger,
+) -> Augmented<Expr> {
+    let metadata = get_metadata(tkiter);
+    let Token { range: lrange, .. } = exact_token(tkiter, TokenKind::Ret);
+
+    let label = expect_label(tkiter, dlogger, "ret expression");
+
+    let value = Box::new(parse_expr(tkiter, dlogger));
+
+    Augmented {
+        range: union_of(lrange, value.range),
+        metadata,
+        val: Expr::Ret { label, value },
     }
 }
 
@@ -760,8 +773,11 @@ fn decide_expr_term<'a, TkIter: Iterator<Item = Token> + 'a>(
         TokenKind::New => Some(Box::new(parse_exact_expr_new_literal::<TkIter>)),
         TokenKind::BraceLeft => Some(Box::new(parse_exact_expr_struct_literal::<TkIter>)),
         TokenKind::ParenLeft => Some(Box::new(parse_exact_expr_group::<TkIter>)),
-        TokenKind::Block => Some(Box::new(parse_exact_expr_block::<TkIter>)),
+        TokenKind::Label(_) => Some(Box::new(parse_exact_expr_block::<TkIter>)),
         TokenKind::Case => Some(Box::new(parse_exact_expr_case::<TkIter>)),
+        TokenKind::If => Some(Box::new(parse_exact_expr_if::<TkIter>)),
+        TokenKind::Loop => Some(Box::new(parse_exact_expr_loop::<TkIter>)),
+        TokenKind::Ret => Some(Box::new(parse_exact_expr_ret::<TkIter>)),
         TokenKind::Fn => Some(Box::new(parse_exact_expr_fn::<TkIter>)),
         TokenKind::Identifier(_) => Some(Box::new(parse_exact_expr_identifier::<TkIter>)),
         TokenKind::Struct => Some(Box::new(parse_exact_expr_structty::<TkIter>)),
@@ -1055,11 +1071,11 @@ fn parse_patexpr_term<TkIter: Iterator<Item = Token>>(
             }
         }
         Some(TokenKind::Nominal) => {
-            let mut_tk = tkiter.next().unwrap();
-            assert!(mut_tk.kind == Some(TokenKind::Nominal));
+            let nominal_tk = tkiter.next().unwrap();
+            assert!(nominal_tk.kind == Some(TokenKind::Nominal));
             let identifier = expect_identifier(tkiter, dlogger, "nominal identifier pattern");
             Augmented {
-                range: union_of(mut_tk.range, identifier.range),
+                range: union_of(nominal_tk.range, identifier.range),
                 metadata,
                 val: PatExpr::Identifier {
                     identifier,
@@ -1253,26 +1269,6 @@ fn parse_exact_blockstatement_valdef<TkIter: Iterator<Item = Token>>(
     }
 }
 
-// parses a while or panics
-fn parse_exact_blockstatement_while<TkIter: Iterator<Item = Token>>(
-    tkiter: &mut PeekMoreIterator<TkIter>,
-    dlogger: &mut DiagnosticLogger,
-) -> Augmented<BlockStatement> {
-    let metadata = get_metadata(tkiter);
-    let while_tk = tkiter.next().unwrap();
-    assert!(Some(TokenKind::While) == while_tk.kind);
-
-    let cond = Box::new(parse_expr(tkiter, dlogger));
-
-    let body = Box::new(parse_blockexpr(tkiter, dlogger));
-
-    Augmented {
-        metadata,
-        range: union_of(while_tk.range, body.range),
-        val: BlockStatement::While { cond, body },
-    }
-}
-
 // parse range expression
 fn parse_rangeexpr<TkIter: Iterator<Item = Token>>(
     tkiter: &mut PeekMoreIterator<TkIter>,
@@ -1304,42 +1300,6 @@ fn parse_rangeexpr<TkIter: Iterator<Item = Token>>(
             start,
             end,
             inclusive,
-        },
-    }
-}
-
-// parses a set or panics
-fn parse_exact_blockstatement_for<TkIter: Iterator<Item = Token>>(
-    tkiter: &mut PeekMoreIterator<TkIter>,
-    dlogger: &mut DiagnosticLogger,
-) -> Augmented<BlockStatement> {
-    let metadata = get_metadata(tkiter);
-    let for_tk = tkiter.next().unwrap();
-    assert!(Some(TokenKind::For) == for_tk.kind);
-
-    let pattern = Box::new(parse_patexpr(tkiter, dlogger));
-
-    expect_token(tkiter, dlogger, "for loop", vec![TokenKind::In]);
-
-    let range = Box::new(parse_rangeexpr(tkiter, dlogger));
-
-    let by = if tkiter.peek_nth(0).unwrap().kind == Some(TokenKind::By) {
-        let _ = tkiter.next().unwrap();
-        Some(Box::new(parse_expr_term(tkiter, dlogger)))
-    } else {
-        None
-    };
-
-    let body = Box::new(parse_blockexpr(tkiter, dlogger));
-
-    Augmented {
-        metadata,
-        range: union_of(for_tk.range, body.range),
-        val: BlockStatement::For {
-            pattern,
-            body,
-            range,
-            by,
         },
     }
 }
@@ -1398,8 +1358,6 @@ fn parse_blockstatement<TkIter: Iterator<Item = Token>>(
 
     match maybe_kind {
         Some(TokenKind::Let) => parse_exact_blockstatement_valdef(tkiter, dlogger),
-        Some(TokenKind::While) => parse_exact_blockstatement_while(tkiter, dlogger),
-        Some(TokenKind::For) => parse_exact_blockstatement_for(tkiter, dlogger),
         Some(_) => parse_exact_blockstatement_do(tkiter, dlogger),
         None => {
             // grab metadata
@@ -1556,7 +1514,7 @@ fn parse_exact_expr_generic<TkIter: Iterator<Item = Token>>(
     let generic_tk = exact_token(tkiter, TokenKind::Generic);
     let (params, _) = parse_tyargs_expr(tkiter, dlogger, parse_patexpr);
 
-    let returnkind = if tkiter.peek_nth(0).unwrap().kind == Some(TokenKind::ConstrainType) {
+    let returnkind = if tkiter.peek_nth(0).unwrap().kind == Some(TokenKind::ConstrainKind) {
         tkiter.next();
         Some(Box::new(parse_kind_expr(tkiter, dlogger)))
     } else {
@@ -1566,7 +1524,7 @@ fn parse_exact_expr_generic<TkIter: Iterator<Item = Token>>(
     expect_token(
         tkiter,
         dlogger,
-        "function type definition",
+        "generic definition",
         vec![TokenKind::Defun],
     );
 
@@ -1620,6 +1578,15 @@ fn parse_kind_expr<TkIter: Iterator<Item = Token>>(
                 val: KindExpr::Bool,
             }
         }
+        Some(TokenKind::TypeKind) => {
+            let metadata = get_metadata(tkiter);
+            let Token { range, .. } = exact_token(tkiter, TokenKind::TypeKind);
+            Augmented {
+                range,
+                metadata,
+                val: KindExpr::Int,
+            }
+        }
         Some(TokenKind::BracketLeft) => {
             let metadata = get_metadata(tkiter);
             let (range, args, _) = parse_delimited_statement_seq(
@@ -1644,7 +1611,13 @@ fn parse_kind_expr<TkIter: Iterator<Item = Token>>(
             dlogger.log_unexpected_token_specific(
                 range,
                 "kind expression",
-                vec![TokenKind::Identifier(String::new())],
+                vec![
+                    TokenKind::IntKind,
+                    TokenKind::FloatKind,
+                    TokenKind::BoolKind,
+                    TokenKind::TypeKind,
+                    TokenKind::BracketLeft,
+                ],
                 &k,
             );
             Augmented {
