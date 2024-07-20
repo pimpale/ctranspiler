@@ -6,7 +6,7 @@ use crate::ast::IdentifierModifier;
 use crate::dlogger::DiagnosticLogger;
 use crate::hir;
 use crate::hir::{Augmented, Environment};
-use crate::types::{TypeParam, TypeValue, TypeValueConstructor};
+use crate::types::{KindValue, TypeParam, TypeValue, TypeValueConstructor};
 
 // gets a hint but doesn't bind any free variables yet
 // doesn't thoroughly traverse the tree, so make sure to call typecheck_val_expr_and_patch on this node afterwards
@@ -372,43 +372,80 @@ pub fn typecheck_val_expr_and_patch(
             };
             expect_type(v, expected_type, actual_type, dlogger)
         }
-        hir::ValExpr::Bool(i) => match expected_type {
-            TypeValue::Bool => TypeValue::Bool,
-            _ => {
-                let actual = TypeValue::BoolLit(*i);
-                expect_type(v, expected_type, actual, dlogger)
+        hir::ValExpr::Bool { value, kind } => match kind {
+            Some(KindValue::Bool) => {
+                let value = *value;
+                expect_type(v, expected_type, TypeValue::BoolLit(value), dlogger)
             }
+            Some(KindValue::Val) => expect_type(v, expected_type, TypeValue::Bool, dlogger),
+            _ => unreachable!("should have been kindchecked"),
         },
-        hir::ValExpr::Int(ref i) => match expected_type {
-            // takes the shape of the expected type
-            w @ TypeValue::Concretization {
-                constructor: TypeValueConstructor::IntConstructor,
-                ..
-            } => w.clone(),
-            // default to type variable
-            _ => match i64::try_from(i) {
-                Ok(i) => expect_type(v, expected_type, TypeValue::IntLit(i), dlogger),
-                Err(_) => {
-                    dlogger.log_int_too_large(v.range, 64);
+        hir::ValExpr::Int { value, kind } => match kind {
+            Some(KindValue::Int) => {
+                // type variable
+                match i64::try_from(value.clone()) {
+                    Ok(i) => expect_type(v, expected_type, TypeValue::IntLit(i), dlogger),
+                    Err(_) => {
+                        dlogger.log_int_too_large(v.range, 64);
+                        v.val = hir::ValExpr::Error;
+                        TypeValue::Unknown
+                    }
+                }
+            }
+            Some(KindValue::Val) => match expected_type {
+                // takes the shape of the expected type
+                w @ TypeValue::Concretization {
+                    constructor: TypeValueConstructor::IntConstructor,
+                    ..
+                } => w.clone(),
+                // otherwise error
+                expected_type => {
+                    dlogger.log_type_mismatch(
+                        v.range,
+                        &expected_type.to_string(),
+                        TypeValue::Concretization {
+                            constructor: TypeValueConstructor::IntConstructor,
+                            tyargs: vec![TypeValue::Unknown, TypeValue::Unknown],
+                        }
+                        .to_string()
+                        .as_str(),
+                    );
                     v.val = hir::ValExpr::Error;
                     TypeValue::Unknown
                 }
             },
+            _ => unreachable!("should have been kindchecked"),
         },
-        hir::ValExpr::Float(ref i) => match expected_type {
-            // takes the shape of the expected type
-            w @ TypeValue::Concretization {
-                constructor: TypeValueConstructor::FloatConstructor,
-                ..
-            } => w.clone(),
-            // default to type variable
-            _ => {
-                let (n, d) = i.reduced().into_raw();
+        hir::ValExpr::Float { value, kind } => match kind {
+            Some(KindValue::Float) => {
+                let (n, d) = value.reduced().into_raw();
                 let n = ToPrimitive::to_f64(&n).unwrap();
                 let d = ToPrimitive::to_f64(&d).unwrap();
-                let actual = TypeValue::FloatLit(n / d);
-                expect_type(v, expected_type, actual, dlogger)
+                expect_type(v, expected_type, TypeValue::FloatLit(n / d), dlogger)
             }
+            Some(KindValue::Val) => match expected_type {
+                // takes the shape of the expected type
+                w @ TypeValue::Concretization {
+                    constructor: TypeValueConstructor::FloatConstructor,
+                    ..
+                } => w.clone(),
+                // otherwise error
+                expected_type => {
+                    dlogger.log_type_mismatch(
+                        v.range,
+                        &expected_type.to_string(),
+                        TypeValue::Concretization {
+                            constructor: TypeValueConstructor::FloatConstructor,
+                            tyargs: vec![TypeValue::Unknown],
+                        }
+                        .to_string()
+                        .as_str(),
+                    );
+                    v.val = hir::ValExpr::Error;
+                    TypeValue::Unknown
+                }
+            },
+            _ => unreachable!("should have been kindchecked"),
         },
         hir::ValExpr::String(s) => {
             let l = s.len();
@@ -1095,6 +1132,19 @@ pub fn typecheck_val_expr_and_patch(
         ),
         hir::ValExpr::Extern { ty, .. } => {
             typecheck_val_expr_and_patch(ty, expected_type, dlogger, checker)
+        }
+        hir::ValExpr::Hole => todo!(),
+        hir::ValExpr::Typed { val, ty } => {
+            // get the expected type's type
+            let expected_ty =
+                typecheck_val_expr_and_patch(ty, &TypeValue::Unknown, dlogger, checker);
+            // check the value
+            let actual_ty = typecheck_val_expr_and_patch(val, &expected_ty, dlogger, checker);
+            // check the type
+            expect_type(ty, expected_type, actual_ty, dlogger)
+        }
+        hir::ValExpr::Kinded { val, .. } => {
+            typecheck_val_expr_and_patch(val, expected_type, dlogger, checker)
         }
     }
 }

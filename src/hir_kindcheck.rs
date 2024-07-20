@@ -171,17 +171,35 @@ pub fn kindcheck_val_expr_and_patch(
             expect_kind(v, expected_kind, actual_kind, dlogger)
         }
         // depending on context can either be a type or a value
-        hir::ValExpr::Bool(_) => match expected_kind {
-            KindValue::Val => KindValue::Val,
-            _ => expect_kind(v, expected_kind, KindValue::Bool, dlogger),
+        hir::ValExpr::Bool { kind, .. } => match expected_kind {
+            KindValue::Val => {
+                *kind = Some(KindValue::Val);
+                KindValue::Val
+            }
+            _ => {
+                *kind = Some(KindValue::Bool);
+                expect_kind(v, expected_kind, KindValue::Bool, dlogger)
+            }
         },
-        hir::ValExpr::Int(_) => match expected_kind {
-            KindValue::Val => KindValue::Val,
-            _ => expect_kind(v, expected_kind, KindValue::Int, dlogger),
+        hir::ValExpr::Int { kind, .. } => match expected_kind {
+            KindValue::Val => {
+                *kind = Some(KindValue::Val);
+                KindValue::Val
+            }
+            _ => {
+                *kind = Some(KindValue::Int);
+                expect_kind(v, expected_kind, KindValue::Int, dlogger)
+            }
         },
-        hir::ValExpr::Float(_) => match expected_kind {
-            KindValue::Val => KindValue::Val,
-            _ => expect_kind(v, expected_kind, KindValue::Float, dlogger),
+        hir::ValExpr::Float { kind, .. } => match expected_kind {
+            KindValue::Val => {
+                *kind = Some(KindValue::Val);
+                KindValue::Val
+            }
+            _ => {
+                *kind = Some(KindValue::Float);
+                expect_kind(v, expected_kind, KindValue::Float, dlogger)
+            }
         },
         hir::ValExpr::String(_) => expect_kind(v, expected_kind, KindValue::Val, dlogger),
         hir::ValExpr::StructLiteral(fields) => {
@@ -421,6 +439,29 @@ pub fn kindcheck_val_expr_and_patch(
         hir::ValExpr::Extern { ty, .. } => {
             kindcheck_val_expr_and_patch(ty, &KindValue::Type, dlogger, checker);
             expect_kind(v, expected_kind, KindValue::Val, dlogger)
+        }
+        hir::ValExpr::Hole => match expected_kind {
+            KindValue::Unknown => {
+                dlogger.log_could_not_infer_hole_kind(v.range);
+                v.val = hir::ValExpr::Error;
+                KindValue::Unknown
+            },
+            ek => ek.clone()
+        },
+        hir::ValExpr::Typed { val, ty } => {
+            let expected_type_kind = get_kind_of_type(expected_kind.clone(), ty.range, dlogger);
+            let actual_type_kind =
+                kindcheck_val_expr_and_patch(ty, &expected_type_kind, dlogger, checker);
+            let expected_val_kind_from_type = get_kind_of_member(actual_type_kind, ty.range, dlogger);
+            let actual_val_kind = kindcheck_val_expr_and_patch(val, &expected_val_kind_from_type, dlogger, checker);
+            expect_kind(v, expected_kind, actual_val_kind, dlogger)
+        }
+        hir::ValExpr::Kinded { val, kind } => {
+            // compute the kind of the kind
+            let kind = evaluate_hir_kind(kind);
+            // check the value with the kind
+            let actual_val_kind = kindcheck_val_expr_and_patch(val, &kind, dlogger, checker);
+            expect_kind(v, expected_kind, actual_val_kind, dlogger)
         }
     }
 }

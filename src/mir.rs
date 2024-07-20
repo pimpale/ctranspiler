@@ -1,4 +1,3 @@
-
 // Function-Local
 pub struct BasicBlockIdx(usize);
 pub struct StackVariableIdx(usize);
@@ -68,28 +67,28 @@ pub enum Builtin {
     // boolean operators
     BoolNot, // bool -> bool
     // integer operators
-    IntAddGen,         // [U](u, u) -> u
-    IntSubGen,         // [U](u, u) -> u
-    IntMulGen,         // [U](u, u) -> u
-    IntDivGen,         // [U](u, u) -> u
-    IntRemGen,         // [U](u, u) -> u
-    IntShlLGen,        // [U](u, u) -> u
-    IntShrLGen,        // [U](u, u) -> u
-    IntShrAGen,        // [U](u, u) -> u
-    IntRolGen,         // [U](u, u) -> u
-    IntRorGen,         // [U](u, u) -> u
-    IntAndGen,         // [U](u, u) -> u
-    IntOrGen,          // [U](u, u) -> u
-    IntXorGen,         // [U](u, u) -> u
-    IntInvGen,         // [U]u -> u
-    IntNegGen,         // [U]u -> u
+    IntAddGen,  // [U](u, u) -> u
+    IntSubGen,  // [U](u, u) -> u
+    IntMulGen,  // [U](u, u) -> u
+    IntDivGen,  // [U](u, u) -> u
+    IntRemGen,  // [U](u, u) -> u
+    IntShlLGen, // [U](u, u) -> u
+    IntShrLGen, // [U](u, u) -> u
+    IntShrAGen, // [U](u, u) -> u
+    IntRolGen,  // [U](u, u) -> u
+    IntRorGen,  // [U](u, u) -> u
+    IntAndGen,  // [U](u, u) -> u
+    IntOrGen,   // [U](u, u) -> u
+    IntXorGen,  // [U](u, u) -> u
+    IntInvGen,  // [U]u -> u
+    IntNegGen,  // [U]u -> u
     // float operators
-    FloatAddGen,    // [F](f, f) -> f
-    FloatSubGen,    // [F](f, f) -> f
-    FloatMulGen,    // [F](f, f) -> f
-    FloatDivGen,    // [F](f, f) -> f
-    FloatRemGen,    // [F](f, f) -> f
-    FloatNegGen,    // [F]f -> f
+    FloatAddGen, // [F](f, f) -> f
+    FloatSubGen, // [F](f, f) -> f
+    FloatMulGen, // [F](f, f) -> f
+    FloatDivGen, // [F](f, f) -> f
+    FloatRemGen, // [F](f, f) -> f
+    FloatNegGen, // [F]f -> f
     // conversion operators
     // convert int to int
     ConvIntIntGen, // [T, U] t -> u

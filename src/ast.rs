@@ -5,16 +5,8 @@ use serde::{Deserialize, Serialize};
 use strum::AsRefStr;
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
-pub struct Metadata {
-    pub range: Range,
-    pub significant: bool,
-    pub value: Vec<u8>,
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct Augmented<T> {
     pub range: Range,
-    pub metadata: Vec<Metadata>,
     pub val: T,
 }
 
@@ -83,16 +75,8 @@ pub enum ValBinaryOpKind {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
-pub enum CaseTargetExpr {
-    Error,
-    Bool(bool),
-    Int(BigInt),
-    PatExpr(Box<Augmented<PatExpr>>),
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct CaseExpr {
-    pub target: Box<Augmented<CaseTargetExpr>>,
+    pub target: Box<Augmented<Expr>>,
     pub body: Box<Augmented<Expr>>,
 }
 
@@ -101,33 +85,6 @@ pub enum IdentifierModifier {
     Mutable,
     Nominal,
     None,
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug, AsRefStr)]
-pub enum PatExpr {
-    Error,
-    Ignore,
-    Identifier {
-        modifier: IdentifierModifier,
-        identifier: Identifier,
-    },
-    // destructure anonymous struct
-    StructLiteral(Vec<Augmented<StructItemExpr<PatExpr>>>),
-
-    // destructure nominal type
-    New {
-        ty: Box<Augmented<Expr>>,
-        pat: Box<Augmented<PatExpr>>,
-    },
-    // assert pattern has some type
-    Typed {
-        pat: Box<Augmented<PatExpr>>,
-        ty: Box<Augmented<Expr>>,
-    },
-    Kinded {
-        pat: Box<Augmented<PatExpr>>,
-        kind: Box<Augmented<KindExpr>>,
-    },
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -141,6 +98,7 @@ pub struct RangeExpr {
 pub enum Expr {
     // An error when parsing
     Error,
+    Ignore,
     Int(BigInt),
     Bool(bool),
     Float(BigRational),
@@ -149,8 +107,8 @@ pub enum Expr {
         block: bool,
     },
     FnDef {
-        typarams: Option<Vec<Augmented<PatExpr>>>,
-        params: Vec<Augmented<PatExpr>>,
+        typarams: Option<Vec<Augmented<Expr>>>,
+        params: Vec<Augmented<Expr>>,
         returnty: Option<Box<Augmented<Expr>>>,
         body: Box<Augmented<Expr>>,
     },
@@ -176,7 +134,6 @@ pub enum Expr {
     },
     // Block
     Block {
-        label: Label,
         statements: Vec<Augmented<BlockStatement>>,
         trailing_semicolon: bool,
     },
@@ -185,7 +142,10 @@ pub enum Expr {
     // Inline array
     Array(Vec<Augmented<Expr>>),
     // A reference to a previously defined variable
-    Identifier(Identifier),
+    Identifier {
+        modifier: IdentifierModifier,
+        identifier: Identifier,
+    },
     // Function application
     App {
         root: Box<Augmented<Expr>>,
@@ -206,13 +166,21 @@ pub enum Expr {
         root: Box<Augmented<Expr>>,
         tyargs: Vec<Augmented<Expr>>,
     },
+    Typed {
+        pat: Box<Augmented<Expr>>,
+        ty: Box<Augmented<Expr>>,
+    },
+    Kinded {
+        pat: Box<Augmented<Expr>>,
+        kind: Box<Augmented<KindExpr>>,
+    },
     // structs and enums
     StructTy(Vec<Augmented<StructItemExpr<Expr>>>),
     EnumTy(Vec<Augmented<StructItemExpr<Expr>>>),
     UnionTy(Vec<Augmented<StructItemExpr<Expr>>>),
     // generic is the equivalent of a function on the type level
     Generic {
-        params: Vec<Augmented<PatExpr>>,
+        params: Vec<Augmented<Expr>>,
         returnkind: Option<Box<Augmented<KindExpr>>>,
         body: Box<Augmented<Expr>>,
     },
@@ -228,7 +196,6 @@ pub enum Expr {
     },
     // Loop
     Loop {
-        label: Label,
         body: Box<Augmented<Expr>>,
     },
     // Return
@@ -242,13 +209,29 @@ pub enum Expr {
         then_branch: Box<Augmented<Expr>>,
         else_branch: Option<Box<Augmented<Expr>>>,
     },
+    // Annotated
+    Annotated {
+        metadata: Vec<u8>,
+        significant: bool,
+        value: Box<Augmented<Expr>>,
+    },
+    // Labeled
+    Labeled {
+        label: Label,
+        value: Box<Augmented<Expr>>,
+    },
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, AsRefStr)]
 pub enum BlockStatement {
     Error,
+    Annotated {
+        metadata: Vec<u8>,
+        significant: bool,
+        value: Box<Augmented<BlockStatement>>,
+    },
     Let {
-        pat: Box<Augmented<PatExpr>>,
+        pat: Box<Augmented<Expr>>,
         value: Box<Augmented<Expr>>,
     },
     Use {
@@ -260,8 +243,13 @@ pub enum BlockStatement {
 #[derive(Serialize, Deserialize, Clone, Debug, AsRefStr)]
 pub enum FileStatement {
     Error,
+    Annotated {
+        metadata: Vec<u8>,
+        significant: bool,
+        value: Box<Augmented<FileStatement>>,
+    },
     Let {
-        pat: Box<Augmented<PatExpr>>,
+        pat: Box<Augmented<Expr>>,
         value: Box<Augmented<Expr>>,
     },
     Use {

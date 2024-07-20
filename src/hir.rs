@@ -111,9 +111,19 @@ pub enum ValBinaryOpKind {
 pub enum ValExpr {
     // An error when parsing
     Error,
-    Int(BigInt),
-    Bool(bool),
-    Float(BigRational),
+    Hole,
+    Int {
+        value: BigInt,
+        kind: Option<KindValue>,
+    },
+    Bool {
+        value: bool,
+        kind: Option<KindValue>,
+    },
+    Float {
+        value: BigRational,
+        kind: Option<KindValue>,
+    },
     String(Vec<u8>),
     Ref(Box<Augmented<ValExpr>>),
     Deref(Box<Augmented<ValExpr>>),
@@ -199,6 +209,14 @@ pub enum ValExpr {
     Ret {
         label: usize,
         value: Box<Augmented<ValExpr>>,
+    },
+    Typed {
+        val: Box<Augmented<ValExpr>>,
+        ty: Box<Augmented<ValExpr>>,
+    },
+    Kinded {
+        val: Box<Augmented<ValExpr>>,
+        kind: Box<Augmented<KindExpr>>,
     },
 }
 
@@ -326,6 +344,21 @@ impl Environment {
             }
             None => None,
         }
+    }
+
+    pub fn introduce_anonymous_label(&mut self, range: Range) -> usize {
+        let id = self.lb_name_table.len();
+        let label = format!("__anon_{}", id);
+        self.labels_in_scope
+            .last_mut()
+            .unwrap()
+            .push((label.clone(), id));
+        self.lb_name_table.push(label.clone());
+        self.lb_range_table.push(range);
+        self.lb_kind_table.push(KindValue::Unknown);
+        self.lb_type_table.push(TypeValue::Unknown);
+        self.lb_type_hint_table.push(TypeValue::Unknown);
+        return id;
     }
 
     pub fn unintroduce_label(&mut self) {

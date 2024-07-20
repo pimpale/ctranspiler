@@ -6,8 +6,7 @@ let CString = Slice[Char];
 # declare the external functions
 let puts = extern "puts" Fn(CString) -> struct {};
 
-let main = fn(argc: U64, argv: Slice[CString]): U64 -> '{
+let main = fn(argc: U64, argv: Slice[CString]): U64 -> {
     puts(__builtin_array_to_slice[Char, 14]("Hello, world!\n"));
     0
 };
-    

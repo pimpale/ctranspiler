@@ -16,7 +16,6 @@ pub enum TokenKind {
     Fn,        // fn
     If,        // if
     Else,      // else
-    By,        // by
     Loop,      // loop
     Ret,       // ret
     Namespace, // namespace
@@ -29,13 +28,13 @@ pub enum TokenKind {
     Nominal,   // nominal
     Extern,    // extern
     // Values
-    Label(String),                         // 'label
+    Label(String),                          // 'label
     Bool(bool),                             // true
     String { value: Vec<u8>, block: bool }, // "string"
     Int(BigInt),                            // 7
     Float(BigRational),                     // 0.7
     // Types
-    FnTy,               // Fn
+    FnTy, // Fn
     // Kinds
     TypeKind,  // TYPE
     BoolKind,  // BOOL
@@ -76,18 +75,19 @@ pub enum TokenKind {
     Pipe,  // |
     Defun, // ->
     // Other Miscellaneous Operator Things
-    Define,        // =
-    ParenLeft,     // (
-    ParenRight,    // )
-    BracketLeft,   // [
-    BracketRight,  // ]
-    BraceLeft,     // {
-    BraceRight,    // }
-    ConstrainType, // :
-    ConstrainKind, // ::
-    ModuleAccess,  // .
-    Semicolon,     // ;
-    Ignore,        // _
+    Define,         // =
+    ParenLeft,      // (
+    ParenRight,     // )
+    BracketLeft,    // [
+    BracketRight,   // ]
+    OpenStructLeft, // .{
+    BraceLeft,      // {
+    BraceRight,     // }
+    ConstrainType,  // :
+    ConstrainKind,  // ::
+    ModuleAccess,   // .
+    Semicolon,      // ;
+    Ignore,         // _
     // Comments, and Attributes
     Metadata { value: Vec<u8>, significant: bool }, // #!attribute and # comment
 }

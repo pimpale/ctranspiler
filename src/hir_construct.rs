@@ -7,18 +7,6 @@ use crate::ast;
 use crate::dlogger::DiagnosticLogger;
 use crate::hir::*;
 
-fn tr_aug<T, U>(
-    x: ast::Augmented<T>,
-    env: &mut Environment,
-    dlogger: &mut DiagnosticLogger,
-    f: impl Fn(T, &mut Environment, &mut DiagnosticLogger) -> U,
-) -> Augmented<U> {
-    Augmented {
-        range: x.range,
-        val: f(x.val, env, dlogger),
-    }
-}
-
 fn translate_augstructitemexpr<T, U>(
     mut lower: impl FnMut(ast::Augmented<T>, &mut Environment, &mut DiagnosticLogger) -> Augmented<U>,
     mut replace_eponymous: impl FnMut(ast::Identifier, &mut Environment, &mut DiagnosticLogger) -> U,
@@ -86,49 +74,59 @@ fn translate_augstructitemexpr<T, U>(
 }
 
 fn translate_augkindexpr(
-    k: ast::Augmented<ast::KindExpr>,
+    ast::Augmented { val: k, range }: ast::Augmented<ast::KindExpr>,
     env: &mut Environment,
     dlogger: &mut DiagnosticLogger,
 ) -> Augmented<KindExpr> {
-    tr_aug(k, env, dlogger, translate_kindexpr)
-}
-
-fn translate_kindexpr(
-    k: ast::KindExpr,
-    env: &mut Environment,
-    dlogger: &mut DiagnosticLogger,
-) -> KindExpr {
     match k {
-        ast::KindExpr::Error => KindExpr::Error,
-        ast::KindExpr::Type => KindExpr::Type,
-        ast::KindExpr::Int => KindExpr::Int,
-        ast::KindExpr::Float => KindExpr::Float,
-        ast::KindExpr::Bool => KindExpr::Bool,
-        ast::KindExpr::Generic { args, returnkind } => KindExpr::Constructor {
-            paramkinds: args
-                .into_iter()
-                .map(|k| translate_augkindexpr(k, env, dlogger))
-                .collect(),
-            returnkind: Box::new(translate_augkindexpr(*returnkind, env, dlogger)),
+        ast::KindExpr::Error => Augmented {
+            range,
+            val: KindExpr::Error,
+        },
+        ast::KindExpr::Type => Augmented {
+            range,
+            val: KindExpr::Type,
+        },
+        ast::KindExpr::Int => Augmented {
+            range,
+            val: KindExpr::Int,
+        },
+        ast::KindExpr::Float => Augmented {
+            range,
+            val: KindExpr::Float,
+        },
+        ast::KindExpr::Bool => Augmented {
+            range,
+            val: KindExpr::Bool,
+        },
+        ast::KindExpr::Generic { args, returnkind } => Augmented {
+            range,
+            val: KindExpr::Constructor {
+                paramkinds: args
+                    .into_iter()
+                    .map(|k| translate_augkindexpr(k, env, dlogger))
+                    .collect(),
+                returnkind: Box::new(translate_augkindexpr(*returnkind, env, dlogger)),
+            },
         },
     }
 }
 
 fn translate_augpatexpr(
-    ast::Augmented { range, val, .. }: ast::Augmented<ast::PatExpr>,
+    ast::Augmented { range, val, .. }: ast::Augmented<ast::Expr>,
     env: &mut Environment,
     dlogger: &mut DiagnosticLogger,
 ) -> Augmented<ValPatExpr> {
     match val {
-        ast::PatExpr::Error => Augmented {
+        ast::Expr::Error => Augmented {
             range,
             val: ValPatExpr::Error,
         },
-        ast::PatExpr::Ignore => Augmented {
+        ast::Expr::Ignore => Augmented {
             range,
             val: ValPatExpr::Ignore,
         },
-        ast::PatExpr::Identifier {
+        ast::Expr::Identifier {
             identifier,
             modifier,
         } => Augmented {
@@ -142,7 +140,7 @@ fn translate_augpatexpr(
                 None => ValPatExpr::Error,
             },
         },
-        ast::PatExpr::StructLiteral(items) => Augmented {
+        ast::Expr::StructLiteral(items) => Augmented {
             range,
             val: ValPatExpr::StructLiteral(translate_augstructitemexpr(
                 |x, env, dlogger| translate_augpatexpr(x, env, dlogger),
@@ -159,42 +157,63 @@ fn translate_augpatexpr(
                 items,
             )),
         },
-        ast::PatExpr::Typed { pat, ty } => Augmented {
+        ast::Expr::Typed { pat, ty } => Augmented {
             range,
             val: ValPatExpr::Typed {
                 pat: Box::new(translate_augpatexpr(*pat, env, dlogger)),
                 ty: Box::new(translate_augvalexpr(*ty, env, dlogger)),
             },
         },
-        ast::PatExpr::Kinded { pat, kind } => Augmented {
+        ast::Expr::Kinded { pat, kind } => Augmented {
             range,
             val: ValPatExpr::Kinded {
                 pat: Box::new(translate_augpatexpr(*pat, env, dlogger)),
                 kind: Box::new(translate_augkindexpr(*kind, env, dlogger)),
             },
         },
-        ast::PatExpr::New { ty, pat } => Augmented {
+        ast::Expr::New { ty, val } => Augmented {
             range,
             val: ValPatExpr::New {
                 ty: Box::new(translate_augvalexpr(*ty, env, dlogger)),
-                pat: Box::new(translate_augpatexpr(*pat, env, dlogger)),
+                pat: Box::new(translate_augpatexpr(*val, env, dlogger)),
             },
         },
+        val => {
+            dlogger.log_unexpected_pattern(range, val.as_ref());
+            Augmented {
+                range,
+                val: ValPatExpr::Error,
+            }
+        }
     }
 }
 
-fn translate_casetargetexpr(
-    c: ast::CaseTargetExpr,
+fn translate_augcasetargetexpr(
+    ast::Augmented { val: c, range }: ast::Augmented<ast::Expr>,
     env: &mut Environment,
     dlogger: &mut DiagnosticLogger,
-) -> CaseTargetExpr {
+) -> Augmented<CaseTargetExpr> {
     match c {
-        ast::CaseTargetExpr::Error => CaseTargetExpr::Error,
-        ast::CaseTargetExpr::Bool(b) => CaseTargetExpr::Bool(b),
-        ast::CaseTargetExpr::Int(i) => CaseTargetExpr::Int(i),
-        ast::CaseTargetExpr::PatExpr(pat) => {
-            CaseTargetExpr::PatExpr(Box::new(translate_augpatexpr(*pat, env, dlogger)))
-        }
+        ast::Expr::Error => Augmented {
+            range,
+            val: CaseTargetExpr::Error,
+        },
+        ast::Expr::Bool(b) => Augmented {
+            range,
+            val: CaseTargetExpr::Bool(b),
+        },
+        ast::Expr::Int(i) => Augmented {
+            range,
+            val: CaseTargetExpr::Int(i),
+        },
+        _ => Augmented {
+            range,
+            val: CaseTargetExpr::PatExpr(Box::new(translate_augpatexpr(
+                ast::Augmented { val: c, range },
+                env,
+                dlogger,
+            ))),
+        },
     }
 }
 
@@ -204,9 +223,101 @@ fn translate_caseexpr(
     dlogger: &mut DiagnosticLogger,
 ) -> (Augmented<CaseTargetExpr>, Augmented<ValExpr>) {
     (
-        tr_aug(*c.target, env, dlogger, translate_casetargetexpr),
+        translate_augcasetargetexpr(*c.target, env, dlogger),
         translate_augvalexpr(*c.body, env, dlogger),
     )
+}
+
+fn translate_augvalloopexpr(
+    body: Box<ast::Augmented<ast::Expr>>,
+    label: Option<ast::Label>,
+    range: Range,
+    env: &mut Environment,
+    dlogger: &mut DiagnosticLogger,
+) -> Augmented<ValExpr> {
+    let label = match label {
+        Some(label) => match env.introduce_label(label, dlogger) {
+            Some((i, _)) => i,
+            _ => {
+                return Augmented {
+                    range: body.range,
+                    val: ValExpr::Error,
+                }
+            }
+        },
+        None => env.introduce_anonymous_label(range),
+    };
+
+    let body = Box::new(translate_augvalexpr(*body, env, dlogger));
+
+    env.unintroduce_label();
+
+    Augmented {
+        range,
+        val: ValExpr::Loop { label, body },
+    }
+}
+
+fn translate_augvalblockexpr(
+    statements: Vec<ast::Augmented<ast::BlockStatement>>,
+    trailing_semicolon: bool,
+    range: Range,
+    label: Option<ast::Label>,
+    env: &mut Environment,
+    dlogger: &mut DiagnosticLogger,
+) -> Augmented<ValExpr> {
+    let label = match label {
+        Some(label) => match env.introduce_label(label, dlogger) {
+            Some((i, _)) => i,
+            _ => {
+                return Augmented {
+                    range: Range::default(),
+                    val: ValExpr::Error,
+                }
+            }
+        },
+        None => env.introduce_anonymous_label(range),
+    };
+
+    // introduce new scope
+    env.push_block_scope();
+    let mut statements: Vec<Augmented<BlockStatement>> = statements
+        .into_iter()
+        .map(|x| translate_augblockstatement(x, env, dlogger))
+        .collect();
+    // end scope
+    env.pop_block_scope();
+
+    env.unintroduce_label();
+
+    // if the last statement is a do statement, then it is an implicit return
+    // here we turn it into an explicit return
+    if let Some(mut last_statement) = statements.pop() {
+        if let Augmented {
+            range: do_range,
+            val: BlockStatement::Do(ref value),
+            ..
+        } = last_statement
+            && !trailing_semicolon
+        {
+            last_statement = Augmented {
+                range: do_range.clone(),
+                val: BlockStatement::Do(Box::new(Augmented {
+                    range: do_range,
+                    val: ValExpr::Ret {
+                        value: value.clone(),
+                        label,
+                    },
+                })),
+            };
+        }
+        statements.push(last_statement);
+    }
+
+    Augmented {
+        range,
+        val: ValExpr::Block { label, statements },
+    }
 }
 
 fn translate_augvalexpr(
@@ -219,17 +330,32 @@ fn translate_augvalexpr(
             range,
             val: ValExpr::Error,
         },
+        ast::Expr::Ignore => Augmented {
+            range,
+            val: ValExpr::Hole,
+        },
+        // ast::Expr::Kinded { pat, kind }
+        ast::Expr::Annotated { value, .. } => translate_augvalexpr(*value, env, dlogger),
         ast::Expr::Int(i) => Augmented {
             range,
-            val: ValExpr::Int(i),
+            val: ValExpr::Int {
+                value: i,
+                kind: None,
+            },
         },
         ast::Expr::Bool(b) => Augmented {
             range,
-            val: ValExpr::Bool(b),
+            val: ValExpr::Bool {
+                value: b,
+                kind: None,
+            },
         },
         ast::Expr::Float(f) => Augmented {
             range,
-            val: ValExpr::Float(f),
+            val: ValExpr::Float {
+                value: f,
+                kind: None,
+            },
         },
         ast::Expr::String { value, .. } => Augmented {
             range,
@@ -383,26 +509,6 @@ fn translate_augvalexpr(
                 else_branch: else_branch.map(|e| Box::new(translate_augvalexpr(*e, env, dlogger))),
             },
         },
-        ast::Expr::Loop { label, body } => {
-            let label = match env.introduce_label(label, dlogger) {
-                Some((i, _)) => i,
-                _ => {
-                    return Augmented {
-                        range,
-                        val: ValExpr::Error,
-                    }
-                }
-            };
-
-            let body = Box::new(translate_augvalexpr(*body, env, dlogger));
-
-            env.unintroduce_label();
-
-            Augmented {
-                range,
-                val: ValExpr::Loop { label, body },
-            }
-        }
         ast::Expr::Ret { label, value } => {
             let label = match env.lookup_label(label, dlogger) {
                 Some(i) => i,
@@ -422,60 +528,41 @@ fn translate_augvalexpr(
                 },
             }
         }
+        ast::Expr::Loop { body } => translate_augvalloopexpr(body, None, range, env, dlogger),
         ast::Expr::Block {
-            label,
             statements,
             trailing_semicolon,
-        } => {
-            let label = match env.introduce_label(label, dlogger) {
-                Some((i, _)) => i,
-                _ => {
-                    return Augmented {
-                        range,
-                        val: ValExpr::Error,
-                    }
-                }
-            };
-
-            // introduce new scope
-            env.push_block_scope();
-            let mut statements: Vec<Augmented<BlockStatement>> = statements
-                .into_iter()
-                .map(|x| tr_aug(x, env, dlogger, translate_blockstatement))
-                .collect();
-            // end scope
-            env.pop_block_scope();
-
-            env.unintroduce_label();
-
-            // if the last statement is a do statement, and there is no trailing semicolon, then it is an implicit return
-            // here we turn it into an explicit return
-            if let Some(mut last_statement) = statements.pop() {
-                if let Augmented {
-                    range: do_range,
-                    val: BlockStatement::Do(ref value),
-                } = last_statement
-                    && !trailing_semicolon
-                {
-                    last_statement = Augmented {
-                        range: do_range.clone(),
-                        val: BlockStatement::Do(Box::new(Augmented {
-                            range: do_range,
-                            val: ValExpr::Ret {
-                                value: value.clone(),
-                                label,
-                            },
-                        })),
-                    };
-                }
-                statements.push(last_statement);
+        } => translate_augvalblockexpr(statements, trailing_semicolon, range, None, env, dlogger),
+        ast::Expr::Labeled { label, value } => match value.val {
+            ast::Expr::Loop { body } => {
+                translate_augvalloopexpr(body, Some(label), range, env, dlogger)
             }
-
-            Augmented {
+            ast::Expr::Block {
+                statements,
+                trailing_semicolon,
+            } => translate_augvalblockexpr(
+                statements,
+                trailing_semicolon,
                 range,
-                val: ValExpr::Block { label, statements },
+                Some(label),
+                env,
+                dlogger,
+            ),
+            _ => {
+                let label_str = match label {
+                    ast::Label {
+                        label: Some(identifier),
+                        ..
+                    } => identifier,
+                    _ => "{unknown}".to_string(),
+                };
+                dlogger.log_label_on_non_loop_or_block(range, &label_str);
+                Augmented {
+                    range,
+                    val: ValExpr::Error,
+                }
             }
-        }
+        },
         ast::Expr::Group(v) => translate_augvalexpr(*v, env, dlogger),
         ast::Expr::Array(items) => Augmented {
             range,
@@ -486,11 +573,24 @@ fn translate_augvalexpr(
                     .collect(),
             ),
         },
-        ast::Expr::Identifier(i) => Augmented {
+        ast::Expr::Identifier {
+            modifier,
+            identifier,
+        } => Augmented {
             range,
-            val: match env.lookup_identifier(i, dlogger) {
-                Some(id) => ValExpr::Identifier(id),
-                None => ValExpr::Error,
+            val: match modifier {
+                ast::IdentifierModifier::None => match env.lookup_identifier(identifier, dlogger) {
+                    Some(id) => ValExpr::Identifier(id),
+                    None => ValExpr::Error,
+                },
+                ast::IdentifierModifier::Mutable => {
+                    dlogger.log_mutable_identifier_in_expression(range);
+                    ValExpr::Error
+                }
+                ast::IdentifierModifier::Nominal => {
+                    dlogger.log_nominal_identifier_in_expression(range);
+                    ValExpr::Error
+                }
             },
         },
         ast::Expr::FnDef {
@@ -680,16 +780,35 @@ fn translate_augvalexpr(
                 ty: Box::new(translate_augvalexpr(*ty, env, dlogger)),
             },
         },
+        ast::Expr::Typed { pat, ty } => {
+            let val = Box::new(translate_augvalexpr(*pat, env, dlogger));
+            let ty = Box::new(translate_augvalexpr(*ty, env, dlogger));
+            Augmented {
+                range,
+                val: ValExpr::Typed { val, ty },
+            }
+        }
+        ast::Expr::Kinded { pat, kind } => {
+            let val = Box::new(translate_augvalexpr(*pat, env, dlogger));
+            let kind = Box::new(translate_augkindexpr(*kind, env, dlogger));
+            Augmented {
+                range,
+                val: ValExpr::Kinded { val, kind },
+            }
+        }
     }
 }
 
-fn translate_blockstatement(
-    bs: ast::BlockStatement,
+fn translate_augblockstatement(
+    ast::Augmented { range, val }: ast::Augmented<ast::BlockStatement>,
     env: &mut Environment,
     dlogger: &mut DiagnosticLogger,
-) -> BlockStatement {
-    match bs {
-        ast::BlockStatement::Error => BlockStatement::Error,
+) -> Augmented<BlockStatement> {
+    match val {
+        ast::BlockStatement::Error => Augmented {
+            range,
+            val: BlockStatement::Error,
+        },
         ast::BlockStatement::Let { pat, value } => {
             // first parse value so that we don't accidentally introduce the name of the val before the value
             let value = Box::new(translate_augvalexpr(*value, env, dlogger));
@@ -697,14 +816,24 @@ fn translate_blockstatement(
             // now introduce name
             let pat = Box::new(translate_augpatexpr(*pat, env, dlogger));
 
-            BlockStatement::Let { pat, value }
+            Augmented {
+                range,
+                val: BlockStatement::Let { pat, value },
+            }
         }
         ast::BlockStatement::Use { namespace } => {
             env.use_namespace(namespace, dlogger);
-            BlockStatement::NoOp
+            Augmented {
+                range,
+                val: BlockStatement::NoOp,
+            }
         }
-        ast::BlockStatement::Do(v) => {
-            BlockStatement::Do(Box::new(translate_augvalexpr(*v, env, dlogger)))
+        ast::BlockStatement::Do(v) => Augmented {
+            range,
+            val: BlockStatement::Do(Box::new(translate_augvalexpr(*v, env, dlogger))),
+        },
+        ast::BlockStatement::Annotated { value, .. } => {
+            translate_augblockstatement(*value, env, dlogger)
         }
     }
 }
@@ -756,6 +885,9 @@ pub fn translate_augfilestatement(
                     .insert(identifier.clone(), Name::Namespace(namespace_scope));
             }
             out_items
+        }
+        ast::FileStatement::Annotated { value, .. } => {
+            translate_augfilestatement(*value, env, dlogger)
         }
     }
 }

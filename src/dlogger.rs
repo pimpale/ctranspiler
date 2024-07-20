@@ -1004,7 +1004,10 @@ impl DiagnosticLogger {
             code: Some(NumberOrString::Number(76)),
             code_description: None,
             source: self.source.clone(),
-            message: format!("identifier `{}` has kind TYPE but is marked mut", identifier),
+            message: format!(
+                "identifier `{}` has kind TYPE but is marked mut",
+                identifier
+            ),
             related_information: None,
             tags: None,
             data: None,
@@ -1018,7 +1021,10 @@ impl DiagnosticLogger {
             code: Some(NumberOrString::Number(77)),
             code_description: None,
             source: self.source.clone(),
-            message: format!("identifier `{}` has kind VALUE but is marked nominal", identifier),
+            message: format!(
+                "identifier `{}` has kind VALUE but is marked nominal",
+                identifier
+            ),
             related_information: None,
             tags: None,
             data: None,
@@ -1047,6 +1053,76 @@ impl DiagnosticLogger {
             code_description: None,
             source: self.source.clone(),
             message: format!("unknown label `'{}`", label),
+            related_information: None,
+            tags: None,
+            data: None,
+        })
+    }
+
+    pub fn log_label_on_non_loop_or_block(&mut self, range: Range, label: &str) {
+        self.log(Diagnostic {
+            range,
+            severity: Some(DiagnosticSeverity::ERROR),
+            code: Some(NumberOrString::Number(79)),
+            code_description: None,
+            source: self.source.clone(),
+            message: format!("label `'{}` on non-loop or block", label),
+            related_information: None,
+            tags: None,
+            data: None,
+        })
+    }
+
+    pub fn log_nominal_identifier_in_expression(&mut self, range: Range) {
+        self.log(Diagnostic {
+            range,
+            severity: Some(DiagnosticSeverity::ERROR),
+            code: Some(NumberOrString::Number(80)),
+            code_description: None,
+            source: self.source.clone(),
+            message: format!("nominal modifier only allowed in patterns"),
+            related_information: None,
+            tags: None,
+            data: None,
+        })
+    }
+
+    pub fn log_mutable_identifier_in_expression(&mut self, range: Range) {
+        self.log(Diagnostic {
+            range,
+            severity: Some(DiagnosticSeverity::ERROR),
+            code: Some(NumberOrString::Number(81)),
+            code_description: None,
+            source: self.source.clone(),
+            message: format!("mutable modifier only allowed in patterns"),
+            related_information: None,
+            tags: None,
+            data: None,
+        })
+    }
+
+    pub fn log_unexpected_pattern(&mut self, range: Range, found: &str) {
+        self.log(Diagnostic {
+            range,
+            severity: Some(DiagnosticSeverity::ERROR),
+            code: Some(NumberOrString::Number(82)),
+            code_description: None,
+            source: self.source.clone(),
+            message: format!("found unrecognized pattern `{}`",  found),
+            related_information: None,
+            tags: None,
+            data: None,
+        })
+    }
+
+    pub fn log_could_not_infer_hole_kind(&mut self, range: Range) {
+        self.log(Diagnostic {
+            range,
+            severity: Some(DiagnosticSeverity::ERROR),
+            code: Some(NumberOrString::Number(83)),
+            code_description: None,
+            source: self.source.clone(),
+            message: format!("could not infer hole kind"),
             related_information: None,
             tags: None,
             data: None,

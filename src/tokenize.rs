@@ -85,7 +85,6 @@ impl<Source: Iterator<Item = u8>> Tokenizer<Source> {
             b"fn" => TokenKind::Fn,
             b"if" => TokenKind::If,
             b"else" => TokenKind::Else,
-            b"by" => TokenKind::By,
             b"loop" => TokenKind::Loop,
             b"ret" => TokenKind::Ret,
             b"nominal" => TokenKind::Nominal,
@@ -557,6 +556,7 @@ impl<Source: Iterator<Item = u8>> Iterator for Tokenizer<Source> {
                 Some(b'.') => match self.source.peek_nth(1).unwrap().0 {
                     Some(b'.') => return Some(self.lex_simple_token(TokenKind::Range, 2)),
                     Some(b'=') => return Some(self.lex_simple_token(TokenKind::RangeInclusive, 2)),
+                    Some(b'{') => return Some(self.lex_simple_token(TokenKind::OpenStructLeft, 2)),
                     _ => return Some(self.lex_simple_token(TokenKind::ModuleAccess, 1)),
                 },
                 Some(b'*') => match self.source.peek_nth(1).unwrap().0 {
