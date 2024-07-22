@@ -8,7 +8,7 @@ use strum::AsRefStr;
 use crate::{
     ast,
     dlogger::DiagnosticLogger,
-    types::{typevalue_kind, KindValue, TypeParam, TypeValue, TypeValueConstructor},
+    types::{typevalue_kind, KindValue, TypeParam, Value, TypeValueConstructor},
 };
 
 #[derive(Clone, Debug, PartialEq)]
@@ -115,6 +115,7 @@ pub enum ValExpr {
     Int {
         value: BigInt,
         kind: Option<KindValue>,
+        data: Option<(bool, usize)>,
     },
     Bool {
         value: bool,
@@ -123,6 +124,7 @@ pub enum ValExpr {
     Float {
         value: BigRational,
         kind: Option<KindValue>,
+        data: Option<usize>,
     },
     String(Vec<u8>),
     Ref(Box<Augmented<ValExpr>>),
@@ -264,7 +266,7 @@ pub struct Environment {
     pub id_modifier_table: Vec<ast::IdentifierModifier>,
 
     // contains x for type variables, and type(x) for val variables
-    pub id_type_table: Vec<TypeValue>,
+    pub id_type_table: Vec<Value>,
     // contains type(x) for type variables, and kind(x) for val variables
     pub id_kind_table: Vec<KindValue>,
 
@@ -274,8 +276,8 @@ pub struct Environment {
     // the label table
     pub lb_name_table: Vec<String>,
     pub lb_range_table: Vec<Range>,
-    pub lb_type_table: Vec<TypeValue>,
-    pub lb_type_hint_table: Vec<TypeValue>,
+    pub lb_type_table: Vec<Value>,
+    pub lb_type_hint_table: Vec<Value>,
     pub lb_kind_table: Vec<KindValue>,
 }
 
@@ -314,7 +316,7 @@ impl Environment {
                     );
                     self.id_range_table.push(range);
                     self.id_kind_table.push(KindValue::Unknown);
-                    self.id_type_table.push(TypeValue::Unknown);
+                    self.id_type_table.push(Value::Unknown);
                     self.id_modifier_table.push(ast::IdentifierModifier::None);
                     Some((id, identifier))
                 }
@@ -338,8 +340,8 @@ impl Environment {
                 self.lb_name_table.push(label.clone());
                 self.lb_range_table.push(range);
                 self.lb_kind_table.push(KindValue::Unknown);
-                self.lb_type_table.push(TypeValue::Unknown);
-                self.lb_type_hint_table.push(TypeValue::Unknown);
+                self.lb_type_table.push(Value::Unknown);
+                self.lb_type_hint_table.push(Value::Unknown);
                 Some((id, label))
             }
             None => None,
@@ -356,8 +358,8 @@ impl Environment {
         self.lb_name_table.push(label.clone());
         self.lb_range_table.push(range);
         self.lb_kind_table.push(KindValue::Unknown);
-        self.lb_type_table.push(TypeValue::Unknown);
-        self.lb_type_hint_table.push(TypeValue::Unknown);
+        self.lb_type_table.push(Value::Unknown);
+        self.lb_type_hint_table.push(Value::Unknown);
         return id;
     }
 
@@ -455,7 +457,7 @@ impl Environment {
         &mut self,
         identifier: &str,
         kind: KindValue,
-        ty: TypeValue,
+        ty: Value,
     ) -> usize {
         let id = self.id_name_table.len();
         self.names_in_scope
@@ -479,21 +481,21 @@ impl Environment {
     fn intro_typarams(
         &mut self,
         params: Vec<(&str, KindValue)>,
-    ) -> (Vec<Option<TypeParam>>, Vec<TypeValue>) {
+    ) -> (Vec<Option<TypeParam>>, Vec<Value>) {
         let mut typarams = vec![];
         let mut tyvars = vec![];
         for (name, kind) in params {
-            let id = self.unconditional_insert_identifier(name, kind, TypeValue::Unknown);
+            let id = self.unconditional_insert_identifier(name, kind, Value::Unknown);
             typarams.push(Some(TypeParam {
                 id,
                 range: Range::default(),
             }));
-            tyvars.push(TypeValue::SymbolicVariable(id));
+            tyvars.push(Value::SymbolicVariable(id));
         }
         (typarams, tyvars)
     }
 
-    fn insert_builtin(&mut self, identifier: &str, ty: TypeValue) {
+    fn insert_builtin(&mut self, identifier: &str, ty: Value) {
         let kind = typevalue_kind(&ty, self);
         self.unconditional_insert_identifier(identifier, kind, ty);
     }
@@ -516,26 +518,26 @@ impl Environment {
         };
 
         // insert builtins into the environment
-        env.insert_builtin("Never", TypeValue::Never);
-        env.insert_builtin("Bool", TypeValue::Bool);
-        env.insert_builtin("Ref", TypeValue::RefConstructor);
-        env.insert_builtin("Array", TypeValue::ArrayConstructor);
-        env.insert_builtin("Slice", TypeValue::SliceConstructor);
-        env.insert_builtin("Int", TypeValue::IntConstructor);
-        env.insert_builtin("Float", TypeValue::FloatConstructor);
+        env.insert_builtin("Never", Value::Never);
+        env.insert_builtin("Bool", Value::Bool);
+        env.insert_builtin("Ref", Value::RefTyConstructor);
+        env.insert_builtin("Array", Value::ArrayTyConstructor);
+        env.insert_builtin("Slice", Value::SliceTyConstructor);
+        env.insert_builtin("Int", Value::IntTyConstructor);
+        env.insert_builtin("Float", Value::FloatTyConstructor);
 
         let arg_ArrayX_ret_SliceX_ty = {
             let (typarams, tyvars) =
                 env.intro_typarams(vec![("T", KindValue::Type), ("N", KindValue::Int)]);
 
-            TypeValue::Generic {
+            Value::Generic {
                 typarams,
-                body: Box::new(TypeValue::Fn {
-                    paramtys: vec![TypeValue::Concretization {
+                body: Box::new(Value::Fn {
+                    paramtys: vec![Value::Concretization {
                         constructor: TypeValueConstructor::ArrayConstructor,
                         tyargs: vec![tyvars[0].clone(), tyvars[1].clone()],
                     }],
-                    returntype: Box::new(TypeValue::Concretization {
+                    returntype: Box::new(Value::Concretization {
                         constructor: TypeValueConstructor::SliceConstructor,
                         tyargs: vec![tyvars[0].clone()],
                     }),
@@ -550,20 +552,20 @@ impl Environment {
             let (typarams, tyvars) =
                 env.intro_typarams(vec![("sgn", KindValue::Bool), ("sz", KindValue::Int)]);
 
-            TypeValue::Generic {
+            Value::Generic {
                 typarams,
-                body: Box::new(TypeValue::Fn {
+                body: Box::new(Value::Fn {
                     paramtys: vec![
-                        TypeValue::Concretization {
+                        Value::Concretization {
                             constructor: TypeValueConstructor::IntConstructor,
                             tyargs: vec![tyvars[0].clone(), tyvars[1].clone()],
                         },
-                        TypeValue::Concretization {
+                        Value::Concretization {
                             constructor: TypeValueConstructor::IntConstructor,
                             tyargs: vec![tyvars[0].clone(), tyvars[1].clone()],
                         },
                     ],
-                    returntype: Box::new(TypeValue::Concretization {
+                    returntype: Box::new(Value::Concretization {
                         constructor: TypeValueConstructor::IntConstructor,
                         tyargs: vec![tyvars[0].clone(), tyvars[1].clone()],
                     }),
@@ -589,14 +591,14 @@ impl Environment {
             let (typarams, tyvars) =
                 env.intro_typarams(vec![("sgn", KindValue::Bool), ("sz", KindValue::Int)]);
 
-            TypeValue::Generic {
+            Value::Generic {
                 typarams,
-                body: Box::new(TypeValue::Fn {
-                    paramtys: vec![TypeValue::Concretization {
+                body: Box::new(Value::Fn {
+                    paramtys: vec![Value::Concretization {
                         constructor: TypeValueConstructor::IntConstructor,
                         tyargs: vec![tyvars[0].clone(), tyvars[1].clone()],
                     }],
-                    returntype: Box::new(TypeValue::Concretization {
+                    returntype: Box::new(Value::Concretization {
                         constructor: TypeValueConstructor::IntConstructor,
                         tyargs: vec![tyvars[0].clone(), tyvars[1].clone()],
                     }),
@@ -610,20 +612,20 @@ impl Environment {
         let arg_FloatX_FloatX_ret_FloatX_ty = {
             let (typarams, tyvars) = env.intro_typarams(vec![("sz", KindValue::Int)]);
 
-            TypeValue::Generic {
+            Value::Generic {
                 typarams,
-                body: Box::new(TypeValue::Fn {
+                body: Box::new(Value::Fn {
                     paramtys: vec![
-                        TypeValue::Concretization {
+                        Value::Concretization {
                             constructor: TypeValueConstructor::FloatConstructor,
                             tyargs: vec![tyvars[0].clone()],
                         },
-                        TypeValue::Concretization {
+                        Value::Concretization {
                             constructor: TypeValueConstructor::FloatConstructor,
                             tyargs: vec![tyvars[0].clone()],
                         },
                     ],
-                    returntype: Box::new(TypeValue::Concretization {
+                    returntype: Box::new(Value::Concretization {
                         constructor: TypeValueConstructor::FloatConstructor,
                         tyargs: vec![tyvars[0].clone()],
                     }),
@@ -641,14 +643,14 @@ impl Environment {
         let arg_FloatX_ret_FloatX_ty = {
             let (typarams, tyvars) = env.intro_typarams(vec![("sz", KindValue::Int)]);
 
-            TypeValue::Generic {
+            Value::Generic {
                 typarams,
-                body: Box::new(TypeValue::Fn {
-                    paramtys: vec![TypeValue::Concretization {
+                body: Box::new(Value::Fn {
+                    paramtys: vec![Value::Concretization {
                         constructor: TypeValueConstructor::FloatConstructor,
                         tyargs: vec![tyvars[0].clone()],
                     }],
-                    returntype: Box::new(TypeValue::Concretization {
+                    returntype: Box::new(Value::Concretization {
                         constructor: TypeValueConstructor::FloatConstructor,
                         tyargs: vec![tyvars[0].clone()],
                     }),
@@ -667,14 +669,14 @@ impl Environment {
                 ("sz2", KindValue::Int),
             ]);
 
-            TypeValue::Generic {
+            Value::Generic {
                 typarams,
-                body: Box::new(TypeValue::Fn {
-                    paramtys: vec![TypeValue::Concretization {
+                body: Box::new(Value::Fn {
+                    paramtys: vec![Value::Concretization {
                         constructor: TypeValueConstructor::IntConstructor,
                         tyargs: vec![tyvars[0].clone(), tyvars[1].clone()],
                     }],
-                    returntype: Box::new(TypeValue::Concretization {
+                    returntype: Box::new(Value::Concretization {
                         constructor: TypeValueConstructor::IntConstructor,
                         tyargs: vec![tyvars[2].clone(), tyvars[3].clone()],
                     }),
@@ -689,14 +691,14 @@ impl Environment {
             let (typarams, tyvars) =
                 env.intro_typarams(vec![("sz1", KindValue::Int), ("sz2", KindValue::Int)]);
 
-            TypeValue::Generic {
+            Value::Generic {
                 typarams,
-                body: Box::new(TypeValue::Fn {
-                    paramtys: vec![TypeValue::Concretization {
+                body: Box::new(Value::Fn {
+                    paramtys: vec![Value::Concretization {
                         constructor: TypeValueConstructor::FloatConstructor,
                         tyargs: vec![tyvars[0].clone()],
                     }],
-                    returntype: Box::new(TypeValue::Concretization {
+                    returntype: Box::new(Value::Concretization {
                         constructor: TypeValueConstructor::FloatConstructor,
                         tyargs: vec![tyvars[1].clone()],
                     }),
@@ -711,14 +713,14 @@ impl Environment {
             let (typarams, tyvars) =
                 env.intro_typarams(vec![("isz", KindValue::Bool), ("fsz", KindValue::Int)]);
 
-            TypeValue::Generic {
+            Value::Generic {
                 typarams,
-                body: Box::new(TypeValue::Fn {
-                    paramtys: vec![TypeValue::Concretization {
+                body: Box::new(Value::Fn {
+                    paramtys: vec![Value::Concretization {
                         constructor: TypeValueConstructor::IntConstructor,
-                        tyargs: vec![TypeValue::BoolLit(true), tyvars[0].clone()],
+                        tyargs: vec![Value::BoolLit(true), tyvars[0].clone()],
                     }],
-                    returntype: Box::new(TypeValue::Concretization {
+                    returntype: Box::new(Value::Concretization {
                         constructor: TypeValueConstructor::FloatConstructor,
                         tyargs: vec![tyvars[1].clone()],
                     }),
@@ -733,16 +735,16 @@ impl Environment {
             let (typarams, tyvars) =
                 env.intro_typarams(vec![("fsz", KindValue::Int), ("isz", KindValue::Int)]);
 
-            TypeValue::Generic {
+            Value::Generic {
                 typarams,
-                body: Box::new(TypeValue::Fn {
-                    paramtys: vec![TypeValue::Concretization {
+                body: Box::new(Value::Fn {
+                    paramtys: vec![Value::Concretization {
                         constructor: TypeValueConstructor::FloatConstructor,
                         tyargs: vec![tyvars[0].clone()],
                     }],
-                    returntype: Box::new(TypeValue::Concretization {
+                    returntype: Box::new(Value::Concretization {
                         constructor: TypeValueConstructor::IntConstructor,
-                        tyargs: vec![TypeValue::BoolLit(true), tyvars[1].clone()],
+                        tyargs: vec![Value::BoolLit(true), tyvars[1].clone()],
                     }),
                 }),
             }

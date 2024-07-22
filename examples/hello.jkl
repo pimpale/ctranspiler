@@ -1,12 +1,12 @@
 # declare the types
-let U64 = Int[false, 64];
-let Char = Int[false, 8];
-let CString = Slice[Char];
+let U64 = Nat(64);
+let Char = Nat(8);
+let CString = Slice(Char);
 
 # declare the external functions
 let puts = extern "puts" Fn(CString) -> struct {};
 
-let main = fn(argc: U64, argv: Slice[CString]): U64 -> {
-    puts(__builtin_array_to_slice[Char, 14]("Hello, world!\n"));
+let main = fn(argc: U64, argv: Slice(CString)): U64 -> {
+    puts(__builtin_array_to_slice(Char, 14)("Hello, world!\n"));
     0
 };

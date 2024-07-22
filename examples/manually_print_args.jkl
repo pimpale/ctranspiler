@@ -10,7 +10,7 @@ let main = fn(argc: U64, argv: Slice[CString]): U64 -> {
     let mut i: U64 = 0;
     'over_arg loop {
         if i == argc {
-            ret 'over_arg .{};
+            ret 'over_arg .{}
         }
         let arg = argv.[i];
         let mut j: U64 = 0;

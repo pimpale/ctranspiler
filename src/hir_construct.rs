@@ -341,6 +341,7 @@ fn translate_augvalexpr(
             val: ValExpr::Int {
                 value: i,
                 kind: None,
+                data: None,
             },
         },
         ast::Expr::Bool(b) => Augmented {
@@ -355,6 +356,7 @@ fn translate_augvalexpr(
             val: ValExpr::Float {
                 value: f,
                 kind: None,
+                data: None,
             },
         },
         ast::Expr::String { value, .. } => Augmented {

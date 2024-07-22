@@ -21,20 +21,6 @@ pub enum StructItemExpr<T> {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
-pub enum KindExpr {
-    Error,
-    Type,
-    Int,
-    Float,
-    Bool,
-    // this is the kind of a generic function
-    Generic {
-        args: Vec<Augmented<KindExpr>>,
-        returnkind: Box<Augmented<KindExpr>>,
-    },
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct Identifier {
     pub identifier: Option<String>,
     pub range: Range,
@@ -107,13 +93,9 @@ pub enum Expr {
         block: bool,
     },
     FnDef {
-        typarams: Option<Vec<Augmented<Expr>>>,
         params: Vec<Augmented<Expr>>,
-        returnty: Option<Box<Augmented<Expr>>>,
         body: Box<Augmented<Expr>>,
     },
-    Ref(Box<Augmented<Expr>>),
-    Deref(Box<Augmented<Expr>>),
     // Constructs a new anonymous struct type
     StructLiteral(Vec<Augmented<StructItemExpr<Expr>>>),
     // Creates a new instance of a nominal type
@@ -161,29 +143,20 @@ pub enum Expr {
         root: Box<Augmented<Expr>>,
         field: String,
     },
-    // concretization
-    Concretization {
-        root: Box<Augmented<Expr>>,
-        tyargs: Vec<Augmented<Expr>>,
-    },
+    Ref(Box<Augmented<Expr>>),
+    Deref(Box<Augmented<Expr>>),
     Typed {
         pat: Box<Augmented<Expr>>,
         ty: Box<Augmented<Expr>>,
     },
-    Kinded {
+    ReverseTyped {
         pat: Box<Augmented<Expr>>,
-        kind: Box<Augmented<KindExpr>>,
+        ty: Box<Augmented<Expr>>,
     },
     // structs and enums
     StructTy(Vec<Augmented<StructItemExpr<Expr>>>),
     EnumTy(Vec<Augmented<StructItemExpr<Expr>>>),
     UnionTy(Vec<Augmented<StructItemExpr<Expr>>>),
-    // generic is the equivalent of a function on the type level
-    Generic {
-        params: Vec<Augmented<Expr>>,
-        returnkind: Option<Box<Augmented<KindExpr>>>,
-        body: Box<Augmented<Expr>>,
-    },
     // type of a function
     FnTy {
         paramtys: Vec<Augmented<Expr>>,

@@ -319,7 +319,7 @@ fn parse_struct_item_expr<TkIter: Iterator<Item = Token>, T>(
             };
 
             if let Token {
-                kind: Some(TokenKind::ConstrainType),
+                kind: Some(TokenKind::AscribeType),
                 ..
             } = tkiter.peek_nth(0).unwrap()
             {
@@ -770,7 +770,6 @@ fn decide_expr_term<'a, TkIter: Iterator<Item = Token> + 'a>(
         TokenKind::Enum => Some(Box::new(parse_exact_expr_enumty::<TkIter>)),
         TokenKind::Union => Some(Box::new(parse_exact_expr_unionty::<TkIter>)),
         TokenKind::FnTy => Some(Box::new(parse_exact_expr_fnty::<TkIter>)),
-        TokenKind::Generic => Some(Box::new(parse_exact_expr_generic::<TkIter>)),
         TokenKind::Extern => Some(Box::new(parse_exact_expr_extern::<TkIter>)),
         _ => None,
     }
@@ -832,22 +831,6 @@ fn parse_exact_expr_postfix_apply<TkIter: Iterator<Item = Token>>(
     }
 }
 
-fn parse_exact_expr_postfix_concretize<TkIter: Iterator<Item = Token>>(
-    tkiter: &mut PeekMoreIterator<TkIter>,
-    dlogger: &mut DiagnosticLogger,
-    prefix: Augmented<Expr>,
-) -> Augmented<Expr> {
-    let (tyargs, tyargs_range) = parse_tyargs_expr(tkiter, dlogger, parse_expr);
-
-    Augmented {
-        range: tyargs_range,
-        val: Expr::Concretization {
-            root: Box::new(prefix),
-            tyargs,
-        },
-    }
-}
-
 fn parse_exact_expr_postfix_fieldaccess_or_arrayaccess<TkIter: Iterator<Item = Token>>(
     tkiter: &mut PeekMoreIterator<TkIter>,
     dlogger: &mut DiagnosticLogger,
@@ -900,11 +883,8 @@ fn parse_expr_postfix_operators<TkIter: Iterator<Item = Token>>(
         Some(TokenKind::ParenLeft) => Some(Box::new(|tkiter, dlogger, prefix| {
             parse_exact_expr_postfix_apply(tkiter, dlogger, prefix)
         })),
-        Some(TokenKind::BracketLeft) => Some(Box::new(|tkiter, dlogger, prefix| {
-            parse_exact_expr_postfix_concretize(tkiter, dlogger, prefix)
-        })),
-        Some(TokenKind::ConstrainType) => Some(Box::new(|tkiter, dlogger, prefix| {
-            // discard constrain type token
+        Some(TokenKind::AscribeType) => Some(Box::new(|tkiter, dlogger, prefix| {
+            // discard type token
             let _ = tkiter.next().unwrap();
             // parse type
             let ty = Box::new(parse_expr(tkiter, dlogger));
@@ -916,16 +896,16 @@ fn parse_expr_postfix_operators<TkIter: Iterator<Item = Token>>(
                 },
             }
         })),
-        Some(TokenKind::ConstrainKind) => Some(Box::new(|tkiter, dlogger, prefix| {
-            // discard constrain kind token
+        Some(TokenKind::AscribeTypeRev) => Some(Box::new(|tkiter, dlogger, prefix| {
+            // discard type token
             let _ = tkiter.next().unwrap();
-            // parse kind
-            let kind = Box::new(parse_kind_expr(tkiter, dlogger));
+            // parse type
+            let pat = Box::new(parse_expr(tkiter, dlogger));
             Augmented {
-                range: union_of(prefix.range, kind.range),
-                val: Expr::Kinded {
-                    pat: Box::new(prefix),
-                    kind,
+                range: union_of(prefix.range, pat.range),
+                val: Expr::Typed {
+                    pat,
+                    ty: Box::new(prefix),
                 },
             }
         })),
@@ -1002,7 +982,6 @@ fn parse_expr_compare_operators<TkIter: Iterator<Item = Token>>(
             TokenKind::LessEqual => Some(ValBinaryOpKind::LessEqual),
             TokenKind::GreaterEqual => Some(ValBinaryOpKind::GreaterEqual),
             TokenKind::Equal => Some(ValBinaryOpKind::Equal),
-            TokenKind::NotEqual => Some(ValBinaryOpKind::NotEqual),
             _ => None,
         }),
     )
@@ -1109,7 +1088,7 @@ fn parse_exact_valdef<TkIter: Iterator<Item = Token>>(
     let let_tk = exact_token(tkiter, TokenKind::Let);
 
     let pattern = Box::new(parse_expr(tkiter, dlogger));
-    expect_token(tkiter, dlogger, "let statement", vec![TokenKind::Define]);
+    expect_token(tkiter, dlogger, "let statement", vec![TokenKind::Assign]);
 
     let value = Box::new(parse_expr(tkiter, dlogger));
 
@@ -1253,20 +1232,7 @@ fn parse_exact_expr_fn<TkIter: Iterator<Item = Token>>(
 ) -> Augmented<Expr> {
     let fn_tk = exact_token(tkiter, TokenKind::Fn);
 
-    let typarams = if tkiter.peek_nth(0).unwrap().kind == Some(TokenKind::BracketLeft) {
-        Some(parse_tyargs_expr(tkiter, dlogger, parse_expr).0)
-    } else {
-        None
-    };
-
     let (params, _) = parse_args_expr(tkiter, dlogger, parse_expr);
-
-    let returnty = if tkiter.peek_nth(0).unwrap().kind == Some(TokenKind::ConstrainType) {
-        let _ = tkiter.next().unwrap();
-        Some(Box::new(parse_expr(tkiter, dlogger)))
-    } else {
-        None
-    };
 
     expect_token(
         tkiter,
@@ -1279,9 +1245,7 @@ fn parse_exact_expr_fn<TkIter: Iterator<Item = Token>>(
     Augmented {
         range: union_of(fn_tk.range, body.range),
         val: Expr::FnDef {
-            typarams,
             params,
-            returnty,
             body,
         },
     }
@@ -1372,120 +1336,6 @@ fn parse_exact_expr_fnty<TkIter: Iterator<Item = Token>>(
     Augmented {
         range: union_of(fn_tk.range, returnty.range),
         val: Expr::FnTy { paramtys, returnty },
-    }
-}
-fn parse_exact_expr_generic<TkIter: Iterator<Item = Token>>(
-    tkiter: &mut PeekMoreIterator<TkIter>,
-    dlogger: &mut DiagnosticLogger,
-) -> Augmented<Expr> {
-    let generic_tk = exact_token(tkiter, TokenKind::Generic);
-    let (params, _) = parse_tyargs_expr(tkiter, dlogger, parse_expr);
-
-    let returnkind = if tkiter.peek_nth(0).unwrap().kind == Some(TokenKind::ConstrainKind) {
-        tkiter.next();
-        Some(Box::new(parse_kind_expr(tkiter, dlogger)))
-    } else {
-        None
-    };
-
-    expect_token(
-        tkiter,
-        dlogger,
-        "generic definition",
-        vec![TokenKind::Defun],
-    );
-
-    let body = Box::new(parse_expr(tkiter, dlogger));
-
-    Augmented {
-        range: union_of(generic_tk.range, body.range),
-        val: Expr::Generic {
-            params,
-            returnkind,
-            body,
-        },
-    }
-}
-
-fn parse_kind_expr<TkIter: Iterator<Item = Token>>(
-    tkiter: &mut PeekMoreIterator<TkIter>,
-    dlogger: &mut DiagnosticLogger,
-) -> Augmented<KindExpr> {
-    let Token {
-        kind: maybe_kind,
-        range,
-    } = tkiter.peek_nth(0).unwrap();
-
-    match maybe_kind {
-        Some(TokenKind::IntKind) => {
-            let Token { range, .. } = exact_token(tkiter, TokenKind::IntKind);
-            Augmented {
-                range,
-
-                val: KindExpr::Int,
-            }
-        }
-        Some(TokenKind::FloatKind) => {
-            let Token { range, .. } = exact_token(tkiter, TokenKind::FloatKind);
-            Augmented {
-                range,
-
-                val: KindExpr::Float,
-            }
-        }
-        Some(TokenKind::BoolKind) => {
-            let Token { range, .. } = exact_token(tkiter, TokenKind::BoolKind);
-            Augmented {
-                range,
-
-                val: KindExpr::Bool,
-            }
-        }
-        Some(TokenKind::TypeKind) => {
-            let Token { range, .. } = exact_token(tkiter, TokenKind::TypeKind);
-            Augmented {
-                range,
-
-                val: KindExpr::Int,
-            }
-        }
-        Some(TokenKind::BracketLeft) => {
-            let (range, args, _) = parse_delimited_statement_seq(
-                tkiter,
-                dlogger,
-                "generic argument kinds",
-                parse_kind_expr,
-                TokenKind::BracketLeft,
-                TokenKind::BracketRight,
-                TokenKind::Comma,
-            );
-            let _ = expect_token(tkiter, dlogger, "kind expression", vec![TokenKind::Defun]);
-            let returnkind = Box::new(parse_kind_expr(tkiter, dlogger));
-            Augmented {
-                range: union_of(range, returnkind.range),
-
-                val: KindExpr::Generic { args, returnkind },
-            }
-        }
-        k => {
-            dlogger.log_unexpected_token_specific(
-                *range,
-                "kind expression",
-                vec![
-                    TokenKind::IntKind,
-                    TokenKind::FloatKind,
-                    TokenKind::BoolKind,
-                    TokenKind::TypeKind,
-                    TokenKind::BracketLeft,
-                ],
-                &k,
-            );
-            Augmented {
-                range: *range,
-
-                val: KindExpr::Error,
-            }
-        }
     }
 }
 

@@ -1,3 +1,5 @@
+use crate::values::Value;
+
 // Function-Local
 pub struct BasicBlockIdx(usize);
 pub struct StackVariableIdx(usize);
@@ -26,6 +28,11 @@ pub struct RValue {
     kind: RValueKind,
 }
 
+pub struct Local {
+    ty: Value,
+    mutable: bool,
+}
+
 pub enum Terminator {
     // switch
     Switches {
@@ -39,7 +46,7 @@ pub enum Terminator {
         // the function to call
         function: RValue,
         // the arguments provided to the call
-        arg: Vec<RValue>,
+        args: Vec<RValue>,
         // the call will write its return value in this place
         write_result: Place,
         // execution will continue from this point
@@ -53,12 +60,10 @@ pub struct BasicBlock {
 }
 
 pub struct MirFunc {
-    root: BasicBlock,
-}
-
-pub enum MirModuleEntry {
-    Constant { toeval: BasicBlock },
-    Function(MirFunc),
+    arg_count: usize,
+    locals: Vec<Local>,
+    basic_blocks: Vec<BasicBlock>,
+    root: BasicBlockIdx,
 }
 
 #[derive(Debug)]
@@ -98,4 +103,25 @@ pub enum Builtin {
     ConvIntFloatGen, // [T, U] u -> f
     // convert float to int
     ConvFloatIntGen, // [T, U] f -> u
+}
+
+struct Global {
+    // type
+    ty: Value,
+    // representation of the data in bytes
+    data: Vec<u8>,
+}
+
+pub struct Environment {
+    constants: Vec<MirFunc>,
+    functions: Vec<Global>,
+}
+
+impl Environment {
+    pub fn new() -> Self {
+        Environment {
+            constants: Vec::new(),
+            functions: Vec::new(),
+        }
+    }
 }

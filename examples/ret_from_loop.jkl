@@ -14,9 +14,9 @@ let main = fn(): U64 -> {
     let _:U64 = from_loop;
 
     # also you can return a value from a block
-    let j: U64 = {
+    let j: U64 = 'j {
         # explicit return
-        ret' 10;
+        ret 'j 10;
     };
 
     let _:U64 = j;

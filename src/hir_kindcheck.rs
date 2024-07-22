@@ -4,7 +4,7 @@ use crate::ast;
 use crate::dlogger::DiagnosticLogger;
 use crate::hir::Augmented;
 use crate::hir::{self, Environment};
-use crate::types::{get_kind_of_member, get_kind_of_type, kind_is_val, KindValue, TypeValue};
+use crate::types::{get_kind_of_member, get_kind_of_type, kind_is_val, KindValue, Value};
 
 pub fn evaluate_hir_kind(kind: &Augmented<hir::KindExpr>) -> KindValue {
     match &kind.val {

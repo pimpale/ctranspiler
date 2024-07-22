@@ -24,7 +24,6 @@ pub enum TokenKind {
     Struct,    // struct
     Enum,      // enum
     Union,     // union
-    Generic,   // generic
     Nominal,   // nominal
     Extern,    // extern
     // Values
@@ -35,11 +34,6 @@ pub enum TokenKind {
     Float(BigRational),                     // 0.7
     // Types
     FnTy, // Fn
-    // Kinds
-    TypeKind,  // TYPE
-    BoolKind,  // BOOL
-    IntKind,   // INT
-    FloatKind, // FLOAT
     // Math Operators
     Plus,  // +
     Minus, // -
@@ -47,7 +41,7 @@ pub enum TokenKind {
     Div,   // /
     Rem,   // %
     // Boolean Operators
-    Not, // !
+    Not, // not
     And, // and
     Or,  // or
     // Type operators
@@ -56,8 +50,7 @@ pub enum TokenKind {
     Range,          // ..
     RangeInclusive, // ..=
     // Comparison and Equality
-    Equal,        // ==
-    NotEqual,     // !=
+    Equal,        // =
     Less,         // <
     LessEqual,    // <=
     Greater,      // >
@@ -69,13 +62,12 @@ pub enum TokenKind {
     MulAssign, // *=
     DivAssign, // /=
     // Reference
-    Ref,   // &
-    Deref, // @
+    Ref,   // .&
+    Deref, // .@
     // Arrows
     Pipe,  // |
     Defun, // ->
     // Other Miscellaneous Operator Things
-    Define,         // =
     ParenLeft,      // (
     ParenRight,     // )
     BracketLeft,    // [
@@ -83,8 +75,8 @@ pub enum TokenKind {
     OpenStructLeft, // .{
     BraceLeft,      // {
     BraceRight,     // }
-    ConstrainType,  // :
-    ConstrainKind,  // ::
+    AscribeType,    // :
+    AscribeTypeRev, // ::
     ModuleAccess,   // .
     Semicolon,      // ;
     Ignore,         // _
