@@ -73,58 +73,19 @@ fn translate_augstructitemexpr<T, U>(
     out_items
 }
 
-fn translate_augkindexpr(
-    ast::Augmented { val: k, range }: ast::Augmented<ast::KindExpr>,
-    env: &mut Environment,
-    dlogger: &mut DiagnosticLogger,
-) -> Augmented<KindExpr> {
-    match k {
-        ast::KindExpr::Error => Augmented {
-            range,
-            val: KindExpr::Error,
-        },
-        ast::KindExpr::Type => Augmented {
-            range,
-            val: KindExpr::Type,
-        },
-        ast::KindExpr::Int => Augmented {
-            range,
-            val: KindExpr::Int,
-        },
-        ast::KindExpr::Float => Augmented {
-            range,
-            val: KindExpr::Float,
-        },
-        ast::KindExpr::Bool => Augmented {
-            range,
-            val: KindExpr::Bool,
-        },
-        ast::KindExpr::Generic { args, returnkind } => Augmented {
-            range,
-            val: KindExpr::Constructor {
-                paramkinds: args
-                    .into_iter()
-                    .map(|k| translate_augkindexpr(k, env, dlogger))
-                    .collect(),
-                returnkind: Box::new(translate_augkindexpr(*returnkind, env, dlogger)),
-            },
-        },
-    }
-}
-
 fn translate_augpatexpr(
     ast::Augmented { range, val, .. }: ast::Augmented<ast::Expr>,
     env: &mut Environment,
     dlogger: &mut DiagnosticLogger,
-) -> Augmented<ValPatExpr> {
+) -> Augmented<PatExpr> {
     match val {
         ast::Expr::Error => Augmented {
             range,
-            val: ValPatExpr::Error,
+            val: PatExpr::Error,
         },
         ast::Expr::Ignore => Augmented {
             range,
-            val: ValPatExpr::Ignore,
+            val: PatExpr::Ignore,
         },
         ast::Expr::Identifier {
             identifier,
@@ -132,25 +93,25 @@ fn translate_augpatexpr(
         } => Augmented {
             range,
             val: match env.introduce_identifier(identifier, dlogger) {
-                Some((id, original)) => ValPatExpr::Identifier {
+                Some((id, original)) => PatExpr::Identifier {
                     id,
                     modifier,
                     original,
                 },
-                None => ValPatExpr::Error,
+                None => PatExpr::Error,
             },
         },
         ast::Expr::StructLiteral(items) => Augmented {
             range,
-            val: ValPatExpr::StructLiteral(translate_augstructitemexpr(
+            val: PatExpr::StructLiteral(translate_augstructitemexpr(
                 |x, env, dlogger| translate_augpatexpr(x, env, dlogger),
                 |id, env, dlogger| match env.introduce_identifier(id, dlogger) {
-                    Some((id, original)) => ValPatExpr::Identifier {
+                    Some((id, original)) => PatExpr::Identifier {
                         modifier: ast::IdentifierModifier::None,
                         id,
                         original,
                     },
-                    None => ValPatExpr::Error,
+                    None => PatExpr::Error,
                 },
                 env,
                 dlogger,
@@ -159,21 +120,21 @@ fn translate_augpatexpr(
         },
         ast::Expr::Typed { pat, ty } => Augmented {
             range,
-            val: ValPatExpr::Typed {
+            val: PatExpr::Typed {
                 pat: Box::new(translate_augpatexpr(*pat, env, dlogger)),
                 ty: Box::new(translate_augvalexpr(*ty, env, dlogger)),
             },
         },
-        ast::Expr::Kinded { pat, kind } => Augmented {
+        ast::Expr::ReverseTyped { pat, ty } => Augmented {
             range,
-            val: ValPatExpr::Kinded {
+            val: PatExpr::Typed {
                 pat: Box::new(translate_augpatexpr(*pat, env, dlogger)),
-                kind: Box::new(translate_augkindexpr(*kind, env, dlogger)),
+                ty: Box::new(translate_augvalexpr(*ty, env, dlogger)),
             },
         },
         ast::Expr::New { ty, val } => Augmented {
             range,
-            val: ValPatExpr::New {
+            val: PatExpr::New {
                 ty: Box::new(translate_augvalexpr(*ty, env, dlogger)),
                 pat: Box::new(translate_augpatexpr(*val, env, dlogger)),
             },
@@ -182,38 +143,9 @@ fn translate_augpatexpr(
             dlogger.log_unexpected_pattern(range, val.as_ref());
             Augmented {
                 range,
-                val: ValPatExpr::Error,
+                val: PatExpr::Error,
             }
         }
-    }
-}
-
-fn translate_augcasetargetexpr(
-    ast::Augmented { val: c, range }: ast::Augmented<ast::Expr>,
-    env: &mut Environment,
-    dlogger: &mut DiagnosticLogger,
-) -> Augmented<CaseTargetExpr> {
-    match c {
-        ast::Expr::Error => Augmented {
-            range,
-            val: CaseTargetExpr::Error,
-        },
-        ast::Expr::Bool(b) => Augmented {
-            range,
-            val: CaseTargetExpr::Bool(b),
-        },
-        ast::Expr::Int(i) => Augmented {
-            range,
-            val: CaseTargetExpr::Int(i),
-        },
-        _ => Augmented {
-            range,
-            val: CaseTargetExpr::PatExpr(Box::new(translate_augpatexpr(
-                ast::Augmented { val: c, range },
-                env,
-                dlogger,
-            ))),
-        },
     }
 }
 
@@ -221,9 +153,9 @@ fn translate_caseexpr(
     c: ast::CaseExpr,
     env: &mut Environment,
     dlogger: &mut DiagnosticLogger,
-) -> (Augmented<CaseTargetExpr>, Augmented<ValExpr>) {
+) -> (Augmented<PatExpr>, Augmented<ValExpr>) {
     (
-        translate_augcasetargetexpr(*c.target, env, dlogger),
+        translate_augpatexpr(*c.target, env, dlogger),
         translate_augvalexpr(*c.body, env, dlogger),
     )
 }
@@ -340,15 +272,6 @@ fn translate_augvalexpr(
             range,
             val: ValExpr::Int {
                 value: i,
-                kind: None,
-                data: None,
-            },
-        },
-        ast::Expr::Bool(b) => Augmented {
-            range,
-            val: ValExpr::Bool {
-                value: b,
-                kind: None,
             },
         },
         ast::Expr::Float(f) => Augmented {
@@ -394,7 +317,7 @@ fn translate_augvalexpr(
                     fun: Box::new(translate_augvalexpr(*right_operand, env, dlogger)),
                     args: vec![translate_augvalexpr(*left_operand, env, dlogger)],
                 },
-                ast::ValBinaryOpKind::Assign => ValExpr::BinaryOp {
+                ast::ValBinaryOpKind::Assign => ValExpr::Assign {
                     op: ValBinaryOpKind::Assign,
                     left_operand: Box::new(translate_augvalexpr(*left_operand, env, dlogger)),
                     right_operand: Box::new(translate_augvalexpr(*right_operand, env, dlogger)),
@@ -499,18 +422,6 @@ fn translate_augvalexpr(
                 val: ValExpr::CaseOf { expr, cases },
             }
         }
-        ast::Expr::If {
-            cond,
-            then_branch,
-            else_branch,
-        } => Augmented {
-            range,
-            val: ValExpr::If {
-                cond: Box::new(translate_augvalexpr(*cond, env, dlogger)),
-                then_branch: Box::new(translate_augvalexpr(*then_branch, env, dlogger)),
-                else_branch: else_branch.map(|e| Box::new(translate_augvalexpr(*e, env, dlogger))),
-            },
-        },
         ast::Expr::Ret { label, value } => {
             let label = match env.lookup_label(label, dlogger) {
                 Some(i) => i,
@@ -596,53 +507,7 @@ fn translate_augvalexpr(
             },
         },
         ast::Expr::FnDef {
-            typarams: Some(typarams),
             params,
-            returnty,
-            body,
-        } => {
-            // introduce scope
-            env.push_fn_scope();
-
-            // insert typarams into scope
-            let typarams = typarams
-                .into_iter()
-                .map(|x| translate_augpatexpr(x, env, dlogger))
-                .collect();
-
-            // insert params into scope
-            let params = params
-                .into_iter()
-                .map(|x| translate_augpatexpr(x, env, dlogger))
-                .collect();
-
-            let returnty = returnty.map(|rt| Box::new(translate_augvalexpr(*rt, env, dlogger)));
-
-            let body = Box::new(translate_augvalexpr(*body, env, dlogger));
-
-            // end type and val scope
-            env.pop_fn_scope();
-
-            Augmented {
-                range,
-                val: ValExpr::Generic {
-                    params: typarams,
-                    returnkind: None,
-                    body: Box::new(Augmented {
-                        range,
-                        val: ValExpr::FnDef {
-                            params,
-                            returnty,
-                            body,
-                        },
-                    }),
-                },
-            }
-        }
-        ast::Expr::FnDef {
-            typarams: None,
-            params,
-            returnty,
             body,
         } => {
             // introduce new type and val scope
@@ -654,8 +519,6 @@ fn translate_augvalexpr(
                 .map(|x| translate_augpatexpr(x, env, dlogger))
                 .collect();
 
-            let returnty = returnty.map(|rt| Box::new(translate_augvalexpr(*rt, env, dlogger)));
-
             let body = Box::new(translate_augvalexpr(*body, env, dlogger));
 
             // end type and val scope
@@ -663,30 +526,19 @@ fn translate_augvalexpr(
 
             let val = ValExpr::FnDef {
                 params,
-                returnty,
                 body,
             };
 
             Augmented { range, val }
         }
-        ast::Expr::FnTy { paramtys, returnty } => Augmented {
+        ast::Expr::FnTy { param_tys: paramtys, dep_return_ty: returnty } => Augmented {
             range,
             val: ValExpr::FnTy {
-                paramtys: paramtys
+                param_tys: paramtys
                     .into_iter()
                     .map(|x| translate_augvalexpr(x, env, dlogger))
                     .collect(),
-                returnty: Box::new(translate_augvalexpr(*returnty, env, dlogger)),
-            },
-        },
-        ast::Expr::Concretization { root, tyargs } => Augmented {
-            range,
-            val: ValExpr::Concretization {
-                generic: Box::new(translate_augvalexpr(*root, env, dlogger)),
-                tyargs: tyargs
-                    .into_iter()
-                    .map(|x| translate_augvalexpr(x, env, dlogger))
-                    .collect(),
+                dep_ty: Box::new(translate_augvalexpr(*returnty, env, dlogger)),
             },
         },
         ast::Expr::App { root, args } => Augmented {
@@ -760,21 +612,6 @@ fn translate_augvalexpr(
                 items,
             )),
         },
-        ast::Expr::Generic {
-            params,
-            returnkind,
-            body,
-        } => Augmented {
-            range,
-            val: ValExpr::Generic {
-                params: params
-                    .into_iter()
-                    .map(|x| translate_augpatexpr(x, env, dlogger))
-                    .collect(),
-                returnkind: returnkind.map(|rk| Box::new(translate_augkindexpr(*rk, env, dlogger))),
-                body: Box::new(translate_augvalexpr(*body, env, dlogger)),
-            },
-        },
         ast::Expr::Extern { name, ty } => Augmented {
             range,
             val: ValExpr::Extern {
@@ -782,7 +619,7 @@ fn translate_augvalexpr(
                 ty: Box::new(translate_augvalexpr(*ty, env, dlogger)),
             },
         },
-        ast::Expr::Typed { pat, ty } => {
+        ast::Expr::ReverseTyped { pat, ty } => {
             let val = Box::new(translate_augvalexpr(*pat, env, dlogger));
             let ty = Box::new(translate_augvalexpr(*ty, env, dlogger));
             Augmented {
@@ -790,12 +627,12 @@ fn translate_augvalexpr(
                 val: ValExpr::Typed { val, ty },
             }
         }
-        ast::Expr::Kinded { pat, kind } => {
+        ast::Expr::Typed { pat, ty } => {
             let val = Box::new(translate_augvalexpr(*pat, env, dlogger));
-            let kind = Box::new(translate_augkindexpr(*kind, env, dlogger));
+            let ty = Box::new(translate_augvalexpr(*ty, env, dlogger));
             Augmented {
                 range,
-                val: ValExpr::Kinded { val, kind },
+                val: ValExpr::Typed { val, ty },
             }
         }
     }

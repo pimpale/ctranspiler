@@ -1,3 +1,5 @@
+use crate::builtin::Builtin;
+
 use super::codereader::union_of;
 use super::codereader::CodeReader;
 use super::dlogger::DiagnosticLogger;
@@ -8,6 +10,7 @@ use num_rational::BigRational;
 use num_traits::Zero;
 use peekmore::{PeekMore, PeekMoreIterator};
 use std::char::from_u32;
+use strum::IntoEnumIterator;
 
 pub struct Tokenizer<Source: Iterator<Item = u8>> {
     // we need to peek deep into the codereader in order to figure out
@@ -45,7 +48,7 @@ impl<Source: Iterator<Item = u8>> Tokenizer<Source> {
     fn internal_lex_word(&mut self) -> (Vec<u8>, Range) {
         assert!(matches!(
             self.source.peek_nth(0).unwrap(),
-            (Some(b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'_'), _)
+            (Some(b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'_' | b'@'), _)
         ));
 
         let mut word = vec![];
@@ -83,19 +86,22 @@ impl<Source: Iterator<Item = u8>> Tokenizer<Source> {
             b"new" => TokenKind::New,
             b"in" => TokenKind::In,
             b"fn" => TokenKind::Fn,
-            b"if" => TokenKind::If,
-            b"else" => TokenKind::Else,
             b"loop" => TokenKind::Loop,
             b"ret" => TokenKind::Ret,
             b"nominal" => TokenKind::Nominal,
             b"namespace" => TokenKind::Namespace,
             b"use" => TokenKind::Use,
             b"Fn" => TokenKind::FnTy,
-            b"true" => TokenKind::Bool(true),
-            b"false" => TokenKind::Bool(false),
             b"extern" => TokenKind::Extern,
             b"_" => TokenKind::Ignore,
-            _ => TokenKind::Identifier(String::from_utf8_lossy(&word).into()),
+            _ => 'a: {
+                for b in Builtin::iter() {
+                    if b.to_string().as_bytes() == &word {
+                        break 'a TokenKind::Builtin(b);
+                    }
+                }
+                TokenKind::Identifier(String::from_utf8_lossy(&word).into())
+            }
         };
 
         Token::new(tk, range)
@@ -500,9 +506,16 @@ impl<Source: Iterator<Item = u8>> Iterator for Tokenizer<Source> {
         loop {
             match self.source.peek_nth(0).unwrap().0 {
                 // here we match different characters
-                Some(b'a'..=b'z' | b'A'..=b'Z' | b'_' | b'@') => {
+                Some(b'a'..=b'z' | b'A'..=b'Z' | b'_') => {
                     return Some(self.lex_identifier_or_keyword())
                 }
+                Some(b'@') => match self.source.peek_nth(1).unwrap().0 {
+                    Some(b'a'..=b'z' | b'A'..=b'Z' | b'_') => {
+                        return Some(self.lex_identifier_or_keyword())
+                    }
+                    _ => return Some(self.lex_simple_token(TokenKind::Deref, 1)),
+                },
+                Some(b'&') => return Some(self.lex_simple_token(TokenKind::Ref, 1)),
                 Some(b'0'..=b'9') => return Some(self.lex_number()),
                 Some(b'`') => return Some(self.lex_strop()),
                 Some(b'#') => return Some(self.lex_metadata()),
@@ -540,8 +553,6 @@ impl<Source: Iterator<Item = u8>> Iterator for Tokenizer<Source> {
                     _ => return Some(self.lex_simple_token(TokenKind::Greater, 1)),
                 },
                 Some(b'.') => match self.source.peek_nth(1).unwrap().0 {
-                    Some(b'&') => return Some(self.lex_simple_token(TokenKind::Ref, 2)),
-                    Some(b'@') => return Some(self.lex_simple_token(TokenKind::Deref, 2)),
                     Some(b'.') => return Some(self.lex_simple_token(TokenKind::Range, 2)),
                     Some(b'=') => return Some(self.lex_simple_token(TokenKind::RangeInclusive, 2)),
                     Some(b'{') => return Some(self.lex_simple_token(TokenKind::OpenStructLeft, 2)),

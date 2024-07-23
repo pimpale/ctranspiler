@@ -4,7 +4,7 @@ use crate::ast;
 use crate::dlogger::DiagnosticLogger;
 use crate::hir::Augmented;
 use crate::hir::{self, Environment};
-use crate::types::{get_kind_of_member, get_kind_of_type, kind_is_val, KindValue, Value};
+use crate::values::{get_kind_of_member, get_kind_of_type, kind_is_val, Value};
 
 pub fn evaluate_hir_kind(kind: &Augmented<hir::KindExpr>) -> KindValue {
     match &kind.val {
@@ -30,22 +30,22 @@ pub fn evaluate_hir_kind(kind: &Augmented<hir::KindExpr>) -> KindValue {
 }
 
 pub fn kindhint_of_val_pat_and_patch(
-    v: &mut Augmented<hir::ValPatExpr>,
+    v: &mut Augmented<hir::PatExpr>,
     dlogger: &mut DiagnosticLogger,
     checker: &mut Environment,
 ) -> KindValue {
     match &mut v.val {
-        hir::ValPatExpr::Error => KindValue::Unknown,
-        hir::ValPatExpr::Ignore => KindValue::Unknown,
-        hir::ValPatExpr::Identifier { .. } => KindValue::Unknown,
-        hir::ValPatExpr::StructLiteral(_) => KindValue::Val,
-        hir::ValPatExpr::New { .. } => KindValue::Val,
-        hir::ValPatExpr::Typed { ty, .. } => {
+        hir::PatExpr::Error => KindValue::Unknown,
+        hir::PatExpr::Ignore => KindValue::Unknown,
+        hir::PatExpr::Identifier { .. } => KindValue::Unknown,
+        hir::PatExpr::StructLiteral(_) => KindValue::Val,
+        hir::PatExpr::New { .. } => KindValue::Val,
+        hir::PatExpr::Typed { ty, .. } => {
             let kind = kindcheck_val_expr_and_patch(ty, &KindValue::Unknown, dlogger, checker);
             // the kind of what could be assigned to this variable
             get_kind_of_member(kind, ty.range, dlogger)
         }
-        hir::ValPatExpr::Kinded { kind, .. } => evaluate_hir_kind(&kind),
+        hir::PatExpr::Kinded { kind, .. } => evaluate_hir_kind(&kind),
     }
 }
 
@@ -69,24 +69,24 @@ where
 }
 
 pub fn kindcheck_valpatexpr_and_patch(
-    v: &mut Augmented<hir::ValPatExpr>,
+    v: &mut Augmented<hir::PatExpr>,
     expected_kind: &KindValue,
     dlogger: &mut DiagnosticLogger,
     checker: &mut Environment,
 ) -> KindValue {
     match &mut v.val {
-        hir::ValPatExpr::Error => KindValue::Unknown,
-        hir::ValPatExpr::Ignore => {
+        hir::PatExpr::Error => KindValue::Unknown,
+        hir::PatExpr::Ignore => {
             // if expected kind is unknown, we throw an error
             if expected_kind == &KindValue::Unknown {
                 dlogger.log_cannot_infer_valpat_kind(v.range);
-                v.val = hir::ValPatExpr::Error;
+                v.val = hir::PatExpr::Error;
                 KindValue::Unknown
             } else {
                 expected_kind.clone()
             }
         }
-        hir::ValPatExpr::Identifier {
+        hir::PatExpr::Identifier {
             id,
             modifier,
             original,
@@ -95,17 +95,17 @@ pub fn kindcheck_valpatexpr_and_patch(
             // if expected kind is unknown, we throw an error
             if expected_kind == &KindValue::Unknown {
                 dlogger.log_cannot_infer_val_kind(v.range);
-                v.val = hir::ValPatExpr::Error;
+                v.val = hir::PatExpr::Error;
                 KindValue::Unknown
             } else {
                 match (modifier, kind_is_val(expected_kind)) {
                     (ast::IdentifierModifier::Mutable, Some(false)) => {
                         dlogger.log_mutable_type(v.range, &original);
-                        v.val = hir::ValPatExpr::Error;
+                        v.val = hir::PatExpr::Error;
                     }
                     (ast::IdentifierModifier::Nominal, Some(true)) => {
                         dlogger.log_nominal_value(v.range, &original);
-                        v.val = hir::ValPatExpr::Error;
+                        v.val = hir::PatExpr::Error;
                     }
                     _ => {}
                 }
@@ -114,18 +114,18 @@ pub fn kindcheck_valpatexpr_and_patch(
                 expected_kind.clone()
             }
         }
-        hir::ValPatExpr::StructLiteral(fields) => {
+        hir::PatExpr::StructLiteral(fields) => {
             for (_, expr) in fields {
                 kindcheck_valpatexpr_and_patch(expr, &KindValue::Type, dlogger, checker);
             }
             expect_kind(v, expected_kind, KindValue::Type, dlogger)
         }
-        hir::ValPatExpr::New { pat, ty } => {
+        hir::PatExpr::New { pat, ty } => {
             kindcheck_val_expr_and_patch(ty, &KindValue::Type, dlogger, checker);
             kindcheck_valpatexpr_and_patch(pat, &KindValue::Type, dlogger, checker);
             expect_kind(v, expected_kind, KindValue::Type, dlogger)
         }
-        hir::ValPatExpr::Typed { pat, ty } => {
+        hir::PatExpr::Typed { pat, ty } => {
             // gets the expected kind of the type
             let expected_type_kind = get_kind_of_type(expected_kind.clone(), ty.range, dlogger);
             // get the actual kind of the type
@@ -135,7 +135,7 @@ pub fn kindcheck_valpatexpr_and_patch(
             let actual_pattern_kind = get_kind_of_member(actual_type_kind, ty.range, dlogger);
             kindcheck_valpatexpr_and_patch(pat, &actual_pattern_kind, dlogger, checker)
         }
-        hir::ValPatExpr::Kinded { pat, kind } => {
+        hir::PatExpr::Kinded { pat, kind } => {
             let kind = evaluate_hir_kind(kind);
             kindcheck_valpatexpr_and_patch(pat, &kind, dlogger, checker)
         }
@@ -305,7 +305,7 @@ pub fn kindcheck_val_expr_and_patch(
             }
             expect_kind(v, expected_kind, KindValue::Val, dlogger)
         }
-        hir::ValExpr::FnTy { paramtys, returnty } => {
+        hir::ValExpr::FnTy { param_tys: paramtys, dep_ty: returnty } => {
             for arg in paramtys {
                 kindcheck_val_expr_and_patch(arg, &KindValue::Type, dlogger, checker);
             }

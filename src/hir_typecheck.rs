@@ -6,20 +6,20 @@ use crate::ast::IdentifierModifier;
 use crate::dlogger::DiagnosticLogger;
 use crate::hir;
 use crate::hir::{Augmented, Environment};
-use crate::types::{KindValue, TypeParam, Value, TypeValueConstructor};
+use crate::values::{KindValue, TypeParam, Value, TypeValueConstructor};
 
 // gets a hint but doesn't bind any free variables yet
 // doesn't thoroughly traverse the tree, so make sure to call typecheck_val_expr_and_patch on this node afterwards
 pub fn typehint_of_val_pat_and_patch(
-    v: &mut Augmented<hir::ValPatExpr>,
+    v: &mut Augmented<hir::PatExpr>,
     dlogger: &mut DiagnosticLogger,
     checker: &mut Environment,
 ) -> Value {
     match &mut v.val {
-        hir::ValPatExpr::Error => Value::Unknown,
-        hir::ValPatExpr::Ignore => Value::Unknown,
-        hir::ValPatExpr::Identifier { .. } => Value::Unknown,
-        hir::ValPatExpr::StructLiteral(fields) => Value::Struct(
+        hir::PatExpr::Error => Value::Unknown,
+        hir::PatExpr::Ignore => Value::Unknown,
+        hir::PatExpr::Identifier { .. } => Value::Unknown,
+        hir::PatExpr::StructLiteral(fields) => Value::Struct(
             fields
                 .iter_mut()
                 .map(|(name, expr)| {
@@ -30,13 +30,13 @@ pub fn typehint_of_val_pat_and_patch(
                 })
                 .collect(),
         ),
-        hir::ValPatExpr::New { ty, .. } => {
+        hir::PatExpr::New { ty, .. } => {
             typecheck_val_expr_and_patch(ty, &Value::Unknown, dlogger, checker)
         }
-        hir::ValPatExpr::Typed { ty, .. } => {
+        hir::PatExpr::Typed { ty, .. } => {
             typecheck_val_expr_and_patch(ty, &Value::Unknown, dlogger, checker)
         }
-        hir::ValPatExpr::Kinded { pat, .. } => typehint_of_val_pat_and_patch(pat, dlogger, checker),
+        hir::PatExpr::Kinded { pat, .. } => typehint_of_val_pat_and_patch(pat, dlogger, checker),
     }
 }
 
@@ -224,15 +224,15 @@ fn concretize_type_expr(constructor: &Value, tyargs: Vec<Value>) -> Value {
 }
 
 pub fn typecheck_val_pat_and_patch(
-    v: &mut Augmented<hir::ValPatExpr>,
+    v: &mut Augmented<hir::PatExpr>,
     expected_type: &Value,
     dlogger: &mut DiagnosticLogger,
     checker: &mut Environment,
 ) -> Value {
     match &mut v.val {
-        hir::ValPatExpr::Error => Value::Unknown,
-        hir::ValPatExpr::Ignore => expected_type.clone(),
-        hir::ValPatExpr::Identifier { id, .. } => match expected_type {
+        hir::PatExpr::Error => Value::Unknown,
+        hir::PatExpr::Ignore => expected_type.clone(),
+        hir::PatExpr::Identifier { id, .. } => match expected_type {
             Value::Unknown => {
                 dlogger.log_cannot_infer_pattern_type(v.range);
                 Value::Unknown
@@ -242,7 +242,7 @@ pub fn typecheck_val_pat_and_patch(
                 expected_type.clone()
             }
         },
-        hir::ValPatExpr::StructLiteral(fields) => {
+        hir::PatExpr::StructLiteral(fields) => {
             let mut expected_fields = match expected_type {
                 Value::Struct(fields) => fields.clone(),
                 _ => fields
@@ -275,12 +275,12 @@ pub fn typecheck_val_pat_and_patch(
             }
 
             if has_error {
-                v.val = hir::ValPatExpr::Error;
+                v.val = hir::PatExpr::Error;
             }
 
             expect_type(v, expected_type, Value::Struct(actual_fields), dlogger)
         }
-        hir::ValPatExpr::New { pat, ty } => {
+        hir::PatExpr::New { pat, ty } => {
             // the symbolic type we are deconstructing
             let symbolic_type_to_construct =
                 typecheck_val_expr_and_patch(ty, &Value::Unknown, dlogger, checker);
@@ -291,7 +291,7 @@ pub fn typecheck_val_pat_and_patch(
                         v.range,
                         &symbolic_type_to_construct.to_string(),
                     );
-                    v.val = hir::ValPatExpr::Error;
+                    v.val = hir::PatExpr::Error;
                     return Value::Unknown;
                 }
             };
@@ -300,13 +300,13 @@ pub fn typecheck_val_pat_and_patch(
             // overall type of the pattern
             expect_type(v, expected_type, symbolic_type_to_construct, dlogger)
         }
-        hir::ValPatExpr::Typed { pat, ty } => {
+        hir::PatExpr::Typed { pat, ty } => {
             let asserted_type =
                 typecheck_val_expr_and_patch(ty, &Value::Unknown, dlogger, checker);
             typecheck_val_pat_and_patch(pat, &asserted_type, dlogger, checker);
             expect_type(ty, expected_type, asserted_type, dlogger)
         }
-        hir::ValPatExpr::Kinded { pat, .. } => {
+        hir::PatExpr::Kinded { pat, .. } => {
             typecheck_val_pat_and_patch(pat, expected_type, dlogger, checker)
         }
     }
@@ -343,14 +343,14 @@ pub fn typecheck_case_target_expr_and_patch(
 }
 
 // We assume that the val pat is already kindchecked
-pub fn val_pat_expr_to_typeparam(v: &Augmented<hir::ValPatExpr>) -> Option<TypeParam> {
+pub fn val_pat_expr_to_typeparam(v: &Augmented<hir::PatExpr>) -> Option<TypeParam> {
     match &v.val {
-        hir::ValPatExpr::Identifier { id, .. } => Some(TypeParam {
+        hir::PatExpr::Identifier { id, .. } => Some(TypeParam {
             range: v.range.clone(),
             id: *id,
         }),
-        hir::ValPatExpr::Kinded { pat, .. } => val_pat_expr_to_typeparam(pat),
-        hir::ValPatExpr::Error => None,
+        hir::PatExpr::Kinded { pat, .. } => val_pat_expr_to_typeparam(pat),
+        hir::PatExpr::Error => None,
         _ => {
             unreachable!("should have been kindchecked")
         }
@@ -1097,7 +1097,7 @@ pub fn typecheck_val_expr_and_patch(
             // type of the function application
             expect_type(v, expected_type, *returnty, dlogger)
         }
-        hir::ValExpr::FnTy { paramtys, returnty } => Value::Fn {
+        hir::ValExpr::FnTy { param_tys: paramtys, dep_ty: returnty } => Value::Fn {
             paramtys: paramtys
                 .iter_mut()
                 .map(|ty| typecheck_val_expr_and_patch(ty, &Value::Unknown, dlogger, checker))

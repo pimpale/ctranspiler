@@ -1,128 +1,14 @@
 use std::collections::HashMap;
 
 use lsp_types::Range;
-use num_bigint::{BigInt, BigUint};
 
-use crate::{dlogger::DiagnosticLogger, hir::Environment};
-
-impl std::fmt::Display for Value {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        match self {
-            Value::Never => write!(f, "Never"),
-            Value::SymbolicVariable(id) => {
-                write!(f, "SymbolicVariable({})", id)
-            }
-            Value::Bool => write!(f, "Bool"),
-            Value::RefTyConstructor => write!(f, "RefConstructor"),
-            Value::ArrayTyConstructor => write!(f, "ArrayConstructor"),
-            Value::SliceTyConstructor => write!(f, "SliceConstructor"),
-            Value::IntTyConstructor => write!(f, "IntConstructor"),
-            Value::FloatTyConstructor => write!(f, "FloatConstructor"),
-            Value::IntLit(n) => write!(f, "IntLit({})", n),
-            Value::BoolLit(b) => write!(f, "BoolLit({})", b),
-            Value::FloatLit(n) => write!(f, "FloatLit({})", n),
-            Value::Fn {
-                paramtys,
-                returntype,
-            } => write!(
-                f,
-                "Fn {{ paramtys: [{}], returntype: {} }}",
-                paramtys
-                    .iter()
-                    .map(|x| x.to_string())
-                    .collect::<Vec<String>>()
-                    .join(", "),
-                returntype
-            ),
-            Value::Struct(fields) => write!(
-                f,
-                "Struct {{ fields: [{}] }}",
-                fields
-                    .iter()
-                    .map(|(name, ty)| format!("{}: {}", name, ty))
-                    .collect::<Vec<String>>()
-                    .join(", ")
-            ),
-            Value::Enum(fields) => write!(
-                f,
-                "Enum {{ fields: [{}] }}",
-                fields
-                    .iter()
-                    .map(|(name, ty)| format!("{}: {}", name, ty))
-                    .collect::<Vec<String>>()
-                    .join(", ")
-            ),
-            Value::Union(fields) => write!(
-                f,
-                "Union {{ fields: [{}] }}",
-                fields
-                    .iter()
-                    .map(|(name, ty)| format!("{}: {}", name, ty))
-                    .collect::<Vec<String>>()
-                    .join(", ")
-            ),
-            Value::Generic { typarams, body } => write!(
-                f,
-                "Generic {{ typarams: [{}], body: {} }}",
-                typarams
-                    .iter()
-                    .map(|typaram| print_typaram(typaram))
-                    .collect::<Vec<String>>()
-                    .join(", "),
-                (body)
-            ),
-            Value::Concretization {
-                constructor: symbolic_constructor,
-                tyargs,
-            } => write!(
-                f,
-                "Concretization {{ symbolic_constructor: {}, tyargs: [{}] }}",
-                symbolic_constructor,
-                tyargs
-                    .iter()
-                    .map(|ty| ty.to_string())
-                    .collect::<Vec<String>>()
-                    .join(", ")
-            ),
-        }
-    }
-}
+use crate::{ast, builtin::Builtin, thir};
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Value {
     SymbolicVariable {
         id: usize,
         ty: Box<Value>,
-    },
-    // Type
-    Type {
-        // universe is level + 2
-        level: usize,
-    },
-    // constructors
-    RefTyConstructor {
-        // universe is level + 1
-        level: usize,
-    },
-    ArrayTyConstructor {
-        // universe is level + 1
-        level: usize,
-    },
-    SliceTyConstructor {
-        // universe is level + 1
-        level: usize,
-    },
-    NatTyConstructor {
-        // universe is level + 1
-        level: usize,
-    },
-    IntTyConstructor {
-        // universe is level + 1
-        level: usize,
-    },
-    FloatTyConstructor {
-        // universe is level + 1
-        level: usize,
     },
     // values that inhabit a type
     Ref {
@@ -135,6 +21,7 @@ pub enum Value {
     },
     Slice {
         inner_ty: Box<Value>,
+        length: usize,
         values: *const Value,
     },
     Nat {
@@ -147,15 +34,17 @@ pub enum Value {
         bits: u64,
         value: i64,
     },
-    // a function value
-    LamTy {
-        level: usize,
-        paramtys: Vec<Value>,
-        returnty: Box<Value>,
+    // Type of a function, also known as a Pi type
+    // https://en.wikipedia.org/wiki/Dependent_type#%CE%A0_type
+    PiTy {
+        // types of the parameters
+        param_tys: Vec<Value>,
+        // function mapping the parameters to a result type
+        dep_ty: Box<Closure>,
     },
     Lam {
         ty: Box<Value>,
-        body: Option<Box<Value>>,
+        body: Box<Closure>,
     },
     // a pointer to a function
     FnPtr {
@@ -163,6 +52,7 @@ pub enum Value {
     },
     // a thunk
     Thunk {
+        result_type: Box<Value>,
         lam: Box<Value>,
         args: Vec<Value>,
     },
@@ -195,6 +85,95 @@ pub enum Value {
         ty: Box<Value>,
         variant: Box<Value>,
     },
+    // BUILTINS
+    Builtin(Builtin, usize),
+}
+
+impl std::fmt::Display for Value {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        unsafe {
+            match self {
+                Value::SymbolicVariable { id, .. } => write!(f, "SymbolicVariable({})", id),
+                Value::Ref { var, .. } => {
+                    write!(f, "{}.& ({:#})", *var.clone(), var.clone() as usize)
+                }
+                Value::Array { values, .. } => {
+                    write!(f, "Array[")?;
+                    for value in values {
+                        write!(f, "{}, ", value)?;
+                    }
+                    write!(f, "]")
+                }
+                Value::Slice {
+                    inner_ty,
+                    length,
+                    values,
+                } => {
+                    write!(f, "Slice[{}; ", inner_ty)?;
+                    for i in 0..*length {
+                        write!(f, "{}, ", *values.add(i))?;
+                    }
+                    write!(f, "]")
+                }
+                Value::Nat { value, .. } => write!(f, "{}u", value),
+                Value::Int { value, .. } => write!(f, "{}", value),
+                Value::PiTy { param_tys, dep_ty } => {
+                    write!(f, "Fn(")?;
+                    for paramty in param_tys {
+                        write!(f, " {}", paramty)?;
+                    }
+                    write!(f, " -> {})", dep_ty)
+                }
+                Value::Lam { ty, body } => todo!(),
+                Value::FnPtr { ty } => {
+                    write!(f, "{}.&", ty)
+                }
+                Value::Thunk { lam, args, .. } => {
+                    write!(f, "{}(", lam)?;
+                    for arg in args {
+                        write!(f, " {}", arg)?;
+                    }
+                    write!(f, ")");
+                    Ok(())
+                }
+                Value::StructTy { level, fields } => {
+                    write!(f, "StructTy.{} {{", level)?;
+                    for (name, ty) in fields {
+                        write!(f, " {} : {},", name, ty)?;
+                    }
+                    write!(f, " }}");
+                    Ok(())
+                }
+                Value::EnumTy { level, fields } => {
+                    write!(f, "EnumTy.{} {{", level)?;
+                    for (name, ty) in fields {
+                        write!(f, " {} : {},", name, ty)?;
+                    }
+                    write!(f, " }}");
+                    Ok(())
+                }
+                Value::UnionTy { level, fields } => {
+                    write!(f, "UnionTy.{} {{", level)?;
+                    for (name, ty) in fields {
+                        write!(f, " {} : {},", name, ty)?;
+                    }
+                    write!(f, " }}");
+                    Ok(())
+                }
+                Value::Struct { ty, fields } => {
+                    write!(f, ".{{")?;
+                    for (name, value) in fields {
+                        write!(f, " {} : {},", name, value)?;
+                    }
+                    write!(f, " }}");
+                    Ok(())
+                }
+                Value::Enum { ty, variant } => todo!(),
+                Value::Union { ty, variant } => todo!(),
+                Value::Builtin(builtin, level) => write!(f, "{}.{}", builtin, level),
+            }
+        }
+    }
 }
 
 impl Value {
@@ -208,7 +187,8 @@ impl Value {
 
     pub fn nat_ty(level: usize, bits: u64) -> Value {
         Value::Thunk {
-            lam: Box::new(Value::NatTyConstructor { level }),
+            result_type: Box::new(Value::Builtin(Builtin::Type, level)),
+            lam: Box::new(Value::Builtin(Builtin::Nat, level)),
             args: vec![Value::Nat {
                 universe: level + 1,
                 bits: 64,
@@ -219,7 +199,8 @@ impl Value {
 
     pub fn int_ty(level: usize, bits: u64) -> Value {
         Value::Thunk {
-            lam: Box::new(Value::IntTyConstructor { level }),
+            result_type: Box::new(Value::Builtin(Builtin::Type, level)),
+            lam: Box::new(Value::Builtin(Builtin::Int, level)),
             args: vec![Value::Nat {
                 universe: level + 1,
                 bits: 64,
@@ -231,19 +212,15 @@ impl Value {
     pub fn universe(&self) -> usize {
         match self {
             Value::SymbolicVariable { ty, .. } => ty.universe() - 1,
-            Value::Type { level } => level + 2,
-            Value::RefTyConstructor { level } => level + 1,
-            Value::ArrayTyConstructor { level } => level + 1,
-            Value::SliceTyConstructor { level } => level + 1,
-            Value::NatTyConstructor { level } => level + 1,
-            Value::IntTyConstructor { level } => level + 1,
-            Value::FloatTyConstructor { level } => level + 1,
             Value::Lam { ty, .. } => ty.universe() - 1,
-            Value::LamTy { level, .. } => level + 1,
-            Value::Thunk { lam, .. } => match lam.ty() {
-                Value::LamTy { returnty, .. } => returnty.universe() - 1,
-                _ => unreachable!("bad thunk"),
-            },
+            Value::PiTy {
+                param_tys: param_ty,
+                dep_ty,
+            } => usize::max(
+                param_ty.iter().map(Value::universe).max().unwrap(),
+                dep_ty.universe(),
+            ),
+            Value::Thunk { result_type, .. } => result_type.universe() - 1,
             Value::StructTy { level, .. } => level + 1,
             Value::EnumTy { level, .. } => level + 1,
             Value::UnionTy { level, .. } => level + 1,
@@ -256,182 +233,136 @@ impl Value {
             Value::Struct { ty, .. } => ty.universe() - 1,
             Value::Enum { ty, .. } => ty.universe() - 1,
             Value::Union { ty, .. } => ty.universe() - 1,
+            Value::Builtin(builtin, level) => match builtin {
+                // constructors
+                Builtin::Type => level + 2,
+                Builtin::Ref => level + 1,
+                Builtin::Array => level + 1,
+                Builtin::Slice => level + 1,
+                Builtin::Nat => level + 1,
+                Builtin::Int => level + 1,
+                Builtin::Float => level + 1,
+                // traits
+                Builtin::AddTrait => level + 1,
+                Builtin::SubTrait => level + 1,
+                Builtin::MulTrait => level + 1,
+                Builtin::DivTrait => level + 1,
+                Builtin::RemTrait => level + 1,
+                Builtin::AddAssignTrait => level + 1,
+                Builtin::SubAssignTrait => level + 1,
+                Builtin::MulAssignTrait => level + 1,
+                Builtin::DivAssignTrait => level + 1,
+                Builtin::RemAssignTrait => level + 1,
+                // all non-type builtins have the same universe as their level
+                _ => *level,
+            },
         }
     }
+}
 
-    pub fn ty(&self) -> Value {
-        match self {
+pub struct ExecutionEnvironment {
+    // the outer vec corresponds to the id of the variable
+    // the inner vec corresponds to the stack of values
+    id_values: Vec<Vec<Value>>,
+    id_name_table: Vec<Vec<String>>,
+    id_range_table: Vec<Range>,
+    id_modifier_table: Vec<ast::IdentifierModifier>,
+}
+
+impl ExecutionEnvironment {
+    pub fn new(
+        id_name_table: Vec<Vec<String>>,
+        id_range_table: Vec<Range>,
+        id_modifier_table: Vec<ast::IdentifierModifier>,
+    ) -> ExecutionEnvironment {
+        let env = ExecutionEnvironment {
+            id_values: vec![Vec::new(); id_name_table.len()],
+            id_name_table,
+            id_range_table,
+            id_modifier_table,
+        };
+
+        env
+    }
+
+    pub fn ty(&self, v: &Value) -> Value {
+        match v {
             Value::SymbolicVariable { ty, .. } => *ty.clone(),
-            Value::Type { level } => Value::Type { level: *level + 1 },
-            Value::RefTyConstructor { level } => Value::LamTy {
-                level: *level,
-                paramtys: vec![Value::Type { level: *level }],
-                returnty: Box::new(Value::Type { level: *level }),
-            },
-            Value::ArrayTyConstructor { level } => Value::LamTy {
-                level: level + 1,
-                paramtys: vec![Value::Type { level: *level }, Value::nat_ty(*level, 64)],
-                returnty: Box::new(Value::Type { level: *level }),
-            },
-            Value::SliceTyConstructor { level } => Value::LamTy {
-                level: level + 1,
-                paramtys: vec![Value::Type { level: *level }],
-                returnty: Box::new(Value::Type { level: *level }),
-            },
-            Value::NatTyConstructor { level } => Value::LamTy {
-                level: level + 1,
-                paramtys: vec![Value::nat_ty(level + 1, 64)],
-                returnty: Box::new(Value::Type { level: *level }),
-            },
-            Value::IntTyConstructor { level } => Value::LamTy {
-                level: level + 1,
-                paramtys: vec![Value::nat_ty(*level, 64)],
-                returnty: Box::new(Value::Type { level: *level }),
-            },
-            Value::FloatTyConstructor { level } => Value::LamTy {
-                level: level + 1,
-                paramtys: vec![Value::nat_ty(*level, 64)],
-                returnty: Box::new(Value::Type { level: *level }),
-            },
             Value::Lam { ty, .. } => *ty.clone(),
-            Value::LamTy { level, .. } => Value::Type { level: *level },
-            Value::Thunk { lam, .. } => match lam.ty() {
-                Value::LamTy { returnty, .. } => *returnty.clone(),
-                _ => unreachable!("bad thunk"),
-            },
-            Value::StructTy { level, .. } => Value::Type { level: *level },
-            Value::EnumTy { level, .. } => Value::Type { level: *level },
-            Value::UnionTy { level, .. } => Value::Type { level: *level },
+            w @ Value::PiTy { .. } => Value::Builtin(Builtin::Type, w.universe()),
+            Value::Thunk { result_type, .. } => *result_type.clone(),
+            Value::StructTy { level, .. } => Value::Builtin(Builtin::Type, *level),
+            Value::EnumTy { level, .. } => Value::Builtin(Builtin::Type, *level),
+            Value::UnionTy { level, .. } => Value::Builtin(Builtin::Type, *level),
             Value::Ref { ty, .. } => *ty.clone(),
             Value::Array { inner_ty, values } => Value::Thunk {
-                lam: Box::new(Value::ArrayTyConstructor {
-                    level: inner_ty.universe(),
-                }),
+                result_type: Box::new(Value::Builtin(Builtin::Type, inner_ty.universe() - 1)),
+                lam: Box::new(Value::Builtin(Builtin::Array, inner_ty.universe() - 1)),
                 args: vec![*inner_ty.clone(), Value::nat64(values.len() as u64)],
             },
             Value::Slice { inner_ty, .. } => Value::Thunk {
-                lam: Box::new(Value::SliceTyConstructor {
-                    level: inner_ty.universe() - 1,
-                }),
+                result_type: Box::new(Value::Builtin(Builtin::Type, inner_ty.universe() - 1)),
+                lam: Box::new(Value::Builtin(Builtin::Slice, inner_ty.universe() - 1)),
                 args: vec![*inner_ty.clone()],
             },
             Value::Nat { universe, bits, .. } => Value::nat_ty(*universe, *bits),
-            Value::Int { universe, .. } => Value::int_ty(*universe, 64),
+            Value::Int { universe, bits, .. } => Value::int_ty(*universe, *bits),
             Value::FnPtr { ty } => *ty.clone(),
             Value::Struct { ty, .. } => *ty.clone(),
             Value::Enum { ty, .. } => *ty.clone(),
             Value::Union { ty, .. } => *ty.clone(),
-        }
-    }
-}
-
-pub fn typevalue_kind(ty: &Value, env: &mut Environment) -> KindValue {
-    match ty {
-        Value::Never => KindValue::Type,
-        Value::SymbolicVariable(id) => env.id_kind_table[*id].clone(),
-        Value::Bool => KindValue::Type,
-        Value::RefTyConstructor => KindValue::Generic {
-            paramkinds: vec![KindValue::Type],
-            returnkind: Box::new(KindValue::Type),
-        },
-        Value::ArrayTyConstructor => KindValue::Generic {
-            paramkinds: vec![KindValue::Type, KindValue::Int],
-            returnkind: Box::new(KindValue::Type),
-        },
-        Value::SliceTyConstructor => KindValue::Generic {
-            paramkinds: vec![KindValue::Type],
-            returnkind: Box::new(KindValue::Type),
-        },
-        Value::IntTyConstructor => KindValue::Generic {
-            paramkinds: vec![KindValue::Bool, KindValue::Int],
-            returnkind: Box::new(KindValue::Type),
-        },
-        Value::FloatTyConstructor => KindValue::Generic {
-            paramkinds: vec![KindValue::Int],
-            returnkind: Box::new(KindValue::Type),
-        },
-        Value::IntLit(_) => KindValue::Int,
-        Value::BoolLit(_) => KindValue::Bool,
-        Value::FloatLit(_) => KindValue::Float,
-        Value::Fn { .. } => KindValue::Val,
-        Value::Struct(_) => KindValue::Val,
-        Value::Enum(_) => KindValue::Val,
-        Value::Union(_) => KindValue::Val,
-        Value::Generic { typarams, body } => KindValue::Generic {
-            paramkinds: typarams
-                .iter()
-                .map(|x| match x {
-                    Some(TypeParam { id, .. }) => env.id_kind_table[*id].clone(),
-                    None => KindValue::Unknown,
-                })
-                .collect(),
-            returnkind: Box::new(typevalue_kind(body, env)),
-        },
-        Value::Concretization { constructor, .. } => match constructor {
-            TypeValueConstructor::SymbolicVariable(id) => match env.id_kind_table[*id].clone() {
-                KindValue::Generic { returnkind, .. } => *returnkind,
-                _ => KindValue::Unknown,
+            Value::Builtin(builtin, level) => match builtin {
+                Builtin::Ref => Value::PiTy {
+                    param_tys: vec![Value::Builtin(Builtin::Type, *level)],
+                    dep_ty: (),
+                },
+                Builtin::Array => Value::PiTy {
+                    paramtys: vec![Value::Type { level: *level }, Value::nat_ty(*level, 64)],
+                    returnty: Box::new(Value::Type { level: *level }),
+                },
+                Builtin::SliceTyConstructor(level) => Value::LamTy {
+                    paramtys: vec![Value::Type { level: *level }],
+                    returnty: Box::new(Value::Type { level: *level }),
+                },
+                Builtin::NatTyConstructor(level) => Value::LamTy {
+                    paramtys: vec![Value::nat_ty(level + 1, 64)],
+                    returnty: Box::new(Value::Type { level: *level }),
+                },
+                Builtin::IntTyConstructor(level) => Value::LamTy {
+                    paramtys: vec![Value::nat_ty(*level, 64)],
+                    returnty: Box::new(Value::Type { level: *level }),
+                },
+                Builtin::FloatTyConstructor(level) => Value::LamTy {
+                    paramtys: vec![Value::nat_ty(*level, 64)],
+                    returnty: Box::new(Value::Type { level: *level }),
+                },
+                Builtin::IntNegGen(universe) => Value::LamTy {
+                    paramtys: vec![Value::nat_ty(universe + 1, 64)],
+                    returnty: (),
+                },
             },
-            TypeValueConstructor::RefConstructor => KindValue::Type,
-            TypeValueConstructor::ArrayConstructor => KindValue::Type,
-            TypeValueConstructor::SliceConstructor => KindValue::Type,
-            TypeValueConstructor::IntConstructor => KindValue::Type,
-            TypeValueConstructor::FloatConstructor => KindValue::Type,
-        },
-    }
-}
-
-// gets the kind of a value that could be assignable to a variable with this type
-pub fn get_kind_of_member(
-    kind: KindValue,
-    range: Range,
-    dlogger: &mut DiagnosticLogger,
-) -> KindValue {
-    match kind {
-        KindValue::Unknown => KindValue::Unknown,
-        KindValue::Type => KindValue::Val,
-        KindValue::Generic {
-            paramkinds,
-            returnkind,
-        } => KindValue::Generic {
-            paramkinds,
-            returnkind: Box::new(get_kind_of_member(*returnkind, range, dlogger)),
-        },
-        _ => {
-            dlogger.log_cannot_get_kind_of_member(range, &kind.to_string());
-            KindValue::Unknown
         }
     }
 }
 
-// gets the kind of the type of this variable
-pub fn get_kind_of_type(
-    kind: KindValue,
-    range: Range,
-    dlogger: &mut DiagnosticLogger,
-) -> KindValue {
-    match kind {
-        KindValue::Unknown => KindValue::Unknown,
-        KindValue::Val => KindValue::Type,
-        KindValue::Generic {
-            paramkinds,
-            returnkind,
-        } => KindValue::Generic {
-            paramkinds,
-            returnkind: Box::new(get_kind_of_type(*returnkind, range, dlogger)),
-        },
-        _ => {
-            dlogger.log_cannot_get_kind_of_type(range, &kind.to_string());
-            KindValue::Unknown
-        }
+#[derive(Clone, Debug, PartialEq)]
+pub struct Closure {
+    unpack: Vec<thir::PatExpr>,
+    body: thir::ValExpr,
+}
+
+impl Closure {
+    pub fn universe(&self) -> usize {
+        todo!()
+    }
+
+    pub fn apply(&self, args: Vec<Value>) -> Value {
+        todo!()
     }
 }
 
-pub fn kind_is_val(kind: &KindValue) -> Option<bool> {
-    match kind {
-        KindValue::Unknown => None,
-        KindValue::Val => Some(true),
-        KindValue::Generic { returnkind, .. } => kind_is_val(returnkind),
-        _ => Some(false),
+impl std::fmt::Display for Closure {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "<closure>")
     }
 }

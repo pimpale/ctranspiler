@@ -1,4 +1,7 @@
 # declare the types
+let Slice = @Slice.0;
+let Nat = @Nat.0;
+
 let U64 = Nat(64);
 let Char = Nat(8);
 let CString = Slice(Char);
@@ -7,6 +10,6 @@ let CString = Slice(Char);
 let puts = extern "puts" Fn(CString) -> struct {};
 
 let main = fn(argc: U64, argv: Slice(CString)): U64 -> {
-    puts(__builtin_array_to_slice(Char, 14)("Hello, world!\n"));
+    puts(@array_to_slice(Char, 14)("Hello, world!\n"));
     0
 };

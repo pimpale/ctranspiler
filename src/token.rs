@@ -3,6 +3,8 @@ use num_bigint::BigInt;
 use num_rational::BigRational;
 use strum::AsRefStr;
 
+use crate::builtin::{self, Builtin};
+
 #[derive(Debug, Clone, AsRefStr, PartialEq)]
 pub enum TokenKind {
     // function, type, or variable
@@ -14,8 +16,6 @@ pub enum TokenKind {
     Mut,       // mut
     In,        // in
     Fn,        // fn
-    If,        // if
-    Else,      // else
     Loop,      // loop
     Ret,       // ret
     Namespace, // namespace
@@ -26,9 +26,10 @@ pub enum TokenKind {
     Union,     // union
     Nominal,   // nominal
     Extern,    // extern
+    // Builtins
+    Builtin(Builtin), // builtin
     // Values
     Label(String),                          // 'label
-    Bool(bool),                             // true
     String { value: Vec<u8>, block: bool }, // "string"
     Int(BigInt),                            // 7
     Float(BigRational),                     // 0.7

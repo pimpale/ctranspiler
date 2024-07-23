@@ -8,12 +8,14 @@ mod hir;
 mod hir_construct;
 mod hir_kindcheck;
 mod hir_typecheck;
-mod hir_eval;
 mod mir;
 mod mir_construct;
 mod token;
 mod tokenize;
-mod types;
+mod thir;
+mod builtin;
+mod values;
+mod hint;
 
 use std::io::stdin;
 use std::io::Read;

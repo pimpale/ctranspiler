@@ -4,6 +4,8 @@ use num_rational::BigRational;
 use serde::{Deserialize, Serialize};
 use strum::AsRefStr;
 
+use crate::builtin::Builtin;
+
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct Augmented<T> {
     pub range: Range,
@@ -47,7 +49,6 @@ pub enum ValBinaryOpKind {
     Or,
     // Comparison
     Equal,
-    NotEqual,
     Less,
     LessEqual,
     Greater,
@@ -58,6 +59,7 @@ pub enum ValBinaryOpKind {
     AssignSub,
     AssignMul,
     AssignDiv,
+    AssignRem,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -80,7 +82,7 @@ pub struct RangeExpr {
     pub inclusive: bool,
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug, AsRefStr)]
+#[derive(Clone, Debug, AsRefStr, Serialize, Deserialize)]
 pub enum Expr {
     // An error when parsing
     Error,
@@ -128,6 +130,11 @@ pub enum Expr {
         modifier: IdentifierModifier,
         identifier: Identifier,
     },
+    // a builtin
+    Builtin {
+        builtin: Builtin,
+        level: usize,
+    },
     // Function application
     App {
         root: Box<Augmented<Expr>>,
@@ -159,8 +166,8 @@ pub enum Expr {
     UnionTy(Vec<Augmented<StructItemExpr<Expr>>>),
     // type of a function
     FnTy {
-        paramtys: Vec<Augmented<Expr>>,
-        returnty: Box<Augmented<Expr>>,
+        param_tys: Vec<Augmented<Expr>>,
+        dep_return_ty: Box<Augmented<Expr>>,
     },
     // External function/value
     Extern {
@@ -175,12 +182,6 @@ pub enum Expr {
     Ret {
         label: Label,
         value: Box<Augmented<Expr>>,
-    },
-    // If
-    If {
-        cond: Box<Augmented<Expr>>,
-        then_branch: Box<Augmented<Expr>>,
-        else_branch: Option<Box<Augmented<Expr>>>,
     },
     // Annotated
     Annotated {

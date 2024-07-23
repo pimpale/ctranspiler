@@ -39,7 +39,6 @@ pub struct DiagnosticLogger {
 fn format_token(maybe_tk: Option<&TokenKind>) -> String {
     match maybe_tk {
         Some(TokenKind::Identifier(_)) => String::from("<IDENTIFIER>"),
-        Some(TokenKind::Bool(_)) => String::from("<BOOLEAN>"),
         Some(TokenKind::Int(_)) => String::from("<INTEGER>"),
         Some(TokenKind::Float(_)) => String::from("<FLOAT>"),
         Some(k) => k.as_ref().to_string(),

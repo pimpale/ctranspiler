@@ -1,6 +1,8 @@
-let U64 = Int[false, 64];
-let U32 = Int[false, 32];
-let Unit = struct {};
+let Nat := @Nat.0;
+
+let U64 := Nat(64);
+let U32 := Nat(32);
+let Unit := struct {};
 
 let main = fn(): Unit -> 'f {
     let q = 'q {

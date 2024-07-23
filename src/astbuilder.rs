@@ -544,40 +544,6 @@ fn parse_exact_expr_extern<TkIter: Iterator<Item = Token>>(
     }
 }
 
-fn parse_exact_expr_if<TkIter: Iterator<Item = Token>>(
-    tkiter: &mut PeekMoreIterator<TkIter>,
-    dlogger: &mut DiagnosticLogger,
-) -> Augmented<Expr> {
-    let Token { range: lrange, .. } = exact_token(tkiter, TokenKind::If);
-
-    let cond = Box::new(parse_expr(tkiter, dlogger));
-    let then_branch = Box::new(parse_expr(tkiter, dlogger));
-
-    // add else branch if it exists
-    let else_branch = if let Some(TokenKind::Else) = tkiter.peek_nth(0).unwrap().kind {
-        tkiter.next();
-        Some(Box::new(parse_expr(tkiter, dlogger)))
-    } else {
-        None
-    };
-
-    // rightmost boundary of range
-    let rrange = match else_branch {
-        Some(ref x) => x.range,
-        None => lrange,
-    };
-
-    Augmented {
-        range: union_of(lrange, rrange),
-
-        val: Expr::If {
-            cond,
-            then_branch,
-            else_branch,
-        },
-    }
-}
-
 fn parse_exact_expr_loop<TkIter: Iterator<Item = Token>>(
     tkiter: &mut PeekMoreIterator<TkIter>,
     dlogger: &mut DiagnosticLogger,
@@ -704,25 +670,6 @@ fn parse_exact_expr_rational<TkIter: Iterator<Item = Token>>(
     }
 }
 
-// parses a int
-fn parse_exact_expr_bool<TkIter: Iterator<Item = Token>>(
-    tkiter: &mut PeekMoreIterator<TkIter>,
-    _dlogger: &mut DiagnosticLogger,
-) -> Augmented<Expr> {
-    if let Token {
-        range,
-        kind: Some(TokenKind::Bool(value)),
-    } = tkiter.next().unwrap()
-    {
-        Augmented {
-            range,
-            val: Expr::Bool(value),
-        }
-    } else {
-        unreachable!();
-    }
-}
-
 // parses an ignore
 fn parse_exact_expr_ignore<TkIter: Iterator<Item = Token>>(
     tkiter: &mut PeekMoreIterator<TkIter>,
@@ -749,7 +696,6 @@ fn decide_expr_term<'a, TkIter: Iterator<Item = Token> + 'a>(
     match *tkkind {
         TokenKind::Metadata { .. } => Some(Box::new(parse_exact_annotated_expr::<TkIter>)),
         TokenKind::Label { .. } => Some(Box::new(parse_exact_labeled_expr::<TkIter>)),
-        TokenKind::Bool(_) => Some(Box::new(parse_exact_expr_bool::<TkIter>)),
         TokenKind::Int(_) => Some(Box::new(parse_exact_expr_int::<TkIter>)),
         TokenKind::Float(_) => Some(Box::new(parse_exact_expr_rational::<TkIter>)),
         TokenKind::Ignore => Some(Box::new(parse_exact_expr_ignore::<TkIter>)),
@@ -759,7 +705,6 @@ fn decide_expr_term<'a, TkIter: Iterator<Item = Token> + 'a>(
         TokenKind::BraceLeft => Some(Box::new(parse_exact_expr_block::<TkIter>)),
         TokenKind::ParenLeft => Some(Box::new(parse_exact_expr_group::<TkIter>)),
         TokenKind::Case => Some(Box::new(parse_exact_expr_case::<TkIter>)),
-        TokenKind::If => Some(Box::new(parse_exact_expr_if::<TkIter>)),
         TokenKind::Loop => Some(Box::new(parse_exact_expr_loop::<TkIter>)),
         TokenKind::Ret => Some(Box::new(parse_exact_expr_ret::<TkIter>)),
         TokenKind::Fn => Some(Box::new(parse_exact_expr_fn::<TkIter>)),
@@ -1335,7 +1280,7 @@ fn parse_exact_expr_fnty<TkIter: Iterator<Item = Token>>(
     let returnty = Box::new(parse_expr(tkiter, dlogger));
     Augmented {
         range: union_of(fn_tk.range, returnty.range),
-        val: Expr::FnTy { paramtys, returnty },
+        val: Expr::FnTy { param_tys: paramtys, dep_return_ty: returnty },
     }
 }
 
