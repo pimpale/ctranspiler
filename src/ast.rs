@@ -88,7 +88,6 @@ pub enum Expr {
     Error,
     Ignore,
     Int(BigInt),
-    Bool(bool),
     Float(BigRational),
     String {
         value: Vec<u8>,
@@ -151,7 +150,9 @@ pub enum Expr {
         field: String,
     },
     Ref(Box<Augmented<Expr>>),
+    Mutref(Box<Augmented<Expr>>),
     Deref(Box<Augmented<Expr>>),
+    Copy(Box<Augmented<Expr>>),
     Typed {
         pat: Box<Augmented<Expr>>,
         ty: Box<Augmented<Expr>>,

@@ -6,7 +6,6 @@ mod codereader;
 mod dlogger;
 mod hir;
 mod hir_construct;
-mod hir_kindcheck;
 mod hir_typecheck;
 mod mir;
 mod mir_construct;
@@ -47,11 +46,6 @@ fn main() {
             hir_construct::translate_augfilestatement(filestatement, &mut hir_env, &mut dlogger);
         for mut filestatement in hir_filestatement {
             // kindcheck and typecheck
-            hir_kindcheck::kindcheck_file_statement_and_patch(
-                &mut filestatement,
-                &mut dlogger,
-                &mut hir_env,
-            );
             hir_typecheck::typecheck_file_statement_and_patch(
                 &mut filestatement,
                 &mut dlogger,

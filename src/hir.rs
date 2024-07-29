@@ -4,7 +4,7 @@ use lsp_types::Range;
 use num_bigint::BigInt;
 use num_rational::BigRational;
 
-use crate::{ast, dlogger::DiagnosticLogger};
+use crate::{ast, builtin::Builtin, dlogger::DiagnosticLogger};
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Augmented<T> {
@@ -70,7 +70,14 @@ pub enum ValExpr {
     },
     String(Vec<u8>),
     Ref(Box<Augmented<PlaceExpr>>),
-    Place(Box<Augmented<PlaceExpr>>),
+    MutRef(Box<Augmented<PlaceExpr>>),
+    Copy(Box<Augmented<PlaceExpr>>),
+    Move(Box<Augmented<PlaceExpr>>),
+    // Builtin
+    Builtin {
+        builtin: Builtin,
+        level: usize,
+    },
     // Function
     FnDef {
         params: Vec<Augmented<PatExpr>>,
@@ -104,6 +111,15 @@ pub enum ValExpr {
     Assign {
         target: Box<Augmented<PlaceExpr>>,
         value: Box<Augmented<ValExpr>>,
+    },
+    // short circuiting operators
+    And {
+        left: Box<Augmented<ValExpr>>,
+        right: Box<Augmented<ValExpr>>,
+    },
+    Or {
+        left: Box<Augmented<ValExpr>>,
+        right: Box<Augmented<ValExpr>>,
     },
     // Function application
     App {

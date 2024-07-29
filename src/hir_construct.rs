@@ -4,6 +4,7 @@ use indexmap::IndexMap;
 use lsp_types::Range;
 
 use crate::ast;
+use crate::builtin::Builtin;
 use crate::dlogger::DiagnosticLogger;
 use crate::hir::*;
 
@@ -252,8 +253,16 @@ fn translate_augvalblockexpr(
     }
 }
 
-fn translate_augvalexpr(
+fn translate_augplaceexpr(
     ast::Augmented { range, val, .. }: ast::Augmented<ast::Expr>,
+    env: &mut Environment,
+    dlogger: &mut DiagnosticLogger,
+) -> Augmented<PlaceExpr> {
+    todo!()
+}
+
+fn translate_augvalexpr(
+    ast::Augmented { range, val }: ast::Augmented<ast::Expr>,
     env: &mut Environment,
     dlogger: &mut DiagnosticLogger,
 ) -> Augmented<ValExpr> {
@@ -270,36 +279,44 @@ fn translate_augvalexpr(
         ast::Expr::Annotated { value, .. } => translate_augvalexpr(*value, env, dlogger),
         ast::Expr::Int(i) => Augmented {
             range,
-            val: ValExpr::Int {
-                value: i,
-            },
+            val: ValExpr::Int { value: i },
         },
         ast::Expr::Float(f) => Augmented {
             range,
-            val: ValExpr::Float {
-                value: f,
-                kind: None,
-                data: None,
-            },
+            val: ValExpr::Float { value: f },
         },
         ast::Expr::String { value, .. } => Augmented {
             range,
             val: ValExpr::String(value),
         },
+        ast::Expr::Builtin { builtin, level } => Augmented {
+            range,
+            val: ValExpr::Builtin { builtin, level },
+        },
         ast::Expr::Ref(v) => Augmented {
             range,
-            val: ValExpr::Ref(Box::new(translate_augvalexpr(*v, env, dlogger))),
+            val: ValExpr::Ref(Box::new(translate_augplaceexpr(*v, env, dlogger))),
         },
         ast::Expr::Deref(v) => Augmented {
             range,
-            val: ValExpr::Deref(Box::new(translate_augvalexpr(*v, env, dlogger))),
+            val: ValExpr::Copy(Box::new(translate_augplaceexpr(
+                ast::Augmented {
+                    range,
+                    val: ast::Expr::Deref(v),
+                },
+                env,
+                dlogger,
+            ))),
         },
         ast::Expr::StructLiteral(items) => Augmented {
             range,
             val: ValExpr::StructLiteral(translate_augstructitemexpr(
                 |x, env, dlogger| translate_augvalexpr(x, env, dlogger),
                 |id, env, dlogger| match env.lookup_identifier(id, dlogger) {
-                    Some(id) => ValExpr::Identifier(id),
+                    Some(id) => ValExpr::Copy(Box::new(Augmented {
+                        range,
+                        val: PlaceExpr::Identifier(id),
+                    })),
                     None => ValExpr::Error,
                 },
                 env,
@@ -318,95 +335,131 @@ fn translate_augvalexpr(
                     args: vec![translate_augvalexpr(*left_operand, env, dlogger)],
                 },
                 ast::ValBinaryOpKind::Assign => ValExpr::Assign {
-                    op: ValBinaryOpKind::Assign,
-                    left_operand: Box::new(translate_augvalexpr(*left_operand, env, dlogger)),
-                    right_operand: Box::new(translate_augvalexpr(*right_operand, env, dlogger)),
+                    target: Box::new(translate_augplaceexpr(*left_operand, env, dlogger)),
+                    value: Box::new(translate_augvalexpr(*right_operand, env, dlogger)),
                 },
-                ast::ValBinaryOpKind::AssignAdd => ValExpr::BinaryOp {
-                    op: ValBinaryOpKind::AssignAdd,
-                    left_operand: Box::new(translate_augvalexpr(*left_operand, env, dlogger)),
-                    right_operand: Box::new(translate_augvalexpr(*right_operand, env, dlogger)),
+                ast::ValBinaryOpKind::And => ValExpr::And {
+                    left: Box::new(translate_augvalexpr(*left_operand, env, dlogger)),
+                    right: Box::new(translate_augvalexpr(*right_operand, env, dlogger)),
                 },
-                ast::ValBinaryOpKind::AssignSub => ValExpr::BinaryOp {
-                    op: ValBinaryOpKind::AssignSub,
-                    left_operand: Box::new(translate_augvalexpr(*left_operand, env, dlogger)),
-                    right_operand: Box::new(translate_augvalexpr(*right_operand, env, dlogger)),
+                ast::ValBinaryOpKind::Or => ValExpr::Or {
+                    left: Box::new(translate_augvalexpr(*left_operand, env, dlogger)),
+                    right: Box::new(translate_augvalexpr(*right_operand, env, dlogger)),
                 },
-                ast::ValBinaryOpKind::AssignMul => ValExpr::BinaryOp {
-                    op: ValBinaryOpKind::AssignMul,
-                    left_operand: Box::new(translate_augvalexpr(*left_operand, env, dlogger)),
-                    right_operand: Box::new(translate_augvalexpr(*right_operand, env, dlogger)),
-                },
-                ast::ValBinaryOpKind::AssignDiv => ValExpr::BinaryOp {
-                    op: ValBinaryOpKind::AssignDiv,
-                    left_operand: Box::new(translate_augvalexpr(*left_operand, env, dlogger)),
-                    right_operand: Box::new(translate_augvalexpr(*right_operand, env, dlogger)),
-                },
-                ast::ValBinaryOpKind::Add => ValExpr::BinaryOp {
-                    op: ValBinaryOpKind::Add,
-                    left_operand: Box::new(translate_augvalexpr(*left_operand, env, dlogger)),
-                    right_operand: Box::new(translate_augvalexpr(*right_operand, env, dlogger)),
-                },
-                ast::ValBinaryOpKind::Sub => ValExpr::BinaryOp {
-                    op: ValBinaryOpKind::Sub,
-                    left_operand: Box::new(translate_augvalexpr(*left_operand, env, dlogger)),
-                    right_operand: Box::new(translate_augvalexpr(*right_operand, env, dlogger)),
-                },
-                ast::ValBinaryOpKind::Mul => ValExpr::BinaryOp {
-                    op: ValBinaryOpKind::Mul,
-                    left_operand: Box::new(translate_augvalexpr(*left_operand, env, dlogger)),
-                    right_operand: Box::new(translate_augvalexpr(*right_operand, env, dlogger)),
-                },
-                ast::ValBinaryOpKind::Div => ValExpr::BinaryOp {
-                    op: ValBinaryOpKind::Div,
-                    left_operand: Box::new(translate_augvalexpr(*left_operand, env, dlogger)),
-                    right_operand: Box::new(translate_augvalexpr(*right_operand, env, dlogger)),
-                },
-                ast::ValBinaryOpKind::Rem => ValExpr::BinaryOp {
-                    op: ValBinaryOpKind::Rem,
-                    left_operand: Box::new(translate_augvalexpr(*left_operand, env, dlogger)),
-                    right_operand: Box::new(translate_augvalexpr(*right_operand, env, dlogger)),
-                },
-                ast::ValBinaryOpKind::And => ValExpr::BinaryOp {
-                    op: ValBinaryOpKind::And,
-                    left_operand: Box::new(translate_augvalexpr(*left_operand, env, dlogger)),
-                    right_operand: Box::new(translate_augvalexpr(*right_operand, env, dlogger)),
-                },
-                ast::ValBinaryOpKind::Or => ValExpr::BinaryOp {
-                    op: ValBinaryOpKind::Or,
-                    left_operand: Box::new(translate_augvalexpr(*left_operand, env, dlogger)),
-                    right_operand: Box::new(translate_augvalexpr(*right_operand, env, dlogger)),
-                },
-                ast::ValBinaryOpKind::Equal => ValExpr::BinaryOp {
-                    op: ValBinaryOpKind::Eq,
-                    left_operand: Box::new(translate_augvalexpr(*left_operand, env, dlogger)),
-                    right_operand: Box::new(translate_augvalexpr(*right_operand, env, dlogger)),
-                },
-                ast::ValBinaryOpKind::NotEqual => ValExpr::BinaryOp {
-                    op: ValBinaryOpKind::Neq,
-                    left_operand: Box::new(translate_augvalexpr(*left_operand, env, dlogger)),
-                    right_operand: Box::new(translate_augvalexpr(*right_operand, env, dlogger)),
-                },
-                ast::ValBinaryOpKind::Less => ValExpr::BinaryOp {
-                    op: ValBinaryOpKind::Lt,
-                    left_operand: Box::new(translate_augvalexpr(*left_operand, env, dlogger)),
-                    right_operand: Box::new(translate_augvalexpr(*right_operand, env, dlogger)),
-                },
-                ast::ValBinaryOpKind::Greater => ValExpr::BinaryOp {
-                    op: ValBinaryOpKind::Gt,
-                    left_operand: Box::new(translate_augvalexpr(*left_operand, env, dlogger)),
-                    right_operand: Box::new(translate_augvalexpr(*right_operand, env, dlogger)),
-                },
-                ast::ValBinaryOpKind::LessEqual => ValExpr::BinaryOp {
-                    op: ValBinaryOpKind::Leq,
-                    left_operand: Box::new(translate_augvalexpr(*left_operand, env, dlogger)),
-                    right_operand: Box::new(translate_augvalexpr(*right_operand, env, dlogger)),
-                },
-                ast::ValBinaryOpKind::GreaterEqual => ValExpr::BinaryOp {
-                    op: ValBinaryOpKind::Geq,
-                    left_operand: Box::new(translate_augvalexpr(*left_operand, env, dlogger)),
-                    right_operand: Box::new(translate_augvalexpr(*right_operand, env, dlogger)),
-                },
+                ast::ValBinaryOpKind::AssignAdd
+                | ast::ValBinaryOpKind::AssignSub
+                | ast::ValBinaryOpKind::AssignMul
+                | ast::ValBinaryOpKind::AssignDiv
+                | ast::ValBinaryOpKind::AssignRem => {
+                    let (builtin, field) = match op {
+                        ast::ValBinaryOpKind::AssignAdd => (Builtin::AddAssignTrait, "add_assign"),
+                        ast::ValBinaryOpKind::AssignSub => (Builtin::SubAssignTrait, "sub_assign"),
+                        ast::ValBinaryOpKind::AssignMul => (Builtin::MulAssignTrait, "mul_assign"),
+                        ast::ValBinaryOpKind::AssignDiv => (Builtin::DivAssignTrait, "div_assign"),
+                        ast::ValBinaryOpKind::AssignRem => (Builtin::RemAssignTrait, "rem_assign"),
+                        _ => unreachable!(),
+                    };
+
+                    let place = Augmented {
+                        range,
+                        val: ValExpr::Copy(Box::new(translate_augplaceexpr(
+                            *left_operand,
+                            env,
+                            dlogger,
+                        ))),
+                    };
+                    let value = translate_augvalexpr(*right_operand, env, dlogger);
+                    ValExpr::App {
+                        fun: Box::new(Augmented {
+                            range,
+                            val: ValExpr::FieldAccess {
+                                root: Box::new(Augmented {
+                                    range,
+                                    val: ValExpr::Typed {
+                                        value: Box::new(Augmented {
+                                            range,
+                                            val: ValExpr::Hole,
+                                        }),
+                                        ty: Box::new(Augmented {
+                                            range,
+                                            val: ValExpr::App {
+                                                fun: Box::new(Augmented {
+                                                    range,
+                                                    val: ValExpr::Builtin { builtin, level: 0 },
+                                                }),
+                                                args: vec![Augmented {
+                                                    range,
+                                                    val: ValExpr::Hole,
+                                                }],
+                                            },
+                                        }),
+                                    },
+                                }),
+                                field: field.to_string(),
+                            },
+                        }),
+                        args: vec![place, value],
+                    }
+                }
+                ast::ValBinaryOpKind::Add
+                | ast::ValBinaryOpKind::Sub
+                | ast::ValBinaryOpKind::Mul
+                | ast::ValBinaryOpKind::Div
+                | ast::ValBinaryOpKind::Rem
+                | ast::ValBinaryOpKind::Equal
+                | ast::ValBinaryOpKind::Less
+                | ast::ValBinaryOpKind::LessEqual
+                | ast::ValBinaryOpKind::Greater
+                | ast::ValBinaryOpKind::GreaterEqual => {
+                    let (builtin, field) = match op {
+                        ast::ValBinaryOpKind::Add => (Builtin::AddTrait, "add"),
+                        ast::ValBinaryOpKind::Sub => (Builtin::SubTrait, "sub"),
+                        ast::ValBinaryOpKind::Mul => (Builtin::MulTrait, "mul"),
+                        ast::ValBinaryOpKind::Div => (Builtin::DivTrait, "div"),
+                        ast::ValBinaryOpKind::Rem => (Builtin::RemTrait, "rem"),
+                        ast::ValBinaryOpKind::Equal => (Builtin::EqTrait, "eq"),
+                        ast::ValBinaryOpKind::Less => (Builtin::LtTrait, "lt"),
+                        ast::ValBinaryOpKind::LessEqual => (Builtin::LteTrait, "lte"),
+                        ast::ValBinaryOpKind::Greater => (Builtin::GtTrait, "gt"),
+                        ast::ValBinaryOpKind::GreaterEqual => (Builtin::GteTrait, "gte"),
+                        _ => unreachable!(),
+                    };
+
+                    let left = translate_augvalexpr(*left_operand, env, dlogger);
+                    let right = translate_augvalexpr(*right_operand, env, dlogger);
+
+                    ValExpr::App {
+                        fun: Box::new(Augmented {
+                            range,
+                            val: ValExpr::FieldAccess {
+                                root: Box::new(Augmented {
+                                    range,
+                                    val: ValExpr::Typed {
+                                        value: Box::new(Augmented {
+                                            range,
+                                            val: ValExpr::Hole,
+                                        }),
+                                        ty: Box::new(Augmented {
+                                            range,
+                                            val: ValExpr::App {
+                                                fun: Box::new(Augmented {
+                                                    range,
+                                                    val: ValExpr::Builtin { builtin, level: 0 },
+                                                }),
+                                                args: vec![Augmented {
+                                                    range,
+                                                    val: ValExpr::Hole,
+                                                }],
+                                            },
+                                        }),
+                                    },
+                                }),
+                                field: field.to_string(),
+                            },
+                        }),
+                        args: vec![left, right],
+                    }
+                }
             };
 
             Augmented { range, val }
@@ -506,10 +559,7 @@ fn translate_augvalexpr(
                 }
             },
         },
-        ast::Expr::FnDef {
-            params,
-            body,
-        } => {
+        ast::Expr::FnDef { params, body } => {
             // introduce new type and val scope
             env.push_fn_scope();
 
@@ -524,14 +574,14 @@ fn translate_augvalexpr(
             // end type and val scope
             env.pop_fn_scope();
 
-            let val = ValExpr::FnDef {
-                params,
-                body,
-            };
+            let val = ValExpr::FnDef { params, body };
 
             Augmented { range, val }
         }
-        ast::Expr::FnTy { param_tys: paramtys, dep_return_ty: returnty } => Augmented {
+        ast::Expr::FnTy {
+            param_tys: paramtys,
+            dep_return_ty: returnty,
+        } => Augmented {
             range,
             val: ValExpr::FnTy {
                 param_tys: paramtys
@@ -620,19 +670,19 @@ fn translate_augvalexpr(
             },
         },
         ast::Expr::ReverseTyped { pat, ty } => {
-            let val = Box::new(translate_augvalexpr(*pat, env, dlogger));
+            let value = Box::new(translate_augvalexpr(*pat, env, dlogger));
             let ty = Box::new(translate_augvalexpr(*ty, env, dlogger));
             Augmented {
                 range,
-                val: ValExpr::Typed { val, ty },
+                val: ValExpr::Typed { value, ty },
             }
         }
         ast::Expr::Typed { pat, ty } => {
-            let val = Box::new(translate_augvalexpr(*pat, env, dlogger));
+            let value = Box::new(translate_augvalexpr(*pat, env, dlogger));
             let ty = Box::new(translate_augvalexpr(*ty, env, dlogger));
             Augmented {
                 range,
-                val: ValExpr::Typed { val, ty },
+                val: ValExpr::Typed { value, ty },
             }
         }
     }

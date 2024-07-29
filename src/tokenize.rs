@@ -113,16 +113,7 @@ impl<Source: Iterator<Item = u8>> Tokenizer<Source> {
         let (ap, ar) = self.source.next().unwrap();
         assert_eq!(ap, Some(b'\''));
 
-        let (word, range) = match self.source.peek_nth(0).unwrap().0 {
-            // parse label body (if exists)
-            Some(b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'_') => {
-                let (word, range) = self.internal_lex_word();
-                (word, union_of(ar, range))
-            }
-            // empty body
-            _ => (vec![], ar),
-        };
-
+        let (word, range) = self.internal_lex_word();
         // return lifetime
         Token::new(
             TokenKind::Label(String::from_utf8_lossy(&word).into()),
@@ -515,11 +506,16 @@ impl<Source: Iterator<Item = u8>> Iterator for Tokenizer<Source> {
                     }
                     _ => return Some(self.lex_simple_token(TokenKind::Deref, 1)),
                 },
+                Some(b'\'') => match self.source.peek_nth(1).unwrap().0 {
+                    Some(b'a'..=b'z' | b'A'..=b'Z' | b'_') => {
+                        return Some(self.lex_label())
+                    },
+                    _ => return Some(self.lex_simple_token(TokenKind::Quote, 1)),
+                },
                 Some(b'&') => return Some(self.lex_simple_token(TokenKind::Ref, 1)),
                 Some(b'0'..=b'9') => return Some(self.lex_number()),
                 Some(b'`') => return Some(self.lex_strop()),
                 Some(b'#') => return Some(self.lex_metadata()),
-                Some(b'\'') => return Some(self.lex_label()),
                 Some(b'"') => match self.source.peek_nth(1).unwrap().0 {
                     Some(b'"') => return Some(self.lex_block_string()),
                     _ => return Some(self.lex_string()),

@@ -35,6 +35,8 @@ pub enum TokenKind {
     Float(BigRational),                     // 0.7
     // Types
     FnTy, // Fn
+    // Copy Operator
+    Quote, // '
     // Math Operators
     Plus,  // +
     Minus, // -
@@ -63,8 +65,9 @@ pub enum TokenKind {
     MulAssign, // *=
     DivAssign, // /=
     // Reference
-    Ref,   // .&
-    Deref, // .@
+    Ref,    // .&
+    Mutref, // .!
+    Deref,  // .@
     // Arrows
     Pipe,  // |
     Defun, // ->

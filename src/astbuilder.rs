@@ -865,6 +865,17 @@ fn parse_expr_postfix_operators<TkIter: Iterator<Item = Token>>(
                 }
             },
         )),
+        Some(TokenKind::Mutref) => Some(Box::new(
+            |tkiter: &mut PeekMoreIterator<TkIter>,
+             _dlogger: &mut DiagnosticLogger,
+             prefix: Augmented<Expr>| {
+                let tk = tkiter.next().unwrap();
+                Augmented {
+                    range: union_of(prefix.range, tk.range),
+                    val: Expr::Mutref(Box::new(prefix)),
+                }
+            },
+        )),
         Some(TokenKind::Deref) => Some(Box::new(
             |tkiter: &mut PeekMoreIterator<TkIter>,
              _dlogger: &mut DiagnosticLogger,
@@ -873,6 +884,17 @@ fn parse_expr_postfix_operators<TkIter: Iterator<Item = Token>>(
                 Augmented {
                     range: union_of(prefix.range, tk.range),
                     val: Expr::Deref(Box::new(prefix)),
+                }
+            },
+        )),
+        Some(TokenKind::Quote) => Some(Box::new(
+            |tkiter: &mut PeekMoreIterator<TkIter>,
+             _dlogger: &mut DiagnosticLogger,
+             prefix: Augmented<Expr>| {
+                let tk = tkiter.next().unwrap();
+                Augmented {
+                    range: union_of(prefix.range, tk.range),
+                    val: Expr::Copy(Box::new(prefix)),
                 }
             },
         )),

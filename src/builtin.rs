@@ -7,8 +7,10 @@ pub enum Builtin {
     Type,
     // for constructors the universe is level + 1
     Ref,
+    MutRef,
     Array,
     Slice,
+    Bool,
     Nat,
     Int,
     Float,
@@ -18,6 +20,11 @@ pub enum Builtin {
     MulTrait,
     DivTrait,
     RemTrait,
+    EqTrait,
+    LtTrait,
+    LteTrait,
+    GtTrait,
+    GteTrait,
     AddAssignTrait,
     SubAssignTrait,
     MulAssignTrait,
@@ -31,12 +38,22 @@ pub enum Builtin {
     IntMul, // [U](i, i) -> i
     IntDiv, // [U](i, i) -> i
     IntRem, // [U](i, i) -> i
+    IntLt,  // [U](i, i) -> bool
+    IntLte, // [U](i, i) -> bool
+    IntGt,  // [U](i, i) -> bool
+    IntGte, // [U](i, i) -> bool
+    IntEq,  // [U](i, i) -> bool
     // nat operators
     NatAdd,  // [U](u, u) -> u
     NatSub,  // [U](u, u) -> u
     NatMul,  // [U](u, u) -> u
     NatDiv,  // [U](u, u) -> u
     NatRem,  // [U](u, u) -> u
+    NatLt,   // [U](u, u) -> bool
+    NatLte,  // [U](u, u) -> bool
+    NatGt,   // [U](u, u) -> bool
+    NatGte,  // [U](u, u) -> bool
+    NatEq,   // [U](u, u) -> bool
     NatShlL, // [U](u, u) -> u
     NatShrL, // [U](u, u) -> u
     NatShrA, // [U](u, u) -> u
@@ -53,6 +70,11 @@ pub enum Builtin {
     FloatDiv, // [F](f, f) -> f
     FloatRem, // [F](f, f) -> f
     FloatNeg, // [F]f -> f
+    FloatLt,  // [F](f, f) -> bool
+    FloatLte, // [F](f, f) -> bool
+    FloatGt,  // [F](f, f) -> bool
+    FloatGte, // [F](f, f) -> bool
+    FloatEq,  // [F](f, f) -> bool
     // conversion operators
     // convert int to int
     ConvNatNat, // [T, U] t -> u
@@ -72,8 +94,10 @@ impl std::fmt::Display for Builtin {
         match self {
             Builtin::Type => write!(f, "@Type"),
             Builtin::Ref => write!(f, "@Ref"),
+            Builtin::MutRef => write!(f, "@MutRef"),
             Builtin::Array => write!(f, "@Array"),
             Builtin::Slice => write!(f, "@Slice"),
+            Builtin::Bool => write!(f, "@Bool"),
             Builtin::Nat => write!(f, "@Nat"),
             Builtin::Int => write!(f, "@Int"),
             Builtin::Float => write!(f, "@Float"),
@@ -82,6 +106,11 @@ impl std::fmt::Display for Builtin {
             Builtin::MulTrait => write!(f, "@Mul"),
             Builtin::DivTrait => write!(f, "@Div"),
             Builtin::RemTrait => write!(f, "@Rem"),
+            Builtin::EqTrait => write!(f, "@Eq"),
+            Builtin::LtTrait => write!(f, "@Lt"),
+            Builtin::LteTrait => write!(f, "@Lte"),
+            Builtin::GtTrait => write!(f, "@Gt"),
+            Builtin::GteTrait => write!(f, "@Gte"),
             Builtin::AddAssignTrait => write!(f, "@AddAssign"),
             Builtin::SubAssignTrait => write!(f, "@SubAssign"),
             Builtin::MulAssignTrait => write!(f, "@MulAssign"),
@@ -93,11 +122,21 @@ impl std::fmt::Display for Builtin {
             Builtin::IntMul => write!(f, "@int_mul"),
             Builtin::IntDiv => write!(f, "@int_div"),
             Builtin::IntRem => write!(f, "@int_rem"),
+            Builtin::IntLt => write!(f, "@int_lt"),
+            Builtin::IntLte => write!(f, "@int_lte"),
+            Builtin::IntGt => write!(f, "@int_gt"),
+            Builtin::IntGte => write!(f, "@int_gte"),
+            Builtin::IntEq => write!(f, "@int_eq"),
             Builtin::NatAdd => write!(f, "@nat_add"),
             Builtin::NatSub => write!(f, "@nat_sub"),
             Builtin::NatMul => write!(f, "@nat_mul"),
             Builtin::NatDiv => write!(f, "@nat_div"),
             Builtin::NatRem => write!(f, "@nat_rem"),
+            Builtin::NatLt => write!(f, "@nat_lt"),
+            Builtin::NatLte => write!(f, "@nat_lte"),
+            Builtin::NatGt => write!(f, "@nat_gt"),
+            Builtin::NatGte => write!(f, "@nat_gte"),
+            Builtin::NatEq => write!(f, "@nat_eq"),
             Builtin::NatShlL => write!(f, "@nat_shll"),
             Builtin::NatShrL => write!(f, "@nat_shrl"),
             Builtin::NatShrA => write!(f, "@nat_shra"),
@@ -113,6 +152,11 @@ impl std::fmt::Display for Builtin {
             Builtin::FloatDiv => write!(f, "@float_div"),
             Builtin::FloatRem => write!(f, "@float_rem"),
             Builtin::FloatNeg => write!(f, "@float_neg"),
+            Builtin::FloatLt => write!(f, "@float_lt"),
+            Builtin::FloatLte => write!(f, "@float_lte"),
+            Builtin::FloatGt => write!(f, "@float_gt"),
+            Builtin::FloatGte => write!(f, "@float_gte"),
+            Builtin::FloatEq => write!(f, "@float_eq"),
             Builtin::ConvNatNat => write!(f, "@nat_to_nat"),
             Builtin::ConvIntInt => write!(f, "@int_to_int"),
             Builtin::ConvNatInt => write!(f, "@nat_to_int"),
