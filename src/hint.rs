@@ -1,7 +1,10 @@
+use std::collections::HashMap;
+
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Hint {
-    Union(Vec<Hint>),
+    Unknown,
+    Multi(Vec<Hint>),
     SymbolicVariable {
         id: usize,
         ty: Box<Hint>,

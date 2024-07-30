@@ -29,4 +29,4 @@ let main = fn(): U64 -> {
     let _:U64 = k;
 
     from_loop
-}; 
+};

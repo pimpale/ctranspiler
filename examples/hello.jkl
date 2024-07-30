@@ -1,15 +1,16 @@
 # declare the types
-let Slice = @Slice.0;
-let Nat = @Nat.0;
+let copy Slice = @Slice.0;
+let copy Nat = @Nat.0;
 
-let U64 = Nat(64);
-let Char = Nat(8);
-let CString = Slice(Char);
+let copy U64 = Nat(64);
+let copy Char = Nat(8);
+let copy CString = Slice(Char);
 
 # declare the external functions
-let puts = extern "puts" Fn(CString) -> struct {};
+let puts = extern "puts" CString -> struct {};
 
-let main = fn(argc: U64, argv: Slice(CString)): U64 -> {
+let main = argc: U64, argv: Slice(CString) => U64 
+:: {
     puts(@array_to_slice(Char, 14)("Hello, world!\n"));
     0
 };

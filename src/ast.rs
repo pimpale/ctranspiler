@@ -13,16 +13,6 @@ pub struct Augmented<T> {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
-pub enum StructItemExpr<T> {
-    Error,
-    Eponymous(Identifier),
-    Identified {
-        identifier: Identifier,
-        expr: Box<Augmented<T>>,
-    },
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct Identifier {
     pub identifier: Option<String>,
     pub range: Range,
@@ -60,6 +50,9 @@ pub enum ValBinaryOpKind {
     AssignMul,
     AssignDiv,
     AssignRem,
+    // Range
+    Range,
+    RangeInclusive,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -76,10 +69,13 @@ pub enum IdentifierModifier {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
-pub struct RangeExpr {
-    pub start: Box<Augmented<Expr>>,
-    pub end: Box<Augmented<Expr>>,
-    pub inclusive: bool,
+pub enum StructItemExpr {
+    Error,
+    Eponymous(Identifier),
+    Identified {
+        identifier: Identifier,
+        expr: Box<Augmented<Expr>>,
+    },
 }
 
 #[derive(Clone, Debug, AsRefStr, Serialize, Deserialize)]
@@ -98,7 +94,7 @@ pub enum Expr {
         body: Box<Augmented<Expr>>,
     },
     // Constructs a new anonymous struct type
-    StructLiteral(Vec<Augmented<StructItemExpr<Expr>>>),
+    StructLiteral(Vec<Augmented<StructItemExpr>>),
     // Creates a new instance of a nominal type
     New {
         ty: Box<Augmented<Expr>>,
@@ -162,9 +158,9 @@ pub enum Expr {
         ty: Box<Augmented<Expr>>,
     },
     // structs and enums
-    StructTy(Vec<Augmented<StructItemExpr<Expr>>>),
-    EnumTy(Vec<Augmented<StructItemExpr<Expr>>>),
-    UnionTy(Vec<Augmented<StructItemExpr<Expr>>>),
+    StructTy(Vec<Augmented<StructItemExpr>>),
+    EnumTy(Vec<Augmented<StructItemExpr>>),
+    UnionTy(Vec<Augmented<StructItemExpr>>),
     // type of a function
     FnTy {
         param_tys: Vec<Augmented<Expr>>,

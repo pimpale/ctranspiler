@@ -384,24 +384,7 @@ impl DiagnosticLogger {
             data: None,
         })
     }
-
-    pub fn log_kind_mismatch(&mut self, range: Range, expected_kind: &str, got_kind: &str) {
-        self.log(Diagnostic {
-            range,
-            severity: Some(DiagnosticSeverity::ERROR),
-            code: Some(NumberOrString::Number(34)),
-            code_description: None,
-            source: self.source.clone(),
-            message: format!(
-                "expected kind {}, but found kind {}",
-                expected_kind, got_kind
-            ),
-            related_information: None,
-            tags: None,
-            data: None,
-        })
-    }
-
+    
     pub fn log_nonexistent_field(&mut self, range: Range, field: &str) {
         self.log(Diagnostic {
             range,
@@ -825,62 +808,6 @@ impl DiagnosticLogger {
         })
     }
 
-    pub fn log_unexpected_generic(&mut self, range: Range, expected_kind: &str) {
-        self.log(Diagnostic {
-            range,
-            severity: Some(DiagnosticSeverity::ERROR),
-            code: Some(NumberOrString::Number(64)),
-            code_description: None,
-            source: self.source.clone(),
-            message: format!("expected kind {}, but found a generic", expected_kind),
-            related_information: None,
-            tags: None,
-            data: None,
-        })
-    }
-
-    pub fn log_cannot_infer_type_var_kind(&mut self, range: Range) {
-        self.log(Diagnostic {
-            range,
-            severity: Some(DiagnosticSeverity::ERROR),
-            code: Some(NumberOrString::Number(65)),
-            code_description: None,
-            source: self.source.clone(),
-            message: format!("cannot infer type variable kind"),
-            related_information: None,
-            tags: None,
-            data: None,
-        })
-    }
-
-    pub fn log_cannot_infer_val_kind(&mut self, range: Range) {
-        self.log(Diagnostic {
-            range,
-            severity: Some(DiagnosticSeverity::ERROR),
-            code: Some(NumberOrString::Number(66)),
-            code_description: None,
-            source: self.source.clone(),
-            message: format!("cannot infer value variable kind"),
-            related_information: None,
-            tags: None,
-            data: None,
-        })
-    }
-
-    pub fn log_cannot_infer_valpat_kind(&mut self, range: Range) {
-        self.log(Diagnostic {
-            range,
-            severity: Some(DiagnosticSeverity::ERROR),
-            code: Some(NumberOrString::Number(67)),
-            code_description: None,
-            source: self.source.clone(),
-            message: format!("cannot infer value pattern kind"),
-            related_information: None,
-            tags: None,
-            data: None,
-        })
-    }
-
     pub fn log_missing_field(&mut self, range: Range, field: &str) {
         self.log(Diagnostic {
             range,
@@ -968,67 +895,6 @@ impl DiagnosticLogger {
         })
     }
 
-    pub fn log_cannot_get_kind_of_member(&mut self, range: Range, member: &str) {
-        self.log(Diagnostic {
-            range,
-            severity: Some(DiagnosticSeverity::ERROR),
-            code: Some(NumberOrString::Number(74)),
-            code_description: None,
-            source: self.source.clone(),
-            message: format!("cannot get kind of member `{}`", member),
-            related_information: None,
-            tags: None,
-            data: None,
-        })
-    }
-
-    pub fn log_cannot_get_kind_of_type(&mut self, range: Range, found_type: &str) {
-        self.log(Diagnostic {
-            range,
-            severity: Some(DiagnosticSeverity::ERROR),
-            code: Some(NumberOrString::Number(75)),
-            code_description: None,
-            source: self.source.clone(),
-            message: format!("cannot get kind of type `{}`", found_type),
-            related_information: None,
-            tags: None,
-            data: None,
-        })
-    }
-
-    pub fn log_mutable_type(&mut self, range: Range, identifier: &str) {
-        self.log(Diagnostic {
-            range,
-            severity: Some(DiagnosticSeverity::ERROR),
-            code: Some(NumberOrString::Number(76)),
-            code_description: None,
-            source: self.source.clone(),
-            message: format!(
-                "identifier `{}` has kind TYPE but is marked mut",
-                identifier
-            ),
-            related_information: None,
-            tags: None,
-            data: None,
-        })
-    }
-
-    pub fn log_nominal_value(&mut self, range: Range, identifier: &str) {
-        self.log(Diagnostic {
-            range,
-            severity: Some(DiagnosticSeverity::ERROR),
-            code: Some(NumberOrString::Number(77)),
-            code_description: None,
-            source: self.source.clone(),
-            message: format!(
-                "identifier `{}` has kind VALUE but is marked nominal",
-                identifier
-            ),
-            related_information: None,
-            tags: None,
-            data: None,
-        })
-    }
 
     pub fn log_cannot_access_index_of_non_array(&mut self, range: Range, found_type: &str) {
         self.log(Diagnostic {
@@ -1114,17 +980,32 @@ impl DiagnosticLogger {
         })
     }
 
-    pub fn log_could_not_infer_hole_kind(&mut self, range: Range) {
+    pub fn log_range_in_expression(&mut self, range: Range) {
         self.log(Diagnostic {
             range,
             severity: Some(DiagnosticSeverity::ERROR),
             code: Some(NumberOrString::Number(83)),
             code_description: None,
             source: self.source.clone(),
-            message: format!("could not infer hole kind"),
+            message: format!("range only allowed in patterns"),
             related_information: None,
             tags: None,
             data: None,
         })
     }
+
+    pub fn log_unexpected_place(&mut self, range: Range, found: &str) {
+        self.log(Diagnostic {
+            range,
+            severity: Some(DiagnosticSeverity::ERROR),
+            code: Some(NumberOrString::Number(84)),
+            code_description: None,
+            source: self.source.clone(),
+            message: format!("`{}` is not permitted in a place expression",  found),
+            related_information: None,
+            tags: None,
+            data: None,
+        })
+    }
+
 }

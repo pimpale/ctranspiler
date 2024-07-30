@@ -145,7 +145,6 @@ impl std::default::Default for ValExpr {
 #[derive(Clone, Debug)]
 pub enum BlockStatement {
     Error,
-    NoOp,
     Let {
         pat: Box<Augmented<PatExpr>>,
         value: Box<Augmented<ValExpr>>,
