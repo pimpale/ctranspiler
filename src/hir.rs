@@ -4,7 +4,7 @@ use lsp_types::Range;
 use num_bigint::BigInt;
 use num_rational::BigRational;
 
-use crate::{ast, builtin::Builtin, dlogger::DiagnosticLogger, mir::Place};
+use crate::{ast::{self, IdentifierModifier}, builtin::Builtin, dlogger::DiagnosticLogger, mir::Place};
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Augmented<T> {
@@ -16,11 +16,7 @@ pub struct Augmented<T> {
 pub enum PatExpr {
     Error,
     Ignore,
-    Identifier {
-        original: String,
-        modifier: ast::IdentifierModifier,
-        id: usize,
-    },
+    Identifier(usize),
     StructLiteral(Vec<(Augmented<String>, Augmented<PatExpr>)>),
     New {
         pat: Box<Augmented<PatExpr>>,
@@ -42,17 +38,7 @@ impl std::default::Default for PatExpr {
 #[derive(Clone, Debug)]
 pub enum PlaceExpr {
     Error,
-    Local {
-        // global index (can be looked up in table)
-        global_idx: usize,
-        // de brujin index
-        // meaningful in function scope only
-        debrujin_idx: usize,
-        // whether the variable is captured
-        captured: bool,
-    },
-    // named
-    Global(usize),
+    Var(usize),
     Deref(Box<Augmented<ValExpr>>),
     ArrayAccess {
         root: Box<Augmented<ValExpr>>,
@@ -64,11 +50,11 @@ pub enum PlaceExpr {
     },
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, PartialOrd, Eq, Ord)]
 pub enum UseKind {
-    Borrow,
-    MutBorrow,
-    Move,
+    Borrow = 0,
+    MutBorrow = 1,
+    Move = 2,
 }
 
 #[derive(Clone, Debug)]
@@ -100,9 +86,8 @@ pub enum ValExpr {
         // 1. A take in the body means we take in the captured_vars struct, and replace with take from captured_vars
         // 2. A borrow in the body means that we borrow in the captured_vars struct, and replace with copy from captured_vars
         // 3. A mutborrow in the body means that we borrow in the captured_vars struct, and replace with take from captured_vars
+        captures: Vec<(Augmented<PatExpr>, Augmented<ValExpr>)>,
         params: Vec<Augmented<PatExpr>>,
-        // captured uses de brujin indices
-        captured: Vec<(usize, UseKind)>,
         body: Box<Augmented<ValExpr>>,
     },
     // Constructs a new compound type
@@ -203,31 +188,16 @@ pub enum FileStatement {
 }
 
 #[derive(Clone, Debug)]
-pub enum NameRole {
-    // introduced by a filestatement let, and is global
-    Global,
-    // introduced via match, let, or function parameter
-    Local,
-}
-
-#[derive(Clone, Debug)]
 pub enum Name {
-    Var(usize, NameRole),
+    Var(usize),
     Namespace(Vec<(String, Name)>),
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub enum ScopeKind {
-    Global,
-    Fn,
-    Block,
 }
 
 pub struct Environment {
     // namespaces that we are nested in
     pub namespaces: Vec<Vec<String>>,
     // these are the names that are in scope
-    pub names_in_scope: Vec<(ScopeKind, Vec<(String, Name)>)>,
+    pub names_in_scope: Vec<Vec<(String, Name)>>,
 
     // the identifier table (using absolute indices)
     pub id_name_table: Vec<Vec<String>>,
@@ -246,21 +216,13 @@ impl Environment {
     pub fn introduce_identifier(
         &mut self,
         ast::Identifier { identifier, range }: ast::Identifier,
+        modifier: ast::IdentifierModifier,
     ) -> Option<(usize, String)> {
         match identifier {
             Some(identifier) => {
                 let id = self.id_name_table.len();
-                let (scope_kind, scope) = self.names_in_scope.last_mut().unwrap();
-                scope.push((
-                    identifier.clone(),
-                    Name::Var(
-                        id,
-                        match scope_kind {
-                            ScopeKind::Global => NameRole::Global,
-                            _ => NameRole::Local,
-                        },
-                    ),
-                ));
+                let scope = self.names_in_scope.last_mut().unwrap();
+                scope.push((identifier.clone(), Name::Var(id)));
                 self.id_name_table.push(
                     [
                         self.namespaces.last().unwrap(),
@@ -274,6 +236,17 @@ impl Environment {
             }
             None => None,
         }
+    }
+
+    pub fn introduce_captured_var(&mut self, id: usize) -> usize {
+        let id = self.id_name_table.len();
+        self.id_name_table
+            .push(vec![format!("captured_var_{}", id)]);
+        self.id_range_table.push(self.id_range_table[id].clone());
+        self.id_modifier_table
+            .push(self.id_modifier_table[id].clone());
+
+        id
     }
 
     pub fn introduce_label(
@@ -304,8 +277,8 @@ impl Environment {
             Some(identifier_name) => match self
                 .names_in_scope
                 .iter()
+                .flatten()
                 .rev()
-                .flat_map(|(_, scope)| scope.iter().rev())
                 .filter_map(|(_, name)| match name {
                     Name::Namespace(v) => Some(v),
                     _ => None,
@@ -314,7 +287,7 @@ impl Environment {
             {
                 Some(id) => {
                     let id = id.clone();
-                    self.names_in_scope.last_mut().unwrap().1.extend(id);
+                    self.names_in_scope.last_mut().unwrap().extend(id);
                 }
                 None => {
                     dlogger.log_unknown_identifier(identifier.range, identifier_name);
@@ -333,27 +306,10 @@ impl Environment {
             Some(identifier_name) => match self
                 .names_in_scope
                 .iter()
+                .flatten()
                 .rev()
-                // determine if a scope is "nonlocal"
-                .scan(false, |nonlocal, (scope_kind, scope)| {
-                    if !*nonlocal && scope_kind == &ScopeKind::Fn {
-                        *nonlocal = true;
-                        // return false for the first function scope
-                        Some((false, scope))
-                    } else {
-                        Some((*nonlocal, scope))
-                    }
-                })
-                // flatten
-                .flat_map(|(nonlocal, scope)| scope.iter().rev().zip(std::iter::repeat(nonlocal)))
-                .enumerate()
-                .filter_map(|(debrujin_idx, ((_, name), nonlocal))| match name {
-                    Name::Var(id, NameRole::Global) => Some(PlaceExpr::Global(*id)),
-                    Name::Var(id, NameRole::Local) => Some(PlaceExpr::Local {
-                        global_idx: *id,
-                        debrujin_idx,
-                        captured: nonlocal,
-                    }),
+                .filter_map(|(_, name)| match name {
+                    Name::Var(id) => Some(PlaceExpr::Var(*id)),
                     _ => None,
                 })
                 .next()
@@ -389,7 +345,7 @@ impl Environment {
     }
 
     pub fn push_block_scope(&mut self) {
-        self.names_in_scope.push((ScopeKind::Block, vec![]));
+        self.names_in_scope.push(vec![]);
     }
 
     pub fn pop_block_scope(&mut self) {
@@ -397,7 +353,7 @@ impl Environment {
     }
 
     pub fn push_fn_scope(&mut self) {
-        self.names_in_scope.push((ScopeKind::Fn, vec![]));
+        self.names_in_scope.push(vec![]);
         self.labels_in_scope.push(vec![]);
     }
 
@@ -410,7 +366,7 @@ impl Environment {
     pub fn new() -> Self {
         Environment {
             namespaces: vec![vec![]],
-            names_in_scope: vec![(ScopeKind::Global, vec![])],
+            names_in_scope: vec![vec![]],
             id_name_table: vec![],
             id_modifier_table: vec![],
             id_range_table: vec![],

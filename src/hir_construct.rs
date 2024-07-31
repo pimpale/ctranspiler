@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use indexmap::IndexMap;
 use lsp_types::Range;
@@ -97,12 +97,8 @@ fn translate_augpatexpr(
             modifier,
         } => Augmented {
             range,
-            val: match env.introduce_identifier(identifier) {
-                Some((id, original)) => PatExpr::Identifier {
-                    id,
-                    modifier,
-                    original,
-                },
+            val: match env.introduce_identifier(identifier, modifier) {
+                Some((id, _)) => PatExpr::Identifier(id),
                 None => PatExpr::Error,
             },
         },
@@ -110,12 +106,8 @@ fn translate_augpatexpr(
             range,
             val: PatExpr::StructLiteral(translate_augstructitemexpr(
                 |x, env, dlogger| translate_augpatexpr(x, env, dlogger),
-                |id, env, _| match env.introduce_identifier(id) {
-                    Some((id, original)) => PatExpr::Identifier {
-                        modifier: ast::IdentifierModifier::None,
-                        id,
-                        original,
-                    },
+                |id, env, _| match env.introduce_identifier(id, ast::IdentifierModifier::None) {
+                    Some((id, _)) => PatExpr::Identifier(id),
                     None => PatExpr::Error,
                 },
                 env,
@@ -647,37 +639,39 @@ fn translate_augvalexpr(
             env.push_fn_scope();
 
             // insert params into scope
-            let params = params
+            let mut params: Vec<Augmented<PatExpr>> = params
                 .into_iter()
                 .map(|x| translate_augpatexpr(x, env, dlogger))
                 .collect();
 
-            let body = Box::new(translate_augvalexpr(*body, env, dlogger));
+            let mut body = Box::new(translate_augvalexpr(*body, env, dlogger));
 
             // end type and val scope
             env.pop_fn_scope();
 
-            let mut captured = vec![];
+            let mut find_env = FindCapturedVarEnv::new();
 
-            // find captured variables
-            for param in params {
-                find_captured_patexpr(param, &mut captured);
+            // find captured variables and their use kind
+            for param in params.iter() {
+                find_captured_patexpr(param, &mut find_env);
             }
-            find_captured_valexpr(&body, &mut captured);
+            find_captured_valexpr(&body, &mut find_env);
+
+            // allocate new ids for captured variables
+            let rewrite_env = RewriteCapturedVarEnv::new(find_env, env);
 
             // rewrite to use captured variables
-            let params = params
-                .into_iter()
-                .map(|x| rewrite_captured_patexpr(x, &captured))
-                .collect();
-            let body = rewrite_captured_valexpr(body, &captured);
+            for param in params.iter_mut() {
+                rewrite_captured_patexpr(param, &rewrite_env);
+            }
+            rewrite_captured_valexpr(&mut body, &rewrite_env);
 
             Augmented {
                 range,
                 val: ValExpr::Lam {
                     params,
                     body,
-                    captured,
+                    captures: rewrite_env.to_captured(),
                 },
             }
         }
@@ -813,186 +807,405 @@ fn translate_augvalexpr(
     }
 }
 
-fn find_captured_patexpr(pat: &Augmented<PatExpr>, captured: &mut Vec<(usize, UseKind)>) {
-    match &pat.val {
-        PatExpr::Identifier { .. } => {}
-        PatExpr::Ignore => {}
-        PatExpr::Typed { pat, ty } => {
-            find_captured_patexpr(pat, captured);
-            find_captured_valexpr(ty, captured);
+struct FindCapturedVarEnv {
+    // variables that we need to capture, and their use kind
+    captured: HashMap<usize, UseKind>,
+    // contains variables that were bound inside the body, and so don't need to be captured
+    // note: we don't need to worry about removing variables from this set,
+    // because the previous variable resolution pass will have already caught any unresolved variables
+    bound: HashSet<usize>,
+}
+
+impl FindCapturedVarEnv {
+    fn new() -> Self {
+        FindCapturedVarEnv {
+            captured: HashMap::new(),
+            bound: HashSet::new(),
         }
-        PatExpr::Error => {}
-        PatExpr::StructLiteral(entries) => {
-            for (_, pat) in entries {
-                find_captured_patexpr(pat, captured);
-            }
-        }
-        PatExpr::New { pat, ty } => {
-            find_captured_patexpr(pat, captured);
-            find_captured_valexpr(ty, captured);
-        }
-        PatExpr::Literal(val) => {
-            find_captured_valexpr(val, captured);
+    }
+
+    fn bind_var(&mut self, id: usize) {
+        self.bound.insert(id);
+    }
+
+    fn capture_var_if_needed(&mut self, id: usize, new_use_kind: UseKind) {
+        if !self.bound.contains(&id) {
+            let current_use_level = self.captured.get(&id).cloned();
+            let new_use_level = match current_use_level {
+                Some(old) => std::cmp::max(old, new_use_kind),
+                None => new_use_kind,
+            };
+            self.captured.insert(id, new_use_level);
         }
     }
 }
 
-fn find_captured_valexpr(val: &Augmented<ValExpr>, captured: &mut Vec<(usize, UseKind)>) {
+fn find_captured_patexpr(pat: &Augmented<PatExpr>, env: &mut FindCapturedVarEnv) {
+    match &pat.val {
+        PatExpr::Identifier(id) => env.bind_var(*id),
+        PatExpr::Ignore => {}
+        PatExpr::Typed { pat, ty } => {
+            find_captured_patexpr(pat, env);
+            find_captured_valexpr(ty, env);
+        }
+        PatExpr::Error => {}
+        PatExpr::StructLiteral(entries) => {
+            for (_, pat) in entries {
+                find_captured_patexpr(pat, env);
+            }
+        }
+        PatExpr::New { pat, ty } => {
+            find_captured_patexpr(pat, env);
+            find_captured_valexpr(ty, env);
+        }
+        PatExpr::Literal(val) => {
+            find_captured_valexpr(val, env);
+        }
+    }
+}
+
+fn find_captured_valexpr(val: &Augmented<ValExpr>, env: &mut FindCapturedVarEnv) {
     match val.val {
         ValExpr::Use(ref place, ref role) => {
-            find_captured_placeexpr(place, captured, role.clone());
+            find_captured_placeexpr(place, env, role.clone());
         }
         ValExpr::Block { ref statements, .. } => {
             for statement in statements {
                 match statement.val {
                     BlockStatement::Let { ref pat, .. } => {
-                        find_captured_patexpr(pat, captured);
+                        find_captured_patexpr(pat, env);
                     }
                     BlockStatement::Do(ref val) => {
-                        find_captured_valexpr(val, captured);
+                        find_captured_valexpr(val, env);
                     }
                     _ => {}
                 }
             }
         }
-        ValExpr::Lam {
-            ref params,
-            ref body,
-            ..
-        } => {
-            for param in params {
-                find_captured_patexpr(param, captured);
+        ValExpr::Lam { ref captures, .. } => {
+            for (capture_pat, capture_val) in captures {
+                find_captured_patexpr(capture_pat, env);
+                find_captured_valexpr(capture_val, env);
             }
-            find_captured_valexpr(body, captured);
         }
         ValExpr::CaseOf {
             ref expr,
             ref cases,
         } => {
-            find_captured_valexpr(expr, captured);
+            find_captured_valexpr(expr, env);
             for (pat, val) in cases {
-                find_captured_patexpr(pat, captured);
-                find_captured_valexpr(val, captured);
+                find_captured_patexpr(pat, env);
+                find_captured_valexpr(val, env);
             }
         }
         ValExpr::App { ref fun, ref args } => {
-            find_captured_valexpr(fun, captured);
+            find_captured_valexpr(fun, env);
             for arg in args {
-                find_captured_valexpr(arg, captured);
+                find_captured_valexpr(arg, env);
             }
         }
         ValExpr::ArrayLiteral(ref items) => {
             for item in items {
-                find_captured_valexpr(item, captured);
+                find_captured_valexpr(item, env);
             }
         }
         ValExpr::StructLiteral(ref items) => {
             for (_, val) in items {
-                find_captured_valexpr(val, captured);
+                find_captured_valexpr(val, env);
             }
         }
         ValExpr::Enum(ref items) => {
             for (_, val) in items {
-                find_captured_valexpr(val, captured);
+                find_captured_valexpr(val, env);
             }
         }
         ValExpr::Union(ref items) => {
             for (_, val) in items {
-                find_captured_valexpr(val, captured);
+                find_captured_valexpr(val, env);
             }
         }
         ValExpr::Extern { ref ty, .. } => {
-            find_captured_valexpr(ty, captured);
+            find_captured_valexpr(ty, env);
         }
         ValExpr::Int { .. } => {}
         ValExpr::Float { .. } => {}
         ValExpr::String(_) => {}
         ValExpr::Builtin { .. } => {}
         ValExpr::Ret { ref value, .. } => {
-            find_captured_valexpr(value, captured);
+            find_captured_valexpr(value, env);
         }
         ValExpr::Loop { ref body, .. } => {
-            find_captured_valexpr(body, captured);
+            find_captured_valexpr(body, env);
         }
         ValExpr::And {
             ref left,
             ref right,
         } => {
-            find_captured_valexpr(left, captured);
-            find_captured_valexpr(right, captured);
+            find_captured_valexpr(left, env);
+            find_captured_valexpr(right, env);
         }
         ValExpr::Or {
             ref left,
             ref right,
         } => {
-            find_captured_valexpr(left, captured);
-            find_captured_valexpr(right, captured);
+            find_captured_valexpr(left, env);
+            find_captured_valexpr(right, env);
         }
         ValExpr::Assign {
             ref target,
             ref value,
         } => {
-            find_captured_placeexpr(target, captured, UseKind::MutBorrow);
-            find_captured_valexpr(value, captured);
+            find_captured_placeexpr(target, env, UseKind::MutBorrow);
+            find_captured_valexpr(value, env);
         }
         ValExpr::FieldAccess { ref root, .. } => {
-            find_captured_valexpr(root, captured);
+            find_captured_valexpr(root, env);
         }
         ValExpr::Error => {}
         ValExpr::Hole => {}
         ValExpr::Bool { .. } => {}
         ValExpr::New { ref ty, ref val } => {
-            find_captured_valexpr(ty, captured);
-            find_captured_valexpr(val, captured);
+            find_captured_valexpr(ty, env);
+            find_captured_valexpr(val, env);
         }
         ValExpr::FnTy {
             ref param_tys,
             ref dep_ty,
         } => {
             for param_ty in param_tys {
-                find_captured_valexpr(param_ty, captured);
+                find_captured_valexpr(param_ty, env);
             }
-            find_captured_valexpr(dep_ty, captured);
+            find_captured_valexpr(dep_ty, env);
         }
         ValExpr::Struct(ref fields) => {
             for (_, val) in fields {
-                find_captured_valexpr(val, captured);
+                find_captured_valexpr(val, env);
             }
         }
         ValExpr::Typed { ref value, ref ty } => {
-            find_captured_valexpr(value, captured);
-            find_captured_valexpr(ty, captured);
+            find_captured_valexpr(value, env);
+            find_captured_valexpr(ty, env);
         }
     }
 }
 
 fn find_captured_placeexpr(
     place: &Augmented<PlaceExpr>,
-    captured: &mut Vec<(usize, UseKind)>,
+    env: &mut FindCapturedVarEnv,
     role: UseKind,
 ) {
     match place.val {
-        PlaceExpr::Local { debrujin_idx, .. } => {
-            if role == UseKind::MutBorrow {
-                captured.push(id);
-            }
+        PlaceExpr::Var(id) => {
+            env.capture_var_if_needed(id, role);
         }
-        PlaceExpr::Global(_) => {}
         PlaceExpr::Deref(ref v) => {
-            find_captured_valexpr(v, captured);
+            find_captured_valexpr(v, env);
         }
         PlaceExpr::ArrayAccess {
             ref root,
             ref index,
         } => {
-            find_captured_valexpr(root, captured);
-            find_captured_valexpr(index, captured);
+            find_captured_valexpr(root, env);
+            find_captured_valexpr(index, env);
         }
-        PlaceExpr::FieldAccess {
-            ref root,
-            ref field,
-        } => {
-            find_captured_placeexpr(root, captured, role);
+        PlaceExpr::FieldAccess { ref root, .. } => {
+            find_captured_placeexpr(root, env, role);
+        }
+        PlaceExpr::Error => {}
+    }
+}
+
+struct RewriteCapturedVarEnv {
+    captured: HashMap<usize, (usize, UseKind)>,
+}
+
+enum Action {
+    Copy,
+}
+
+impl RewriteCapturedVarEnv {
+    fn new(FindCapturedVarEnv { captured, .. }: FindCapturedVarEnv, env: &mut Environment) -> Self {
+        RewriteCapturedVarEnv {
+            captured: captured
+                .into_iter()
+                .map(|(id, kind)| {
+                    let new_id = env.introduce_captured_var(id);
+                    (id, (new_id, kind))
+                })
+                .collect(),
+        }
+    }
+
+    fn to_captured(self) -> Vec<(Augmented<PatExpr>, Augmented<ValExpr>)> {
+        self.captured
+            .into_iter()
+            .map(|(id, (new_id, kind))| {
+                let pat = Augmented {
+                    range: Range::default(),
+                    val: PatExpr::Identifier(id),
+                };
+                let val = Augmented {
+                    range: Range::default(),
+                    val: ValExpr::Use(
+                        Box::new(Augmented {
+                            range: Range::default(),
+                            val: PlaceExpr::Var(new_id),
+                        }),
+                        kind,
+                    ),
+                };
+                (pat, val)
+            })
+            .collect()
+    }
+}
+
+fn rewrite_captured_patexpr(pat: &mut Augmented<PatExpr>, env: &RewriteCapturedVarEnv) {
+    match &mut pat.val {
+        PatExpr::Identifier { .. } => {}
+        PatExpr::Ignore => {}
+        PatExpr::Typed { pat, ty } => {
+            rewrite_captured_patexpr(pat, env);
+            rewrite_captured_valexpr(ty, env);
+        }
+        PatExpr::Error => {}
+        PatExpr::StructLiteral(entries) => {
+            for (_, pat) in entries {
+                rewrite_captured_patexpr(pat, env);
+            }
+        }
+        PatExpr::New { pat, ty } => {
+            rewrite_captured_patexpr(pat, env);
+            rewrite_captured_valexpr(ty, env);
+        }
+        PatExpr::Literal(val) => {
+            rewrite_captured_valexpr(val, env);
+        }
+    }
+}
+
+fn rewrite_captured_valexpr(val: &mut Augmented<ValExpr>, env: &RewriteCapturedVarEnv) {
+    match &mut val.val {
+        ValExpr::Use(place, ref role) => {
+            todo!()
+        }
+        ValExpr::Block { statements, .. } => {
+            for statement in statements {
+                match &mut statement.val {
+                    BlockStatement::Let { pat, .. } => {
+                        rewrite_captured_patexpr(pat, env);
+                    }
+                    BlockStatement::Do(val) => {
+                        rewrite_captured_valexpr(val, env);
+                    }
+                    _ => {}
+                }
+            }
+        }
+        ValExpr::Lam { captures, .. } => {
+            for (pat, val) in captures {
+                rewrite_captured_patexpr(pat, env);
+                rewrite_captured_valexpr(val, env);
+            }
+        }
+        ValExpr::CaseOf { expr, cases } => {
+            rewrite_captured_valexpr(expr, env);
+            for (pat, val) in cases {
+                rewrite_captured_patexpr(pat, env);
+                rewrite_captured_valexpr(val, env);
+            }
+        }
+        ValExpr::App { fun, ref mut args } => {
+            rewrite_captured_valexpr(fun, env);
+            for arg in args {
+                rewrite_captured_valexpr(arg, env);
+            }
+        }
+        ValExpr::ArrayLiteral(items) => {
+            for item in items {
+                rewrite_captured_valexpr(item, env);
+            }
+        }
+        ValExpr::StructLiteral(items) => {
+            for (_, val) in items {
+                rewrite_captured_valexpr(val, env);
+            }
+        }
+        ValExpr::Enum(items) => {
+            for (_, val) in items {
+                rewrite_captured_valexpr(val, env);
+            }
+        }
+        ValExpr::Union(items) => {
+            for (_, val) in items {
+                rewrite_captured_valexpr(val, env);
+            }
+        }
+        ValExpr::Extern { ty, .. } => {
+            rewrite_captured_valexpr(ty, env);
+        }
+        ValExpr::Int { .. } => {}
+        ValExpr::Float { .. } => {}
+        ValExpr::String(_) => {}
+        ValExpr::Builtin { .. } => {}
+        ValExpr::Ret { value, .. } => {
+            rewrite_captured_valexpr(value, env);
+        }
+        ValExpr::Loop { body, .. } => {
+            rewrite_captured_valexpr(body, env);
+        }
+        ValExpr::And { left, right } => {
+            rewrite_captured_valexpr(left, env);
+            rewrite_captured_valexpr(right, env);
+        }
+        ValExpr::Or { left, right } => {
+            rewrite_captured_valexpr(left, env);
+            rewrite_captured_valexpr(right, env);
+        }
+        ValExpr::Assign { target, value } => {
+            rewrite_captured_placeexpr(target, env);
+            rewrite_captured_valexpr(value, env);
+        }
+        ValExpr::FieldAccess { root, .. } => {
+            rewrite_captured_valexpr(root, env);
+        }
+        ValExpr::Error => {}
+        ValExpr::Hole => {}
+        ValExpr::Bool { .. } => {}
+        ValExpr::New { ty, val } => {
+            rewrite_captured_valexpr(ty, env);
+            rewrite_captured_valexpr(val, env);
+        }
+        ValExpr::FnTy { param_tys, dep_ty } => {
+            for param_ty in param_tys {
+                rewrite_captured_valexpr(param_ty, env);
+            }
+            rewrite_captured_valexpr(dep_ty, env);
+        }
+        ValExpr::Struct(fields) => {
+            for (_, val) in fields {
+                rewrite_captured_valexpr(val, env);
+            }
+        }
+        ValExpr::Typed { value, ty } => {
+            rewrite_captured_valexpr(value, env);
+            rewrite_captured_valexpr(ty, env);
+        }
+    }
+}
+
+fn rewrite_captured_placeexpr(place: &mut Augmented<PlaceExpr>, env: &RewriteCapturedVarEnv) {
+    match &mut place.val {
+        PlaceExpr::Var(_) => {}
+        PlaceExpr::Deref(v) => {
+            rewrite_captured_valexpr(v, env);
+        }
+        PlaceExpr::ArrayAccess { root, index } => {
+            rewrite_captured_valexpr(root, env);
+            rewrite_captured_valexpr(index, env);
+        }
+        PlaceExpr::FieldAccess { root, .. } => {
+            rewrite_captured_placeexpr(root, env);
         }
         PlaceExpr::Error => {}
     }
@@ -1067,7 +1280,7 @@ pub fn translate_augfilestatement(
             let mut out_items = vec![];
             if let Some(identifier) = identifier {
                 // new scope
-                env.names_in_scope.push(HashMap::new());
+                env.names_in_scope.push(vec![]);
                 // push prefix to the last prefix scope
                 env.namespaces.last_mut().unwrap().push(identifier.clone());
                 // translate items
@@ -1081,7 +1294,7 @@ pub fn translate_augfilestatement(
                 env.names_in_scope
                     .last_mut()
                     .unwrap()
-                    .insert(identifier.clone(), Name::Namespace(namespace_scope));
+                    .push((identifier.clone(), Name::Namespace(namespace_scope)));
             }
             out_items
         }
