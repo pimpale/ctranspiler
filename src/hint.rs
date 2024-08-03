@@ -12,7 +12,7 @@ pub enum Hint {
     // values that inhabit a type
     Ref {
         ty: Box<Hint>,
-        var: *const Hint,
+        var: *mut Hint,
     },
     Array {
         inner_ty: Box<Hint>,
@@ -21,7 +21,7 @@ pub enum Hint {
     Slice {
         inner_ty: Box<Hint>,
         length: usize,
-        values: *const Hint,
+        values: *mut Hint,
     },
     Nat {
         universe: usize,

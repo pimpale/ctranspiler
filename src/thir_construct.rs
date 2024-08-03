@@ -6,7 +6,7 @@ use crate::ast::IdentifierModifier;
 use crate::dlogger::DiagnosticLogger;
 use crate::hint::Hint;
 use crate::hir;
-use crate::hir::{Augmented, Environment};
+use crate::hir::{Augmented, ResolutionEnvironment};
 use crate::values::Value;
 
 
@@ -15,7 +15,7 @@ use crate::values::Value;
 fn typehint_of_pat_and_patch(
     v: &mut Augmented<hir::PatExpr>,
     dlogger: &mut DiagnosticLogger,
-    checker: &mut Environment,
+    checker: &mut ResolutionEnvironment,
 ) -> Hint {
     match &mut v.val {
         hir::PatExpr::Error => Hint::Unknown,
@@ -230,7 +230,7 @@ pub fn typecheck_val_pat_and_patch(
     v: &mut Augmented<hir::PatExpr>,
     expected_type: &Value,
     dlogger: &mut DiagnosticLogger,
-    checker: &mut Environment,
+    checker: &mut ResolutionEnvironment,
 ) -> Value {
     match &mut v.val {
         hir::PatExpr::Error => Value::Unknown,
@@ -319,7 +319,7 @@ pub fn typecheck_case_target_expr_and_patch(
     v: &mut Augmented<hir::CaseTargetExpr>,
     expected_hint: &Hint,
     dlogger: &mut DiagnosticLogger,
-    checker: &mut Environment,
+    checker: &mut ResolutionEnvironment,
 ) -> Value {
     match &mut v.val {
         hir::CaseTargetExpr::Error => Value::Unknown,
@@ -364,7 +364,7 @@ pub fn typecheck_val_expr_and_patch(
     v: &mut Augmented<hir::ValExpr>,
     expected: &Hint,
     dlogger: &mut DiagnosticLogger,
-    checker: &mut Environment,
+    checker: &mut ResolutionEnvironment,
 ) -> Value {
     match &mut v.val {
         hir::ValExpr::Error => Value::Unknown,
@@ -1164,7 +1164,7 @@ pub fn typecheck_val_expr_and_patch(
 pub fn typecheck_block_statement_and_patch(
     v: &mut Augmented<hir::BlockStatement>,
     dlogger: &mut DiagnosticLogger,
-    checker: &mut Environment,
+    checker: &mut ResolutionEnvironment,
 ) {
     match &mut v.val {
         hir::BlockStatement::Error => {}
@@ -1184,7 +1184,7 @@ pub fn typecheck_block_statement_and_patch(
 pub fn typecheck_file_statement_and_patch(
     v: &mut Augmented<hir::FileStatement>,
     dlogger: &mut DiagnosticLogger,
-    checker: &mut Environment,
+    checker: &mut ResolutionEnvironment,
 ) {
     match &mut v.val {
         hir::FileStatement::Error => {}

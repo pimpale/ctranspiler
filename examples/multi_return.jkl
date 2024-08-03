@@ -1,10 +1,9 @@
-let Nat := @Nat.0;
-
-let U64 := Nat(64);
-let U32 := Nat(32);
+let U64 := @Nat(64);
+let U32 := @Nat(32);
 let Unit := struct {};
 
-let main = fn(): Unit -> 'f {
+let main = () => Unit 
+:: 'f {
     let q = 'q {
         let z: U32 = 10;
         ret 'q z;

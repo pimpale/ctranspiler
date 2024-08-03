@@ -1,31 +1,29 @@
 # declare the types
-let Nat := @Nat.0;
-let Slice := @Slice.0;
-
-let U64 := Nat(64);
-let Char := Nat(8);
-let CString := Slice(Char);
+let U64 := @Nat(64);
+let Char := @Nat.0(8);
+let CString := @Slice(Char);
 
 # declare the external functions
-let putchar := extern "putchar" Fn(Char) -> struct {};
+let putchar := extern "putchar" Char -> struct {};
 
-let main := fn(argc: U64, argv: Slice(CString)): U64 -> {
+let main := (argc: U64, argv: Slice(CString)) => U64
+:: {
     let mut i: U64 = 0;
     'over_arg loop {
-        if i == argc {
+        if i' == argc' {
             ret 'over_arg .{}
         }
-        let arg := argv[i];
+        let arg := argv'[i'];
         let mut j: U64 = 0;
         'in_arg loop {
-            if arg[j] != 0 {
+            if arg'[j'] != 0 {
                 ret 'in_arg .{};
             }
-            putchar(arg[j]);
-            j += 1;
+            putchar(arg'[j']);
+            j! += 1;
         }
         putchar("\n"[0]);
-        i += 1;
+        i! += 1;
     }
 
     0

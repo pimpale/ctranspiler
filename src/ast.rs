@@ -26,8 +26,14 @@ pub struct Label {
 
 #[derive(Serialize, Deserialize, Clone, Debug, AsRefStr)]
 pub enum ValBinaryOpKind {
+    // Type Ascription
+    Ascribe,
+    RevAscribe,
     // Function call
     Pipe,
+    // Function
+    Lambda,
+    PiType,
     // Math
     Add,
     Sub,
@@ -89,10 +95,6 @@ pub enum Expr {
         value: Vec<u8>,
         block: bool,
     },
-    FnDef {
-        params: Vec<Augmented<Expr>>,
-        body: Box<Augmented<Expr>>,
-    },
     // Constructs a new anonymous struct type
     StructLiteral(Vec<Augmented<StructItemExpr>>),
     // Creates a new instance of a nominal type
@@ -116,8 +118,8 @@ pub enum Expr {
         statements: Vec<Augmented<BlockStatement>>,
         trailing_semicolon: bool,
     },
-    // Group
-    Group(Box<Augmented<Expr>>),
+    // Group or parameters
+    GroupOrParams(Vec<Augmented<Expr>>),
     // Inline array
     Array(Vec<Augmented<Expr>>),
     // A reference to a previously defined variable
@@ -149,23 +151,11 @@ pub enum Expr {
     Mutref(Box<Augmented<Expr>>),
     Deref(Box<Augmented<Expr>>),
     Copy(Box<Augmented<Expr>>),
-    Typed {
-        pat: Box<Augmented<Expr>>,
-        ty: Box<Augmented<Expr>>,
-    },
-    ReverseTyped {
-        pat: Box<Augmented<Expr>>,
-        ty: Box<Augmented<Expr>>,
-    },
+    Reborrow(Box<Augmented<Expr>>),
     // structs and enums
     StructTy(Vec<Augmented<StructItemExpr>>),
     EnumTy(Vec<Augmented<StructItemExpr>>),
     UnionTy(Vec<Augmented<StructItemExpr>>),
-    // type of a function
-    FnTy {
-        param_tys: Vec<Augmented<Expr>>,
-        dep_return_ty: Box<Augmented<Expr>>,
-    },
     // External function/value
     Extern {
         name: Vec<u8>,

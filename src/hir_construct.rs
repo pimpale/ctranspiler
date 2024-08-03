@@ -6,16 +6,24 @@ use lsp_types::Range;
 use crate::ast::{self};
 use crate::builtin::Builtin;
 use crate::dlogger::DiagnosticLogger;
+use crate::environment::Environment;
 use crate::hir::*;
 
 fn translate_augstructitemexpr<U>(
     mut lower: impl FnMut(
         ast::Augmented<ast::Expr>,
+        &mut VariableResolutionEnvironment,
         &mut Environment,
         &mut DiagnosticLogger,
     ) -> Augmented<U>,
-    mut replace_eponymous: impl FnMut(ast::Identifier, &mut Environment, &mut DiagnosticLogger) -> U,
-    env: &mut Environment,
+    mut replace_eponymous: impl FnMut(
+        ast::Identifier,
+        &mut VariableResolutionEnvironment,
+        &mut Environment,
+        &mut DiagnosticLogger,
+    ) -> U,
+    env: &mut VariableResolutionEnvironment,
+    env2: &mut Environment,
     dlogger: &mut DiagnosticLogger,
     items: Vec<ast::Augmented<ast::StructItemExpr>>,
 ) -> Vec<(Augmented<String>, Augmented<U>)> {
@@ -44,6 +52,7 @@ fn translate_augstructitemexpr<U>(
                                     range: identifier_range,
                                 },
                                 env,
+                                env2,
                                 dlogger,
                             ),
                         },
@@ -68,7 +77,7 @@ fn translate_augstructitemexpr<U>(
                             range: identifier_range,
                             val: identifier,
                         },
-                        lower(*expr, env, dlogger),
+                        lower(*expr, env, env2, dlogger),
                     ));
                 }
             }
@@ -80,7 +89,8 @@ fn translate_augstructitemexpr<U>(
 
 fn translate_augpatexpr(
     ast::Augmented { range, val, .. }: ast::Augmented<ast::Expr>,
-    env: &mut Environment,
+    env: &mut VariableResolutionEnvironment,
+    env2: &mut Environment,
     dlogger: &mut DiagnosticLogger,
 ) -> Augmented<PatExpr> {
     match val {
@@ -97,7 +107,7 @@ fn translate_augpatexpr(
             modifier,
         } => Augmented {
             range,
-            val: match env.introduce_identifier(identifier, modifier) {
+            val: match env.introduce_identifier(identifier, modifier, env2) {
                 Some((id, _)) => PatExpr::Identifier(id),
                 None => PatExpr::Error,
             },
@@ -105,12 +115,17 @@ fn translate_augpatexpr(
         ast::Expr::StructLiteral(items) => Augmented {
             range,
             val: PatExpr::StructLiteral(translate_augstructitemexpr(
-                |x, env, dlogger| translate_augpatexpr(x, env, dlogger),
-                |id, env, _| match env.introduce_identifier(id, ast::IdentifierModifier::None) {
+                |x, env, env2, dlogger| translate_augpatexpr(x, env, env2, dlogger),
+                |id, env, env2, _| match env.introduce_identifier(
+                    id,
+                    ast::IdentifierModifier::None,
+                    env2,
+                ) {
                     Some((id, _)) => PatExpr::Identifier(id),
                     None => PatExpr::Error,
                 },
                 env,
+                env2,
                 dlogger,
                 items,
             )),
@@ -118,22 +133,22 @@ fn translate_augpatexpr(
         ast::Expr::Typed { pat, ty } => Augmented {
             range,
             val: PatExpr::Typed {
-                pat: Box::new(translate_augpatexpr(*pat, env, dlogger)),
-                ty: Box::new(translate_augvalexpr(*ty, env, dlogger)),
+                pat: Box::new(translate_augpatexpr(*pat, env, env2, dlogger)),
+                ty: Box::new(translate_augvalexpr(*ty, env, env2, dlogger)),
             },
         },
         ast::Expr::ReverseTyped { pat, ty } => Augmented {
             range,
             val: PatExpr::Typed {
-                pat: Box::new(translate_augpatexpr(*pat, env, dlogger)),
-                ty: Box::new(translate_augvalexpr(*ty, env, dlogger)),
+                pat: Box::new(translate_augpatexpr(*pat, env, env2, dlogger)),
+                ty: Box::new(translate_augvalexpr(*ty, env, env2, dlogger)),
             },
         },
         ast::Expr::New { ty, val } => Augmented {
             range,
             val: PatExpr::New {
-                ty: Box::new(translate_augvalexpr(*ty, env, dlogger)),
-                pat: Box::new(translate_augpatexpr(*val, env, dlogger)),
+                ty: Box::new(translate_augvalexpr(*ty, env, env2, dlogger)),
+                pat: Box::new(translate_augpatexpr(*val, env, env2, dlogger)),
             },
         },
         val => {
@@ -148,12 +163,13 @@ fn translate_augpatexpr(
 
 fn translate_caseexpr(
     c: ast::CaseExpr,
-    env: &mut Environment,
+    env: &mut VariableResolutionEnvironment,
+    env2: &mut Environment,
     dlogger: &mut DiagnosticLogger,
 ) -> (Augmented<PatExpr>, Augmented<ValExpr>) {
     (
-        translate_augpatexpr(*c.target, env, dlogger),
-        translate_augvalexpr(*c.body, env, dlogger),
+        translate_augpatexpr(*c.target, env, env2, dlogger),
+        translate_augvalexpr(*c.body, env, env2, dlogger),
     )
 }
 
@@ -161,11 +177,12 @@ fn translate_augvalloopexpr(
     body: Box<ast::Augmented<ast::Expr>>,
     label: Option<ast::Label>,
     range: Range,
-    env: &mut Environment,
+    env: &mut VariableResolutionEnvironment,
+    env2: &mut Environment,
     dlogger: &mut DiagnosticLogger,
 ) -> Augmented<ValExpr> {
     let label = match label {
-        Some(label) => match env.introduce_label(label) {
+        Some(label) => match env.introduce_label(label, env2) {
             Some((i, _)) => Some(i),
             _ => {
                 return Augmented {
@@ -177,7 +194,7 @@ fn translate_augvalloopexpr(
         None => None,
     };
 
-    let body = Box::new(translate_augvalexpr(*body, env, dlogger));
+    let body = Box::new(translate_augvalexpr(*body, env, env2, dlogger));
 
     if label.is_some() {
         env.unintroduce_label();
@@ -194,11 +211,12 @@ fn translate_augvalblockexpr(
     trailing_semicolon: bool,
     range: Range,
     label: Option<ast::Label>,
-    env: &mut Environment,
+    env: &mut VariableResolutionEnvironment,
+    env2: &mut Environment,
     dlogger: &mut DiagnosticLogger,
 ) -> Augmented<ValExpr> {
     let label = match label {
-        Some(label) => Some(match env.introduce_label(label) {
+        Some(label) => Some(match env.introduce_label(label, env2) {
             Some((i, _)) => i,
             _ => {
                 return Augmented {
@@ -214,7 +232,7 @@ fn translate_augvalblockexpr(
     env.push_block_scope();
     let mut statements: Vec<Augmented<BlockStatement>> = statements
         .into_iter()
-        .map(|x| translate_augblockstatement(x, env, dlogger))
+        .map(|x| translate_augblockstatement(x, env, env2, dlogger))
         .collect();
     // end scope
     env.pop_block_scope();
@@ -254,7 +272,8 @@ fn translate_augvalblockexpr(
 
 fn translate_augplaceexpr(
     ast::Augmented { range, val, .. }: ast::Augmented<ast::Expr>,
-    env: &mut Environment,
+    env: &mut VariableResolutionEnvironment,
+    env2: &mut Environment,
     dlogger: &mut DiagnosticLogger,
 ) -> Augmented<PlaceExpr> {
     match val {
@@ -275,28 +294,10 @@ fn translate_augplaceexpr(
                 }
             },
         },
-        ast::Expr::Deref(v) => Augmented {
-            range,
-            val: PlaceExpr::Deref(Box::new(translate_augvalexpr(
-                ast::Augmented {
-                    range,
-                    val: ast::Expr::Deref(v),
-                },
-                env,
-                dlogger,
-            ))),
-        },
-        ast::Expr::ArrayAccess { root, index } => Augmented {
-            range,
-            val: PlaceExpr::ArrayAccess {
-                root: Box::new(translate_augvalexpr(*root, env, dlogger)),
-                index: Box::new(translate_augvalexpr(*index, env, dlogger)),
-            },
-        },
         ast::Expr::FieldAccess { root, field } => Augmented {
             range,
             val: PlaceExpr::FieldAccess {
-                root: Box::new(translate_augplaceexpr(*root, env, dlogger)),
+                root: Box::new(translate_augplaceexpr(*root, env, env2, dlogger)),
                 field,
             },
         },
@@ -312,7 +313,8 @@ fn translate_augplaceexpr(
 
 fn translate_augvalexpr(
     ast::Augmented { range, val }: ast::Augmented<ast::Expr>,
-    env: &mut Environment,
+    env: &mut VariableResolutionEnvironment,
+    env2: &mut Environment,
     dlogger: &mut DiagnosticLogger,
 ) -> Augmented<ValExpr> {
     match val {
@@ -325,7 +327,7 @@ fn translate_augvalexpr(
             val: ValExpr::Hole,
         },
         // ast::Expr::Kinded { pat, kind }
-        ast::Expr::Annotated { value, .. } => translate_augvalexpr(*value, env, dlogger),
+        ast::Expr::Annotated { value, .. } => translate_augvalexpr(*value, env, env2, dlogger),
         ast::Expr::Int(i) => Augmented {
             range,
             val: ValExpr::Int { value: i },
@@ -345,24 +347,72 @@ fn translate_augvalexpr(
         ast::Expr::Ref(v) => Augmented {
             range,
             val: ValExpr::Use(
-                Box::new(translate_augplaceexpr(*v, env, dlogger)),
+                Box::new(translate_augplaceexpr(*v, env, env2, dlogger)),
                 UseKind::Borrow,
             ),
         },
         ast::Expr::Mutref(v) => Augmented {
             range,
             val: ValExpr::Use(
-                Box::new(translate_augplaceexpr(*v, env, dlogger)),
+                Box::new(translate_augplaceexpr(*v, env, env2, dlogger)),
                 UseKind::MutBorrow,
             ),
         },
         ast::Expr::Copy(v) => Augmented {
             range,
-            // TODO change this to a copy
-            val: ValExpr::Use(
-                Box::new(translate_augplaceexpr(*v, env, dlogger)),
-                UseKind::Move,
-            ),
+            val: ValExpr::App {
+                fun: Box::new(Augmented {
+                    range,
+                    val: ValExpr::App {
+                        fun: Box::new(Augmented {
+                            range,
+                            val: ValExpr::Builtin {
+                                builtin: Builtin::Copy,
+                                level: 0,
+                            },
+                        }),
+                        args: vec![Augmented {
+                            range,
+                            val: ValExpr::Hole,
+                        }],
+                    },
+                }),
+                args: vec![Augmented {
+                    range,
+                    val: ValExpr::Use(
+                        Box::new(translate_augplaceexpr(*v, env, env2, dlogger)),
+                        UseKind::Borrow,
+                    ),
+                }],
+            },
+        },
+        ast::Expr::Reborrow(v) => Augmented {
+            range,
+            val: ValExpr::App {
+                fun: Box::new(Augmented {
+                    range,
+                    val: ValExpr::App {
+                        fun: Box::new(Augmented {
+                            range,
+                            val: ValExpr::Builtin {
+                                builtin: Builtin::Reborrow,
+                                level: 0,
+                            },
+                        }),
+                        args: vec![Augmented {
+                            range,
+                            val: ValExpr::Hole,
+                        }],
+                    },
+                }),
+                args: vec![Augmented {
+                    range,
+                    val: ValExpr::Use(
+                        Box::new(translate_augplaceexpr(*v, env, env2, dlogger)),
+                        UseKind::MutBorrow,
+                    ),
+                }],
+            },
         },
         ast::Expr::Deref(v) => Augmented {
             range,
@@ -373,6 +423,7 @@ fn translate_augvalexpr(
                         val: ast::Expr::Deref(v),
                     },
                     env,
+                    env2,
                     dlogger,
                 )),
                 UseKind::Move,
@@ -381,8 +432,8 @@ fn translate_augvalexpr(
         ast::Expr::StructLiteral(items) => Augmented {
             range,
             val: ValExpr::StructLiteral(translate_augstructitemexpr(
-                |x, env, dlogger| translate_augvalexpr(x, env, dlogger),
-                |id, env, dlogger| {
+                |x, env, env2, dlogger| translate_augvalexpr(x, env, env2, dlogger),
+                |id, env, _, dlogger| {
                     ValExpr::Use(
                         Box::new(Augmented {
                             range,
@@ -392,6 +443,7 @@ fn translate_augvalexpr(
                     )
                 },
                 env,
+                env2,
                 dlogger,
                 items,
             )),
@@ -403,20 +455,38 @@ fn translate_augvalexpr(
         } => {
             let val = match op {
                 ast::ValBinaryOpKind::Pipe => ValExpr::App {
-                    fun: Box::new(translate_augvalexpr(*right_operand, env, dlogger)),
-                    args: vec![translate_augvalexpr(*left_operand, env, dlogger)],
+                    fun: Box::new(translate_augvalexpr(*right_operand, env, env2, dlogger)),
+                    args: vec![translate_augvalexpr(*left_operand, env, env2, dlogger)],
                 },
-                ast::ValBinaryOpKind::Assign => ValExpr::Assign {
-                    target: Box::new(translate_augplaceexpr(*left_operand, env, dlogger)),
-                    value: Box::new(translate_augvalexpr(*right_operand, env, dlogger)),
+                ast::ValBinaryOpKind::Assign => ValExpr::App {
+                    fun: Box::new(Augmented {
+                        range,
+                        val: ValExpr::App {
+                            fun: Box::new(Augmented {
+                                range,
+                                val: ValExpr::Builtin {
+                                    builtin: Builtin::Assign,
+                                    level: 0,
+                                },
+                            }),
+                            args: vec![Augmented {
+                                range,
+                                val: ValExpr::Hole,
+                            }],
+                        },
+                    }),
+                    args: vec![
+                        translate_augvalexpr(*left_operand, env, env2, dlogger),
+                        translate_augvalexpr(*right_operand, env, env2, dlogger),
+                    ],
                 },
                 ast::ValBinaryOpKind::And => ValExpr::And {
-                    left: Box::new(translate_augvalexpr(*left_operand, env, dlogger)),
-                    right: Box::new(translate_augvalexpr(*right_operand, env, dlogger)),
+                    left: Box::new(translate_augvalexpr(*left_operand, env, env2, dlogger)),
+                    right: Box::new(translate_augvalexpr(*right_operand, env, env2, dlogger)),
                 },
                 ast::ValBinaryOpKind::Or => ValExpr::Or {
-                    left: Box::new(translate_augvalexpr(*left_operand, env, dlogger)),
-                    right: Box::new(translate_augvalexpr(*right_operand, env, dlogger)),
+                    left: Box::new(translate_augvalexpr(*left_operand, env, env2, dlogger)),
+                    right: Box::new(translate_augvalexpr(*right_operand, env, env2, dlogger)),
                 },
                 ast::ValBinaryOpKind::Range | ast::ValBinaryOpKind::RangeInclusive => {
                     dlogger.log_range_in_expression(range);
@@ -439,11 +509,11 @@ fn translate_augvalexpr(
                     let place = Augmented {
                         range,
                         val: ValExpr::Use(
-                            Box::new(translate_augplaceexpr(*left_operand, env, dlogger)),
+                            Box::new(translate_augplaceexpr(*left_operand, env, env2, dlogger)),
                             UseKind::Move,
                         ),
                     };
-                    let value = translate_augvalexpr(*right_operand, env, dlogger);
+                    let value = translate_augvalexpr(*right_operand, env, env2, dlogger);
                     ValExpr::App {
                         fun: Box::new(Augmented {
                             range,
@@ -500,8 +570,8 @@ fn translate_augvalexpr(
                         _ => unreachable!(),
                     };
 
-                    let left = translate_augvalexpr(*left_operand, env, dlogger);
-                    let right = translate_augvalexpr(*right_operand, env, dlogger);
+                    let left = translate_augvalexpr(*left_operand, env, env2, dlogger);
+                    let right = translate_augvalexpr(*right_operand, env, env2, dlogger);
 
                     ValExpr::App {
                         fun: Box::new(Augmented {
@@ -535,15 +605,64 @@ fn translate_augvalexpr(
                         args: vec![left, right],
                     }
                 }
+                ast::ValBinaryOpKind::Ascribe => {
+                    let value = Box::new(translate_augvalexpr(*left_operand, env, env2, dlogger));
+                    let ty = Box::new(translate_augvalexpr(*right_operand, env, env2, dlogger));
+                    ValExpr::Typed { value, ty }
+                }
+                ast::ValBinaryOpKind::RevAscribe => {
+                    let ty = Box::new(translate_augvalexpr(*left_operand, env, env2, dlogger));
+                    let value = Box::new(translate_augvalexpr(*right_operand, env, env2, dlogger));
+                    ValExpr::Typed { value, ty }
+                }
+                ast::ValBinaryOpKind::Lambda => {
+                    // introduce new type and val scope
+                    env.push_fn_scope();
+
+                    // insert params into scope
+                    let mut params: Vec<Augmented<PatExpr>> = params
+                        .into_iter()
+                        .map(|x| translate_augpatexpr(x, env, env2, dlogger))
+                        .collect();
+
+                    let mut body = Box::new(translate_augvalexpr(*body, env, env2, dlogger));
+
+                    // end type and val scope
+                    env.pop_fn_scope();
+
+                    let mut find_env = FindCapturedVarEnvironment::new();
+
+                    // find captured variables and their use kind
+                    for param in params.iter() {
+                        find_captured_patexpr(param, &mut find_env);
+                    }
+                    find_captured_valexpr(&body, &mut find_env);
+
+                    // allocate new ids for captured variables
+                    let rewrite_env = RewriteCapturedVarEnvironment::new(find_env, env, env2);
+
+                    // rewrite to use captured variables
+                    for param in params.iter_mut() {
+                        rewrite_captured_patexpr(param, &rewrite_env);
+                    }
+                    rewrite_captured_valexpr(&mut body, &rewrite_env);
+
+                    ValExpr::Lam {
+                        params,
+                        body,
+                        captures: rewrite_env.to_captured(),
+                    }
+                }
+                ast::ValBinaryOpKind::PiType => todo!(),
             };
 
             Augmented { range, val }
         }
         ast::Expr::CaseOf { expr, cases } => {
-            let expr = Box::new(translate_augvalexpr(*expr, env, dlogger));
+            let expr = Box::new(translate_augvalexpr(*expr, env, env2, dlogger));
             let cases = cases
                 .into_iter()
-                .map(|x| translate_caseexpr(x.val, env, dlogger))
+                .map(|x| translate_caseexpr(x.val, env, env2, dlogger))
                 .collect();
             Augmented {
                 range,
@@ -564,19 +683,27 @@ fn translate_augvalexpr(
             Augmented {
                 range,
                 val: ValExpr::Ret {
-                    value: Box::new(translate_augvalexpr(*value, env, dlogger)),
+                    value: Box::new(translate_augvalexpr(*value, env, env2, dlogger)),
                     label,
                 },
             }
         }
-        ast::Expr::Loop { body } => translate_augvalloopexpr(body, None, range, env, dlogger),
+        ast::Expr::Loop { body } => translate_augvalloopexpr(body, None, range, env, env2, dlogger),
         ast::Expr::Block {
             statements,
             trailing_semicolon,
-        } => translate_augvalblockexpr(statements, trailing_semicolon, range, None, env, dlogger),
+        } => translate_augvalblockexpr(
+            statements,
+            trailing_semicolon,
+            range,
+            None,
+            env,
+            env2,
+            dlogger,
+        ),
         ast::Expr::Labeled { label, value } => match value.val {
             ast::Expr::Loop { body } => {
-                translate_augvalloopexpr(body, Some(label), range, env, dlogger)
+                translate_augvalloopexpr(body, Some(label), range, env, env2, dlogger)
             }
             ast::Expr::Block {
                 statements,
@@ -587,6 +714,7 @@ fn translate_augvalexpr(
                 range,
                 Some(label),
                 env,
+                env2,
                 dlogger,
             ),
             _ => {
@@ -604,13 +732,13 @@ fn translate_augvalexpr(
                 }
             }
         },
-        ast::Expr::Group(v) => translate_augvalexpr(*v, env, dlogger),
+        ast::Expr::GroupOrParams(v) => translate_augvalexpr(*v, env, env2, dlogger),
         ast::Expr::Array(items) => Augmented {
             range,
             val: ValExpr::ArrayLiteral(
                 items
                     .into_iter()
-                    .map(|x| translate_augvalexpr(x, env, dlogger))
+                    .map(|x| translate_augvalexpr(x, env, env2, dlogger))
                     .collect(),
             ),
         },
@@ -629,99 +757,72 @@ fn translate_augvalexpr(
                         },
                     },
                     env,
+                    env2,
                     dlogger,
                 )),
                 UseKind::Move,
             ),
         },
-        ast::Expr::FnDef { params, body } => {
-            // introduce new type and val scope
-            env.push_fn_scope();
-
-            // insert params into scope
-            let mut params: Vec<Augmented<PatExpr>> = params
-                .into_iter()
-                .map(|x| translate_augpatexpr(x, env, dlogger))
-                .collect();
-
-            let mut body = Box::new(translate_augvalexpr(*body, env, dlogger));
-
-            // end type and val scope
-            env.pop_fn_scope();
-
-            let mut find_env = FindCapturedVarEnv::new();
-
-            // find captured variables and their use kind
-            for param in params.iter() {
-                find_captured_patexpr(param, &mut find_env);
-            }
-            find_captured_valexpr(&body, &mut find_env);
-
-            // allocate new ids for captured variables
-            let rewrite_env = RewriteCapturedVarEnv::new(find_env, env);
-
-            // rewrite to use captured variables
-            for param in params.iter_mut() {
-                rewrite_captured_patexpr(param, &rewrite_env);
-            }
-            rewrite_captured_valexpr(&mut body, &rewrite_env);
-
-            Augmented {
-                range,
-                val: ValExpr::Lam {
-                    params,
-                    body,
-                    captures: rewrite_env.to_captured(),
-                },
-            }
-        }
-        ast::Expr::FnTy {
-            param_tys: paramtys,
-            dep_return_ty: returnty,
-        } => Augmented {
-            range,
-            val: ValExpr::FnTy {
-                param_tys: paramtys
-                    .into_iter()
-                    .map(|x| translate_augvalexpr(x, env, dlogger))
-                    .collect(),
-                dep_ty: Box::new(translate_augvalexpr(*returnty, env, dlogger)),
-            },
-        },
         ast::Expr::App { root, args } => Augmented {
             range,
             val: ValExpr::App {
-                fun: Box::new(translate_augvalexpr(*root, env, dlogger)),
+                fun: Box::new(translate_augvalexpr(*root, env, env2, dlogger)),
                 args: args
                     .into_iter()
-                    .map(|x| translate_augvalexpr(x, env, dlogger))
+                    .map(|x| translate_augvalexpr(x, env, env2, dlogger))
                     .collect(),
             },
         },
         ast::Expr::ArrayAccess { root, index } => Augmented {
             range,
-            val: ValExpr::Use(
-                Box::new(translate_augplaceexpr(
-                    ast::Augmented {
-                        range,
-                        val: ast::Expr::ArrayAccess { root, index },
+            val: ValExpr::App {
+                fun: Box::new(Augmented {
+                    range,
+                    val: ValExpr::FieldAccess {
+                        root: Box::new(Augmented {
+                            range,
+                            val: ValExpr::Typed {
+                                value: Box::new(Augmented {
+                                    range,
+                                    val: ValExpr::Hole,
+                                }),
+                                ty: Box::new(Augmented {
+                                    range,
+                                    val: ValExpr::App {
+                                        fun: Box::new(Augmented {
+                                            range,
+                                            val: ValExpr::Builtin {
+                                                builtin: Builtin::IndexTrait,
+                                                level: 0,
+                                            },
+                                        }),
+                                        args: vec![Augmented {
+                                            range,
+                                            val: ValExpr::Hole,
+                                        }],
+                                    },
+                                }),
+                            },
+                        }),
+                        field: "get".to_string(),
                     },
-                    env,
-                    dlogger,
-                )),
-                UseKind::Move,
-            ),
+                }),
+                args: vec![
+                    translate_augvalexpr(*root, env, env2, dlogger),
+                    translate_augvalexpr(*index, env, env2, dlogger),
+                ],
+            },
         },
         ast::Expr::FieldAccess { root, field } => Augmented {
             range,
             val: ValExpr::FieldAccess {
-                root: Box::new(translate_augvalexpr(*root, env, dlogger)),
+                root: Box::new(translate_augvalexpr(*root, env, env2, dlogger)),
                 field,
             },
         },
         ast::Expr::New { ty, val } => {
-            let ty = Box::new(translate_augvalexpr(*ty, env, dlogger));
-            let val = Box::new(translate_augvalexpr(*val, env, dlogger));
+            let ty = Box::new(translate_augvalexpr(*ty, env, env2, dlogger));
+            let val = Box::new(translate_augvalexpr(*val, env, env2, dlogger));
             Augmented {
                 range,
                 val: ValExpr::New { ty, val },
@@ -731,7 +832,7 @@ fn translate_augvalexpr(
             range,
             val: ValExpr::Struct(translate_augstructitemexpr(
                 translate_augvalexpr,
-                |id, env, dlogger| {
+                |id, env, _, dlogger| {
                     ValExpr::Use(
                         Box::new(Augmented {
                             range,
@@ -741,6 +842,7 @@ fn translate_augvalexpr(
                     )
                 },
                 env,
+                env2,
                 dlogger,
                 items,
             )),
@@ -749,7 +851,7 @@ fn translate_augvalexpr(
             range,
             val: ValExpr::Enum(translate_augstructitemexpr(
                 translate_augvalexpr,
-                |id, env, dlogger| {
+                |id, env, _, dlogger| {
                     ValExpr::Use(
                         Box::new(Augmented {
                             range,
@@ -759,6 +861,7 @@ fn translate_augvalexpr(
                     )
                 },
                 env,
+                env2,
                 dlogger,
                 items,
             )),
@@ -767,7 +870,7 @@ fn translate_augvalexpr(
             range,
             val: ValExpr::Union(translate_augstructitemexpr(
                 translate_augvalexpr,
-                |id, env, dlogger| {
+                |id, env, _, dlogger| {
                     ValExpr::Use(
                         Box::new(Augmented {
                             range,
@@ -777,6 +880,7 @@ fn translate_augvalexpr(
                     )
                 },
                 env,
+                env2,
                 dlogger,
                 items,
             )),
@@ -785,29 +889,13 @@ fn translate_augvalexpr(
             range,
             val: ValExpr::Extern {
                 name: name.clone(),
-                ty: Box::new(translate_augvalexpr(*ty, env, dlogger)),
+                ty: Box::new(translate_augvalexpr(*ty, env, env2, dlogger)),
             },
         },
-        ast::Expr::ReverseTyped { pat, ty } => {
-            let value = Box::new(translate_augvalexpr(*pat, env, dlogger));
-            let ty = Box::new(translate_augvalexpr(*ty, env, dlogger));
-            Augmented {
-                range,
-                val: ValExpr::Typed { value, ty },
-            }
-        }
-        ast::Expr::Typed { pat, ty } => {
-            let value = Box::new(translate_augvalexpr(*pat, env, dlogger));
-            let ty = Box::new(translate_augvalexpr(*ty, env, dlogger));
-            Augmented {
-                range,
-                val: ValExpr::Typed { value, ty },
-            }
-        }
     }
 }
 
-struct FindCapturedVarEnv {
+struct FindCapturedVarEnvironment {
     // variables that we need to capture, and their use kind
     captured: HashMap<usize, UseKind>,
     // contains variables that were bound inside the body, and so don't need to be captured
@@ -816,9 +904,9 @@ struct FindCapturedVarEnv {
     bound: HashSet<usize>,
 }
 
-impl FindCapturedVarEnv {
+impl FindCapturedVarEnvironment {
     fn new() -> Self {
-        FindCapturedVarEnv {
+        FindCapturedVarEnvironment {
             captured: HashMap::new(),
             bound: HashSet::new(),
         }
@@ -840,7 +928,7 @@ impl FindCapturedVarEnv {
     }
 }
 
-fn find_captured_patexpr(pat: &Augmented<PatExpr>, env: &mut FindCapturedVarEnv) {
+fn find_captured_patexpr(pat: &Augmented<PatExpr>, env: &mut FindCapturedVarEnvironment) {
     match &pat.val {
         PatExpr::Identifier(id) => env.bind_var(*id),
         PatExpr::Ignore => {}
@@ -864,7 +952,7 @@ fn find_captured_patexpr(pat: &Augmented<PatExpr>, env: &mut FindCapturedVarEnv)
     }
 }
 
-fn find_captured_valexpr(val: &Augmented<ValExpr>, env: &mut FindCapturedVarEnv) {
+fn find_captured_valexpr(val: &Augmented<ValExpr>, env: &mut FindCapturedVarEnvironment) {
     match val.val {
         ValExpr::Use(ref place, ref role) => {
             find_captured_placeexpr(place, env, role.clone());
@@ -951,13 +1039,6 @@ fn find_captured_valexpr(val: &Augmented<ValExpr>, env: &mut FindCapturedVarEnv)
             find_captured_valexpr(left, env);
             find_captured_valexpr(right, env);
         }
-        ValExpr::Assign {
-            ref target,
-            ref value,
-        } => {
-            find_captured_placeexpr(target, env, UseKind::MutBorrow);
-            find_captured_valexpr(value, env);
-        }
         ValExpr::FieldAccess { ref root, .. } => {
             find_captured_valexpr(root, env);
         }
@@ -991,22 +1072,15 @@ fn find_captured_valexpr(val: &Augmented<ValExpr>, env: &mut FindCapturedVarEnv)
 
 fn find_captured_placeexpr(
     place: &Augmented<PlaceExpr>,
-    env: &mut FindCapturedVarEnv,
+    env: &mut FindCapturedVarEnvironment,
     role: UseKind,
 ) {
     match place.val {
         PlaceExpr::Var(id) => {
             env.capture_var_if_needed(id, role);
         }
-        PlaceExpr::Deref(ref v) => {
-            find_captured_valexpr(v, env);
-        }
-        PlaceExpr::ArrayAccess {
-            ref root,
-            ref index,
-        } => {
-            find_captured_valexpr(root, env);
-            find_captured_valexpr(index, env);
+        PlaceExpr::DeBrujinVar { .. } => {
+            unreachable!("should not have debruijn vars at this point")
         }
         PlaceExpr::FieldAccess { ref root, .. } => {
             find_captured_placeexpr(root, env, role);
@@ -1015,7 +1089,7 @@ fn find_captured_placeexpr(
     }
 }
 
-struct RewriteCapturedVarEnv {
+struct RewriteCapturedVarEnvironment {
     captured: HashMap<usize, (usize, UseKind)>,
 }
 
@@ -1023,13 +1097,17 @@ enum Action {
     Copy,
 }
 
-impl RewriteCapturedVarEnv {
-    fn new(FindCapturedVarEnv { captured, .. }: FindCapturedVarEnv, env: &mut Environment) -> Self {
-        RewriteCapturedVarEnv {
+impl RewriteCapturedVarEnvironment {
+    fn new(
+        FindCapturedVarEnvironment { captured, .. }: FindCapturedVarEnvironment,
+        env: &mut VariableResolutionEnvironment,
+        env2: &mut Environment,
+    ) -> Self {
+        RewriteCapturedVarEnvironment {
             captured: captured
                 .into_iter()
                 .map(|(id, kind)| {
-                    let new_id = env.introduce_captured_var(id);
+                    let new_id = env.introduce_captured_var(id, env2);
                     (id, (new_id, kind))
                 })
                 .collect(),
@@ -1060,7 +1138,7 @@ impl RewriteCapturedVarEnv {
     }
 }
 
-fn rewrite_captured_patexpr(pat: &mut Augmented<PatExpr>, env: &RewriteCapturedVarEnv) {
+fn rewrite_captured_patexpr(pat: &mut Augmented<PatExpr>, env: &RewriteCapturedVarEnvironment) {
     match &mut pat.val {
         PatExpr::Identifier { .. } => {}
         PatExpr::Ignore => {}
@@ -1084,11 +1162,131 @@ fn rewrite_captured_patexpr(pat: &mut Augmented<PatExpr>, env: &RewriteCapturedV
     }
 }
 
-fn rewrite_captured_valexpr(val: &mut Augmented<ValExpr>, env: &RewriteCapturedVarEnv) {
-    match &mut val.val {
-        ValExpr::Use(place, ref role) => {
-            todo!()
-        }
+fn rewrite_captured_valexpr(
+    Augmented { range, val }: &mut Augmented<ValExpr>,
+    env: &RewriteCapturedVarEnvironment,
+) {
+    let range = range.clone();
+    match val {
+        ValExpr::Use(place, ref role) => match rewrite_captured_placeexpr(place, env) {
+            // make no changes if not captured
+            None => {}
+            // when moving, everything stays the same
+            Some(UseKind::Move) => {}
+            // when mutably borrowing, convert mutable borrows to reborrows, and borrows to reborrows + downcast
+            Some(UseKind::MutBorrow) => {
+                let role = role.clone();
+                let place = place.clone();
+                *val = match role {
+                    UseKind::Move => unreachable!(
+                        "move is not permitted when the capture is only mutably borrowed"
+                    ),
+                    // x! -> @reborrow(_)(x_captured!)
+                    UseKind::MutBorrow => ValExpr::App {
+                        fun: Box::new(Augmented {
+                            range,
+                            val: ValExpr::App {
+                                fun: Box::new(Augmented {
+                                    range,
+                                    val: ValExpr::Builtin {
+                                        builtin: Builtin::Reborrow,
+                                        level: 0,
+                                    },
+                                }),
+                                args: vec![Augmented {
+                                    range,
+                                    val: ValExpr::Hole,
+                                }],
+                            },
+                        }),
+                        args: vec![Augmented {
+                            range,
+                            val: ValExpr::Use(place, UseKind::MutBorrow),
+                        }],
+                    },
+                    //x& -> @readonly(_)(@reborrow(_)(x_captured!))
+                    UseKind::Borrow => ValExpr::App {
+                        fun: Box::new(Augmented {
+                            range,
+                            val: ValExpr::App {
+                                fun: Box::new(Augmented {
+                                    range,
+                                    val: ValExpr::Builtin {
+                                        builtin: Builtin::Readonly,
+                                        level: 0,
+                                    },
+                                }),
+                                args: vec![Augmented {
+                                    range,
+                                    val: ValExpr::Hole,
+                                }],
+                            },
+                        }),
+                        args: vec![Augmented {
+                            range,
+                            val: ValExpr::App {
+                                fun: Box::new(Augmented {
+                                    range,
+                                    val: ValExpr::App {
+                                        fun: Box::new(Augmented {
+                                            range,
+                                            val: ValExpr::Builtin {
+                                                builtin: Builtin::Reborrow,
+                                                level: 0,
+                                            },
+                                        }),
+                                        args: vec![Augmented {
+                                            range,
+                                            val: ValExpr::Hole,
+                                        }],
+                                    },
+                                }),
+                                args: vec![Augmented {
+                                    range,
+                                    val: ValExpr::Use(place, UseKind::MutBorrow),
+                                }],
+                            },
+                        }],
+                    },
+                }
+            }
+            // when borrowing, convert borrows to copies
+            Some(UseKind::Borrow) => {
+                let role = role.clone();
+                let place = place.clone();
+                *val = match role {
+                    UseKind::Move => {
+                        unreachable!("move is not permitted when the capture is only borrowed")
+                    }
+                    UseKind::MutBorrow => unreachable!(
+                        "mutably borrowing is not permitted when the capture is only borrowed"
+                    ),
+                    // x& -> @copy(_)(x_captured&)
+                    UseKind::Borrow => ValExpr::App {
+                        fun: Box::new(Augmented {
+                            range,
+                            val: ValExpr::App {
+                                fun: Box::new(Augmented {
+                                    range,
+                                    val: ValExpr::Builtin {
+                                        builtin: Builtin::Copy,
+                                        level: 0,
+                                    },
+                                }),
+                                args: vec![Augmented {
+                                    range,
+                                    val: ValExpr::Hole,
+                                }],
+                            },
+                        }),
+                        args: vec![Augmented {
+                            range,
+                            val: ValExpr::Use(place, UseKind::Borrow),
+                        }],
+                    },
+                }
+            }
+        },
         ValExpr::Block { statements, .. } => {
             for statement in statements {
                 match &mut statement.val {
@@ -1162,10 +1360,6 @@ fn rewrite_captured_valexpr(val: &mut Augmented<ValExpr>, env: &RewriteCapturedV
             rewrite_captured_valexpr(left, env);
             rewrite_captured_valexpr(right, env);
         }
-        ValExpr::Assign { target, value } => {
-            rewrite_captured_placeexpr(target, env);
-            rewrite_captured_valexpr(value, env);
-        }
         ValExpr::FieldAccess { root, .. } => {
             rewrite_captured_valexpr(root, env);
         }
@@ -1194,26 +1388,30 @@ fn rewrite_captured_valexpr(val: &mut Augmented<ValExpr>, env: &RewriteCapturedV
     }
 }
 
-fn rewrite_captured_placeexpr(place: &mut Augmented<PlaceExpr>, env: &RewriteCapturedVarEnv) {
+fn rewrite_captured_placeexpr(
+    place: &mut Augmented<PlaceExpr>,
+    env: &RewriteCapturedVarEnvironment,
+) -> Option<UseKind> {
     match &mut place.val {
-        PlaceExpr::Var(_) => {}
-        PlaceExpr::Deref(v) => {
-            rewrite_captured_valexpr(v, env);
+        PlaceExpr::Var(id) => match env.captured.get(&id) {
+            Some((new_id, role)) => {
+                *id = *new_id;
+                Some(role.clone())
+            }
+            None => None,
+        },
+        PlaceExpr::DeBrujinVar { .. } => {
+            unreachable!("should not have debruijn vars at this point")
         }
-        PlaceExpr::ArrayAccess { root, index } => {
-            rewrite_captured_valexpr(root, env);
-            rewrite_captured_valexpr(index, env);
-        }
-        PlaceExpr::FieldAccess { root, .. } => {
-            rewrite_captured_placeexpr(root, env);
-        }
-        PlaceExpr::Error => {}
+        PlaceExpr::FieldAccess { root, .. } => rewrite_captured_placeexpr(root, env),
+        PlaceExpr::Error => None,
     }
 }
 
 fn translate_augblockstatement(
     ast::Augmented { range, val }: ast::Augmented<ast::BlockStatement>,
-    env: &mut Environment,
+    env: &mut VariableResolutionEnvironment,
+    env2: &mut Environment,
     dlogger: &mut DiagnosticLogger,
 ) -> Augmented<BlockStatement> {
     match val {
@@ -1223,10 +1421,10 @@ fn translate_augblockstatement(
         },
         ast::BlockStatement::Let { pat, value } => {
             // first parse value so that we don't accidentally introduce the name of the val before the value
-            let value = Box::new(translate_augvalexpr(*value, env, dlogger));
+            let value = Box::new(translate_augvalexpr(*value, env, env2, dlogger));
 
             // now introduce name
-            let pat = Box::new(translate_augpatexpr(*pat, env, dlogger));
+            let pat = Box::new(translate_augpatexpr(*pat, env, env2, dlogger));
 
             Augmented {
                 range,
@@ -1242,27 +1440,28 @@ fn translate_augblockstatement(
         }
         ast::BlockStatement::Do(v) => Augmented {
             range,
-            val: BlockStatement::Do(Box::new(translate_augvalexpr(*v, env, dlogger))),
+            val: BlockStatement::Do(Box::new(translate_augvalexpr(*v, env, env2, dlogger))),
         },
         ast::BlockStatement::Annotated { value, .. } => {
-            translate_augblockstatement(*value, env, dlogger)
+            translate_augblockstatement(*value, env, env2, dlogger)
         }
     }
 }
 
 pub fn translate_augfilestatement(
     ast::Augmented { range, val, .. }: ast::Augmented<ast::FileStatement>,
-    env: &mut Environment,
+    env: &mut VariableResolutionEnvironment,
+    env2: &mut Environment,
     dlogger: &mut DiagnosticLogger,
 ) -> Vec<Augmented<FileStatement>> {
     match val {
         ast::FileStatement::Error => vec![],
         ast::FileStatement::Let { pat, value } => {
             // first parse value so that we don't accidentally introduce the name of the val before the value
-            let value = Box::new(translate_augvalexpr(*value, env, dlogger));
+            let value = Box::new(translate_augvalexpr(*value, env, env2, dlogger));
 
             // now introduce name
-            let pat = Box::new(translate_augpatexpr(*pat, env, dlogger));
+            let pat = Box::new(translate_augpatexpr(*pat, env, env2, dlogger));
 
             vec![Augmented {
                 val: FileStatement::Let { pat, value },
@@ -1285,7 +1484,7 @@ pub fn translate_augfilestatement(
                 env.namespaces.last_mut().unwrap().push(identifier.clone());
                 // translate items
                 for item in items {
-                    out_items.extend(translate_augfilestatement(item, env, dlogger));
+                    out_items.extend(translate_augfilestatement(item, env, env2, dlogger));
                 }
                 // pop prefix
                 env.namespaces.last_mut().unwrap().pop();
@@ -1299,7 +1498,185 @@ pub fn translate_augfilestatement(
             out_items
         }
         ast::FileStatement::Annotated { value, .. } => {
-            translate_augfilestatement(*value, env, dlogger)
+            translate_augfilestatement(*value, env, env2, dlogger)
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub enum Name {
+    Var(usize),
+    Namespace(Vec<(String, Name)>),
+}
+
+pub struct VariableResolutionEnvironment {
+    // namespaces that we are nested in
+    namespaces: Vec<Vec<String>>,
+    // these are the names that are in scope
+    names_in_scope: Vec<Vec<(String, Name)>>,
+
+    // these are the labels that are in scope
+    labels_in_scope: Vec<Vec<(String, usize)>>,
+}
+
+impl VariableResolutionEnvironment {
+    fn introduce_identifier(
+        &mut self,
+        ast::Identifier { identifier, range }: ast::Identifier,
+        modifier: ast::IdentifierModifier,
+        env: &mut Environment,
+    ) -> Option<(usize, String)> {
+        match identifier {
+            Some(identifier) => {
+                let id = env.id_name_table.len();
+                let scope = self.names_in_scope.last_mut().unwrap();
+                scope.push((identifier.clone(), Name::Var(id)));
+                env.id_name_table.push(
+                    [
+                        self.namespaces.last().unwrap(),
+                        [identifier.clone()].as_slice(),
+                    ]
+                    .concat(),
+                );
+                env.id_range_table.push(range);
+                env.id_modifier_table.push(modifier);
+                Some((id, identifier))
+            }
+            None => None,
+        }
+    }
+
+    fn introduce_captured_var(&mut self, original_id: usize, env: &mut Environment) -> usize {
+        let id = env.id_name_table.len();
+        env.id_name_table
+            .push(vec![format!("captured_var_{}", original_id)]);
+        env.id_range_table.push(env.id_range_table[id].clone());
+        env.id_modifier_table
+            .push(env.id_modifier_table[id].clone());
+
+        id
+    }
+
+    fn introduce_label(
+        &mut self,
+        ast::Label { label, range }: ast::Label,
+        env: &mut Environment,
+    ) -> Option<(usize, String)> {
+        match label {
+            Some(label) => {
+                let id = env.lb_name_table.len();
+                self.labels_in_scope
+                    .last_mut()
+                    .unwrap()
+                    .push((label.clone(), id));
+                env.lb_name_table.push(label.clone());
+                env.lb_range_table.push(range);
+                Some((id, label))
+            }
+            None => None,
+        }
+    }
+
+    fn unintroduce_label(&mut self) {
+        self.labels_in_scope.last_mut().unwrap().pop();
+    }
+
+    fn use_namespace(&mut self, identifier: ast::Identifier, dlogger: &mut DiagnosticLogger) {
+        match &identifier.identifier {
+            Some(identifier_name) => match self
+                .names_in_scope
+                .iter()
+                .flatten()
+                .rev()
+                .filter_map(|(_, name)| match name {
+                    Name::Namespace(v) => Some(v),
+                    _ => None,
+                })
+                .next()
+            {
+                Some(id) => {
+                    let id = id.clone();
+                    self.names_in_scope.last_mut().unwrap().extend(id);
+                }
+                None => {
+                    dlogger.log_unknown_identifier(identifier.range, identifier_name);
+                }
+            },
+            None => {}
+        }
+    }
+
+    fn lookup_identifier(
+        &self,
+        identifier: ast::Identifier,
+        dlogger: &mut DiagnosticLogger,
+    ) -> PlaceExpr {
+        match &identifier.identifier {
+            Some(identifier_name) => match self
+                .names_in_scope
+                .iter()
+                .flatten()
+                .rev()
+                .filter_map(|(_, name)| match name {
+                    Name::Var(id) => Some(PlaceExpr::Var(*id)),
+                    _ => None,
+                })
+                .next()
+            {
+                Some(v) => v,
+                None => {
+                    dlogger.log_unknown_identifier(identifier.range, identifier_name);
+                    PlaceExpr::Error
+                }
+            },
+            None => PlaceExpr::Error,
+        }
+    }
+
+    fn lookup_label(&self, label: ast::Label, dlogger: &mut DiagnosticLogger) -> Option<usize> {
+        match &label.label {
+            Some(label_name) => match self
+                .labels_in_scope
+                .last()
+                .iter()
+                .flat_map(|scope| scope.iter().rev())
+                .filter(|(name, _)| name == label_name)
+                .next()
+            {
+                Some((_, id)) => Some(*id),
+                None => {
+                    dlogger.log_unknown_label(label.range, label_name);
+                    None
+                }
+            },
+            None => None,
+        }
+    }
+
+    fn push_block_scope(&mut self) {
+        self.names_in_scope.push(vec![]);
+    }
+
+    fn pop_block_scope(&mut self) {
+        self.names_in_scope.pop();
+    }
+
+    fn push_fn_scope(&mut self) {
+        self.names_in_scope.push(vec![]);
+        self.labels_in_scope.push(vec![]);
+    }
+
+    fn pop_fn_scope(&mut self) {
+        self.names_in_scope.pop();
+        assert_eq!(self.labels_in_scope.last().unwrap().len(), 0);
+        self.labels_in_scope.pop();
+    }
+
+    pub fn new() -> Self {
+        VariableResolutionEnvironment {
+            namespaces: vec![vec![]],
+            names_in_scope: vec![vec![]],
+            labels_in_scope: vec![vec![]],
         }
     }
 }

@@ -30,7 +30,13 @@ pub enum Builtin {
     MulAssignTrait,
     DivAssignTrait,
     RemAssignTrait,
+    IndexTrait,
     // for the following, the universe is just the level
+    // Mutability intrinsics
+    Assign,
+    Copy,
+    Reborrow,
+    Readonly,
     // integer operators
     IntNeg, // [U]i -> i
     IntAdd, // [U](i, i) -> i
@@ -75,6 +81,13 @@ pub enum Builtin {
     FloatGt,  // [F](f, f) -> bool
     FloatGte, // [F](f, f) -> bool
     FloatEq,  // [F](f, f) -> bool
+    // array operators
+    ArrayIndex,
+    ArrayIndexMut,
+    // slice operators
+    SliceFromArray,
+    SliceIndex,
+    SliceIndexMut,
     // conversion operators
     // convert int to int
     ConvNatNat, // [T, U] t -> u
@@ -116,6 +129,11 @@ impl std::fmt::Display for Builtin {
             Builtin::MulAssignTrait => write!(f, "@MulAssign"),
             Builtin::DivAssignTrait => write!(f, "@DivAssign"),
             Builtin::RemAssignTrait => write!(f, "@RemAssign"),
+            Builtin::IndexTrait => write!(f, "@Index"),
+            Builtin::Assign => write!(f, "@assign"),
+            Builtin::Copy => write!(f, "@copy"),
+            Builtin::Reborrow => write!(f, "@reborrow"),
+            Builtin::Readonly => write!(f, "@readonly"),
             Builtin::IntNeg => write!(f, "@int_neg"),
             Builtin::IntAdd => write!(f, "@int_add"),
             Builtin::IntSub => write!(f, "@int_sub"),
@@ -157,6 +175,11 @@ impl std::fmt::Display for Builtin {
             Builtin::FloatGt => write!(f, "@float_gt"),
             Builtin::FloatGte => write!(f, "@float_gte"),
             Builtin::FloatEq => write!(f, "@float_eq"),
+            Builtin::ArrayIndex => write!(f, "@array_index"),
+            Builtin::ArrayIndexMut => write!(f, "@array_index_mut"),
+            Builtin::SliceFromArray => write!(f, "@slice_from_array"),
+            Builtin::SliceIndex => write!(f, "@slice_index"),
+            Builtin::SliceIndexMut => write!(f, "@slice_index_mut"),
             Builtin::ConvNatNat => write!(f, "@nat_to_nat"),
             Builtin::ConvIntInt => write!(f, "@int_to_int"),
             Builtin::ConvNatInt => write!(f, "@nat_to_int"),

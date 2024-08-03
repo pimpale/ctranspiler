@@ -33,10 +33,9 @@ pub enum TokenKind {
     String { value: Vec<u8>, block: bool }, // "string"
     Int(BigInt),                            // 7
     Float(BigRational),                     // 0.7
-    // Types
-    FnTy, // Fn
     // Copy Operator
-    Quote, // '
+    Copy,     // '
+    Reborrow, // ~
     // Math Operators
     Plus,  // +
     Minus, // -
@@ -65,12 +64,13 @@ pub enum TokenKind {
     MulAssign, // *=
     DivAssign, // /=
     // Reference
-    Ref,    // .&
-    Mutref, // .!
-    Deref,  // .@
+    Ref,    // &
+    Mutref, // !
+    Deref,  // @
     // Arrows
-    Pipe,  // |
-    Defun, // ->
+    Pipe,    // |
+    Defun,   // =>
+    ToArrow, // ->
     // Other Miscellaneous Operator Things
     ParenLeft,      // (
     ParenRight,     // )
