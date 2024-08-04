@@ -77,6 +77,10 @@ pub enum Value {
         lam: Box<Value>,
         args: Vec<Value>,
     },
+    Nominal {
+        nom_id: usize,
+        value: Box<Value>,
+    },
     // compound types
     StructTy {
         // universe is level + 1
@@ -284,5 +288,9 @@ impl Value {
                 _ => *level,
             },
         }
+    }
+
+    pub fn alpha_eq(&self, other: &Value) -> bool {
+        todo!()
     }
 }

@@ -924,20 +924,6 @@ impl DiagnosticLogger {
         })
     }
 
-    pub fn log_label_on_non_loop_or_block(&mut self, range: Range, label: &str) {
-        self.log(Diagnostic {
-            range,
-            severity: Some(DiagnosticSeverity::ERROR),
-            code: Some(NumberOrString::Number(79)),
-            code_description: None,
-            source: self.source.clone(),
-            message: format!("label `'{}` on non-loop or block", label),
-            related_information: None,
-            tags: None,
-            data: None,
-        })
-    }
-
     pub fn log_nominal_identifier_in_expression(&mut self, range: Range) {
         self.log(Diagnostic {
             range,
@@ -1002,6 +988,62 @@ impl DiagnosticLogger {
             code_description: None,
             source: self.source.clone(),
             message: format!("`{}` is not permitted in a place expression",  found),
+            related_information: None,
+            tags: None,
+            data: None,
+        })
+    }
+
+    pub fn log_unexpected_pattern_binop(&mut self, range: Range, found: &str) {
+        self.log(Diagnostic {
+            range,
+            severity: Some(DiagnosticSeverity::ERROR),
+            code: Some(NumberOrString::Number(85)),
+            code_description: None,
+            source: self.source.clone(),
+            message: format!("`{}` is not permitted in a pattern binary operation",  found),
+            related_information: None,
+            tags: None,
+            data: None,
+        })
+    }
+
+    pub fn log_wrong_items_in_group(&mut self, range: Range, found: usize) {
+        self.log(Diagnostic {
+            range,
+            severity: Some(DiagnosticSeverity::ERROR),
+            code: Some(NumberOrString::Number(86)),
+            code_description: None,
+            source: self.source.clone(),
+            message: format!("group must have exactly one item, found {}", found),
+            related_information: None,
+            tags: None,
+            data: None,
+        })
+    }
+
+    pub fn log_trailing_comma_in_group(&mut self, range: Range) {
+        self.log(Diagnostic {
+            range,
+            severity: Some(DiagnosticSeverity::ERROR),
+            code: Some(NumberOrString::Number(87)),
+            code_description: None,
+            source: self.source.clone(),
+            message: format!("trailing comma in group forbidden"),
+            related_information: None,
+            tags: None,
+            data: None,
+        })
+    }
+
+    pub fn log_expected_args(&mut self, range: Range, found: &str) {
+        self.log(Diagnostic {
+            range,
+            severity: Some(DiagnosticSeverity::ERROR),
+            code: Some(NumberOrString::Number(88)),
+            code_description: None,
+            source: self.source.clone(),
+            message: format!("expected arguments, found {}", found),
             related_information: None,
             tags: None,
             data: None,

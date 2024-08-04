@@ -2,7 +2,7 @@ use lsp_types::Range;
 use num_bigint::BigInt;
 use num_rational::BigRational;
 
-use crate::builtin::Builtin;
+use crate::{builtin::Builtin, values::Value};
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Augmented<T> {
@@ -10,21 +10,17 @@ pub struct Augmented<T> {
     pub val: T,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug)]
 pub enum PatExpr {
     Error,
     Ignore,
     Identifier(usize),
     StructLiteral(Vec<(Augmented<String>, Augmented<PatExpr>)>),
     New {
+        nom_id: usize,
         pat: Box<Augmented<PatExpr>>,
-        ty: Box<Augmented<ValExpr>>,
     },
-    Typed {
-        pat: Box<Augmented<PatExpr>>,
-        ty: Box<Augmented<ValExpr>>,
-    },
-    Literal(Box<Augmented<ValExpr>>),
+    Literal(Value),
 }
 
 impl std::default::Default for PatExpr {
@@ -33,11 +29,13 @@ impl std::default::Default for PatExpr {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug)]
 pub enum PlaceExpr {
     Error,
-    Var(usize),
-    DeBrujinVar(usize),
+    Var {
+        debruijn: usize,
+        global: usize,
+    },
     FieldAccess {
         root: Box<Augmented<PlaceExpr>>,
         field: String,
@@ -51,11 +49,10 @@ pub enum UseKind {
     Move,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug)]
 pub enum ValExpr {
     // An error when parsing
     Error,
-    Hole,
     Int {
         value: BigInt,
     },
@@ -104,7 +101,6 @@ pub enum ValExpr {
     },
     // Block
     Block {
-        label: Option<usize>,
         statements: Vec<Augmented<BlockStatement>>,
         last_expr: Box<Augmented<ValExpr>>,
     },
@@ -130,8 +126,11 @@ pub enum ValExpr {
         args: Vec<Augmented<ValExpr>>,
     },
     // type of a function
-    FnTy {
-        param_tys: Vec<Augmented<ValExpr>>,
+    PiTy {
+        // works exactly like a function
+        captures: Vec<(Augmented<PatExpr>, Augmented<ValExpr>)>,
+        params: Vec<Augmented<PatExpr>>,
+        // this is the return type
         dep_ty: Box<Augmented<ValExpr>>,
     },
     // struct and enum
@@ -143,8 +142,11 @@ pub enum ValExpr {
         ty: Box<Augmented<ValExpr>>,
     },
     Loop {
-        label: Option<usize>,
         body: Box<Augmented<ValExpr>>,
+    },
+    Label {
+        label: usize,
+        value: Box<Augmented<ValExpr>>,
     },
     Ret {
         label: usize,
@@ -162,7 +164,7 @@ impl std::default::Default for ValExpr {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug)]
 pub enum BlockStatement {
     Error,
     NoOp,

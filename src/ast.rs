@@ -119,7 +119,10 @@ pub enum Expr {
         trailing_semicolon: bool,
     },
     // Group or parameters
-    GroupOrParams(Vec<Augmented<Expr>>),
+    GroupOrParams {
+        items: Vec<Augmented<Expr>>,
+        trailing_comma: bool,
+    },
     // Inline array
     Array(Vec<Augmented<Expr>>),
     // A reference to a previously defined variable

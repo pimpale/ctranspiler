@@ -1100,7 +1100,7 @@ pub fn typecheck_val_expr_and_patch(
             // type of the function application
             expect_type(v, expected, *returnty, dlogger)
         }
-        hir::ValExpr::FnTy { param_tys: paramtys, dep_ty: returnty } => Value::Fn {
+        hir::ValExpr::PiTy { param_tys: paramtys, dep_ty: returnty } => Value::Fn {
             paramtys: paramtys
                 .iter_mut()
                 .map(|ty| typecheck_val_expr_and_patch(ty, &Value::Unknown, dlogger, checker))

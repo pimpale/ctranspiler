@@ -392,10 +392,13 @@ fn parse_exact_expr_group_or_params<TkIter: Iterator<Item = Token>>(
     tkiter: &mut PeekMoreIterator<TkIter>,
     dlogger: &mut DiagnosticLogger,
 ) -> Augmented<Expr> {
-    let (params, range) = parse_args_expr(tkiter, dlogger, parse_expr);
+    let (items, range, trailing_comma) = parse_args_expr(tkiter, dlogger, parse_expr);
     Augmented {
         range,
-        val: Expr::GroupOrParams(params),
+        val: Expr::GroupOrParams {
+            items,
+            trailing_comma,
+        },
     }
 }
 
@@ -755,8 +758,8 @@ fn parse_args_expr<TkIter: Iterator<Item = Token>, T>(
     tkiter: &mut PeekMoreIterator<TkIter>,
     dlogger: &mut DiagnosticLogger,
     parser_fn: impl Fn(&mut PeekMoreIterator<TkIter>, &mut DiagnosticLogger) -> Augmented<T>,
-) -> (Vec<Augmented<T>>, Range) {
-    let (range, args, _) = parse_delimited_statement_seq(
+) -> (Vec<Augmented<T>>, Range, bool) {
+    let (range, args, trailing_comma) = parse_delimited_statement_seq(
         tkiter,
         dlogger,
         "args or group",
@@ -765,7 +768,7 @@ fn parse_args_expr<TkIter: Iterator<Item = Token>, T>(
         TokenKind::ParenRight,
         TokenKind::Comma,
     );
-    (args, range)
+    (args, range, trailing_comma)
 }
 
 fn parse_exact_expr_postfix_apply<TkIter: Iterator<Item = Token>>(
@@ -773,7 +776,7 @@ fn parse_exact_expr_postfix_apply<TkIter: Iterator<Item = Token>>(
     dlogger: &mut DiagnosticLogger,
     prefix: Augmented<Expr>,
 ) -> Augmented<Expr> {
-    let (args, args_range) = parse_args_expr(tkiter, dlogger, parse_expr);
+    let (args, args_range, _) = parse_args_expr(tkiter, dlogger, parse_expr);
     Augmented {
         range: union_of(prefix.range, args_range),
         val: Expr::App {

@@ -107,7 +107,6 @@ pub enum ValExpr {
     },
     // Block
     Block {
-        label: Option<usize>,
         statements: Vec<Augmented<BlockStatement>>,
         last_expr: Box<Augmented<ValExpr>>,
     },
@@ -133,8 +132,11 @@ pub enum ValExpr {
         args: Vec<Augmented<ValExpr>>,
     },
     // type of a function
-    FnTy {
-        param_tys: Vec<Augmented<ValExpr>>,
+    PiTy {
+        // works exactly like a function
+        captures: Vec<(Augmented<PatExpr>, Augmented<ValExpr>)>,
+        params: Vec<Augmented<PatExpr>>,
+        // this is the return type
         dep_ty: Box<Augmented<ValExpr>>,
     },
     // struct and enum
@@ -146,8 +148,11 @@ pub enum ValExpr {
         ty: Box<Augmented<ValExpr>>,
     },
     Loop {
-        label: Option<usize>,
         body: Box<Augmented<ValExpr>>,
+    },
+    Label {
+        label: usize,
+        value: Box<Augmented<ValExpr>>,
     },
     Ret {
         label: usize,
