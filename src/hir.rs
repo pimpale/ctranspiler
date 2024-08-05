@@ -62,9 +62,6 @@ pub enum ValExpr {
     Int {
         value: BigInt,
     },
-    Bool {
-        value: bool,
-    },
     Float {
         value: BigRational,
     },

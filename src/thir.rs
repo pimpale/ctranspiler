@@ -1,3 +1,4 @@
+use apint::ApInt;
 use lsp_types::Range;
 use num_bigint::BigInt;
 use num_rational::BigRational;
@@ -54,7 +55,10 @@ pub enum ValExpr {
     // An error when parsing
     Error,
     Int {
-        value: BigInt,
+        value: ApInt,
+    },
+    Nat {
+        value: ApInt,
     },
     Bool {
         value: bool,
@@ -151,10 +155,6 @@ pub enum ValExpr {
     Ret {
         label: usize,
         value: Box<Augmented<ValExpr>>,
-    },
-    Typed {
-        value: Box<Augmented<ValExpr>>,
-        ty: Box<Augmented<ValExpr>>,
     },
 }
 
