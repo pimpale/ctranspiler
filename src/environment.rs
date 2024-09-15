@@ -1,3 +1,4 @@
+use apint::{UInt, Width};
 use lsp_types::Range;
 
 use crate::{
@@ -61,8 +62,22 @@ impl ExecutionEnvironment {
                 lam: Box::new(Value::Builtin(Builtin::Slice, inner_ty.universe() - 1)),
                 args: vec![*inner_ty.clone()],
             },
-            Value::Nat { universe, bits, .. } => Value::nat_ty(*universe, *bits),
-            Value::Int { universe, bits, .. } => Value::int_ty(*universe, *bits),
+            Value::Nat {
+                universe,
+                value: uint,
+                ..
+            } => Value::nat_ty(
+                *universe,
+                uint.clone().into_apint().width().to_usize() as u64,
+            ),
+            Value::Int {
+                universe,
+                value: int,
+                ..
+            } => Value::int_ty(
+                *universe,
+                int.clone().into_apint().width().to_usize() as u64,
+            ),
             Value::FnPtr { ty } => *ty.clone(),
             Value::Struct { ty, .. } => *ty.clone(),
             Value::Enum { ty, .. } => *ty.clone(),
@@ -132,23 +147,35 @@ impl ExecutionEnvironment {
     pub fn eval_thir(&mut self, expr: thir::ValExpr) -> Value {
         match expr {
             thir::ValExpr::Error => unreachable!("erroneous code cannot be evaluated"),
-            thir::ValExpr::Int { value } => todo!(),
-            thir::ValExpr::Bool { value } => todo!(),
-            thir::ValExpr::Float { value } => todo!(),
-            thir::ValExpr::String(string) => todo!(),
+            thir::ValExpr::Int { value } => Value::Int { universe: 1, value },
+            thir::ValExpr::Nat { value } => Value::Nat { universe: 1, value },
+            thir::ValExpr::Bool { value } => Value::Nat { universe: 1, value: UInt::from(value) },
+            thir::ValExpr::Float { ..} => todo!(),
+            thir::ValExpr::String(string) => Value::Array { inner_ty: Value::nat_ty(1, bits), values: () },
             thir::ValExpr::Use(_, _) => todo!(),
             thir::ValExpr::Builtin { builtin, level } => todo!(),
-            thir::ValExpr::Lam { captures, params, body } => todo!(),
+            thir::ValExpr::Lam {
+                captures,
+                params,
+                body,
+            } => todo!(),
             thir::ValExpr::StructLiteral(_) => todo!(),
             thir::ValExpr::New { ty, val } => todo!(),
             thir::ValExpr::CaseOf { expr, cases } => todo!(),
-            thir::ValExpr::Block { statements, last_expr } => todo!(),
+            thir::ValExpr::Block {
+                statements,
+                last_expr,
+            } => todo!(),
             thir::ValExpr::ArrayLiteral(_) => todo!(),
             thir::ValExpr::FieldAccess { root, field } => todo!(),
             thir::ValExpr::And { left, right } => todo!(),
             thir::ValExpr::Or { left, right } => todo!(),
             thir::ValExpr::App { fun, args } => todo!(),
-            thir::ValExpr::PiTy { captures, params, dep_ty } => todo!(),
+            thir::ValExpr::PiTy {
+                captures,
+                params,
+                dep_ty,
+            } => todo!(),
             thir::ValExpr::Struct(_) => todo!(),
             thir::ValExpr::Enum(_) => todo!(),
             thir::ValExpr::Union(_) => todo!(),

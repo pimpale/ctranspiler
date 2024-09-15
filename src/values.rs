@@ -1,5 +1,7 @@
 use std::collections::HashMap;
 
+use apint::{Int, UInt};
+
 use crate::{ast, builtin::Builtin, thir};
 
 #[derive(Clone, Debug, PartialEq)]
@@ -47,13 +49,11 @@ pub enum Value {
     },
     Nat {
         universe: usize,
-        bits: u64,
-        value: u64,
+        value: UInt,
     },
     Int {
         universe: usize,
-        bits: u64,
-        value: i64,
+        value: Int,
     },
     // Type of a function, also known as a Pi type
     // https://en.wikipedia.org/wiki/Dependent_type#%CE%A0_type
@@ -140,8 +140,12 @@ impl std::fmt::Display for Value {
                     }
                     write!(f, "]")
                 }
-                Value::Nat { value, .. } => write!(f, "{}u", value),
-                Value::Int { value, .. } => write!(f, "{}", value),
+                Value::Nat { value, .. } => write!(
+                    f,
+                    "{}u",
+                    value.clone().into_apint().as_string_with_radix(10)
+                ),
+                Value::Int { value, .. } => write!(f, "{}", value.clone().into_apint().as_string_with_radix(10)),
                 Value::PiTy { param_tys, dep_ty } => {
                     write!(f, "Fn(")?;
                     for paramty in param_tys {
@@ -205,8 +209,7 @@ impl Value {
     pub fn nat64(value: u64) -> Value {
         Value::Nat {
             universe: 1,
-            bits: 64,
-            value,
+            value: UInt::from(value),
         }
     }
 
@@ -216,8 +219,7 @@ impl Value {
             lam: Box::new(Value::Builtin(Builtin::Nat, level)),
             args: vec![Value::Nat {
                 universe: level + 1,
-                bits: 64,
-                value: bits,
+                value: UInt::from(bits),
             }],
         }
     }
@@ -228,8 +230,7 @@ impl Value {
             lam: Box::new(Value::Builtin(Builtin::Int, level)),
             args: vec![Value::Nat {
                 universe: level + 1,
-                bits: 64,
-                value: bits,
+                value: UInt::from(bits),
             }],
         }
     }
